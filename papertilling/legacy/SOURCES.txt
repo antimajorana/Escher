@@ -1,0 +1,7 @@
+# vendored sources (md5 of the original file, then of the vendored copy)
+wallpaper_lattices.py    758f40089d1141da9a014dc3da2b79d4  0c323fc0dda9309fbb6e5e9c621d0c89
+minimal_lattices.py      187581b62a97a85c453f79012f4c8c13  9a45dfbafaf3cdbea7197d7a64eedac4
+lattice_families.py      d6fbc211566fecfa65992aa4572e59b5  91cdbf22277624dd8dd973d9ace4bb37
+lab_defects.py           a3a9ad6b3ecd6972aa398a5e5cf2f2b7  8f7b5d5a56ff3ef6ca0555a9e51c7667
+fusion_framework.py      f4b14924a766a3eafca469d7c6015424  9c4e804bfd1f7958037042c6e3661753
+data/minimal_lattices.json  f5a418ad6f6b1f54d98e1742d225950d

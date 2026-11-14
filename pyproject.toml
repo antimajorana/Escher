@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "papertilling"
+version = "0.2.0"
+description = "Planar periodic lattices of the 17 wallpaper groups and their crystalline-symmetry defects"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "antimajorana" }]
+keywords = ["lattice", "wallpaper groups", "plane groups", "tiling", "crystal defects", "dislocations", "disclinations", "symmetry"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "networkx>=3.0",
+    "matplotlib>=3.7",
+    "spglib>=2.5",
+]
+
+[project.optional-dependencies]
+fast = ["numba>=0.58"]
+widgets = ["ipywidgets>=8.0"]
+notebooks = ["jupyterlab>=4.0", "ipywidgets>=8.0", "numba>=0.58"]
+test = ["pytest>=7.0"]
+all = ["numba>=0.58", "ipywidgets>=8.0", "jupyterlab>=4.0", "pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/antimajorana/papertilling"
+Issues = "https://github.com/antimajorana/papertilling/issues"
+
+[tool.setuptools.packages.find]
+include = ["papertilling*"]
+
+[tool.setuptools.package-data]
+papertilling = ["data/*.json", "legacy/data/*.json", "legacy/SOURCES.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: heavy cases (full defect gate with the legacy engine, larger legacy-vs-fast scans); run with: pytest -m slow"]
+addopts = "-m 'not slow'"
