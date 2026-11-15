@@ -5,15 +5,18 @@
 | path | content |
 |---|---|
 | `papertilling/` | the package |
-| `papertilling/data/` | stored lattice lists: `points.json` (rule `points`), `sheet.json` (rule `sheet`, the named lattices), `minimal_b.json` (rule `bonds`) |
+| `papertilling/data/` | stored lattice lists: `points.json` (rule `points`), `sheet.json` (rule `sheet`, the named lattices), `minimal_b.json` (rule `bonds`), `named.json` (the 21 named lattices as `(recipe, frame)`) |
 | `papertilling/legacy/` | earlier code, used as engines for the defect builder and as regression references; the md5 sums of the originals are in `legacy/SOURCES.txt` |
+| `rust/` | Cargo workspace: `papertilling-core` (plane groups, D-symbols, surfaces, defects), `papertilling-py` (optional PyO3 extension `papertilling_rs`), `papertilling-app` (native desktop app) |
 | `tests/` | pytest suite |
 | `notebooks/` | the three notebooks (saved with outputs) |
-| `tools/` | builders of the stored data and notebooks, check scripts (`tools/checks/`), the README pictures, the export script |
+| `tools/` | builders of the stored data and notebooks, check scripts (`tools/checks/`), the README pictures, the Colab builder, the export script |
 
-Modules: `dsymbol` (Delaney-Dress symbol, network key), `groups` (ITA Wyckoff tables), `points` (points-only rule, Voronoi bonds),
-`tuning` (slider limits and special values), `enumerate` + `kernels*` (bond-counting search), `lattice` (`Lattice`, catalogue),
-`sheet` (the named lattices), `widgets` (sliders), `defects/` (`catalogue`, `walls`, `build`, `config`, `fast*`).
+Modules: `_rust` (optional `papertilling_rs` bridge), `dsymbol` (Delaney-Dress symbol, network key), `groups` (ITA Wyckoff tables),
+`points` (points-only rule, Voronoi bonds), `tuning` (slider limits and special values), `enumerate` + `kernels*` (bond-counting search),
+`lattice` (`Lattice`, catalogue), `sheet` (the named lattices), `widgets` (sliders),
+`surfaces/` (`base`, `flat`, `pieces`, `polyhedra`, `genus`, `refusal`, `report` for surface verdicts),
+`defects/` (`catalogue`, `walls`, `build`, `config`, `cores`, `draw`, `planarity`, `fast*`).
 
 ## Tests
 
@@ -46,6 +49,22 @@ charges and cores; the relaxed picture differs slightly (positions up to 0.1, sa
 How many lattices: `n` in `minimal_lattices(group, n=n)`. The stored lists hold the first 7 of each group. More than 7 are searched
 at once, simplest first, until `n` are found. Measured on one PC (2026-11-14): 12 lattices take 29 s (p6m), 38 s (p1), 39 s (p2),
 73 s (p4g); 20 lattices of p6m take 53 s. The search stops after 10 minutes (`time_limit`) and marks the unfinished tier OPEN.
+
+## Rust core, desktop app, and optional Python extension
+
+Root `pyproject.toml` stays pure-Python `setuptools`, so `pip install .` and `python tools/build_colab.py OUTPUT_FOLDER`
+require no Rust toolchain. When `papertilling-rs` (`import papertilling_rs`) is installed, Python uses it automatically and
+falls back to its own code when `PAPERTILLING_NO_RUST=1` or when the wheel is absent.
+
+    cargo run --manifest-path rust/Cargo.toml -p papertilling-app --release                 # native desktop app
+    cargo run --manifest-path rust/Cargo.toml -p papertilling-app --release -- --smoke-test # headless 2D + 3D smoke check
+    cargo test --manifest-path rust/Cargo.toml --release --workspace                        # Rust workspace tests
+    maturin develop --release --manifest-path rust/papertilling-py/Cargo.toml               # install papertilling-rs into active venv
+    PAPERTILLING_NO_RUST=1 python -m pytest -q                                              # force pure-Python fallback
+
+Defect configurations can be exported and reopened between the Combine tab of `papertilling-app` and Notebook 3 as portable
+`.json` files (`recipe` + `frame` + `defects` + `options` + `summary`) via `save_config` and `load_config` in
+`papertilling.defects.config`.
 
 ## Publishing the tree
 

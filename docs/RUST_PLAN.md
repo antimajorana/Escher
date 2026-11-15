@@ -1,7 +1,7 @@
 # Plan: a Rust core and a desktop app for papertilling
 
-Status: refined with the author (2026-11-15). Execute stage by stage, reporting after each stage and committing on a branch
-only after the author's explicit yes.
+Status: refined with the author (2026-11-15); Stages 0–6 implemented and verified on branch `stages-5-and-6`.
+Execute stage by stage, reporting after each stage and committing on a branch only after the author's explicit yes.
 
 ## 1. Goal
 

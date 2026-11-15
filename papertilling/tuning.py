@@ -31,12 +31,13 @@ special_points
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 
 import numpy as np
 
-from . import kernels as KN
+from . import _rust, kernels as KN
 from .enumerate import rotation_signatures
 
 REFINE = 33            # points per refinement scan of one grid step (technical choice)
@@ -47,6 +48,11 @@ REASONS = {1: "two sites coincide", 2: "bonds cross / a bond passes through a si
 
 def _family(lattice):
     return getattr(lattice, "family", lattice)
+
+
+def _recipe_dict(fam):
+    fn = getattr(fam, "recipe", None) or getattr(fam, "to_recipe", None)
+    return fn() if callable(fn) else None
 
 
 def _values(fam, values):
@@ -131,6 +137,17 @@ def allowed_interval(lattice, name, lo, hi, n=401, values=None, use_numba=True, 
         out["kind"] = "cell"                              # proved: no forbidden region (module docstring)
         return out
     out["kind"] = "site"
+    if use_numba and (rs := _rust.get()) is not None and (rec := _recipe_dict(fam)) is not None:
+        vjson = json.dumps({k: float(v) for k, v in vals.items()}) if (values or margin is not None) else None
+        try:
+            res = json.loads(rs.allowed_interval_json(json.dumps(rec), name, lo, hi, n=int(n), values_json=vjson,
+                                                      margin=None if margin is None else float(margin)))
+            out.update(interval=(float(res["interval"][0]), float(res["interval"][1])),
+                       edges=(res["edges"][0], res["edges"][1]),
+                       segments=res["segments"], current_ok=bool(res["current_ok"]))
+            return out
+        except ValueError:
+            pass
     margin = 1e-4 * (hi - lo) if margin is None else margin
     col = fam.site_names.index(name)
     xs = np.unique(np.concatenate([np.linspace(lo, hi, n), [x0]]))
@@ -210,6 +227,12 @@ def special_points(lattice, name, lo, hi, values=None, loci=None):
     and the candidate roots (numpy.roots of one non-constant row) are kept where EVERY row is < 1e-7."""
     fam = _family(lattice)
     vals = _values(fam, values)
+    if loci is None and (rs := _rust.get()) is not None and name in getattr(fam, "names", ()) and (rec := _recipe_dict(fam)) is not None:
+        vjson = json.dumps({k: float(v) for k, v in vals.items()}) if values else None
+        try:
+            return json.loads(rs.special_points_json(json.dumps(rec), name, float(lo), float(hi), values_json=vjson))
+        except ValueError:
+            pass
     if loci is None:
         loci = fam.supergroup_loci()
     lo, hi = float(lo), float(hi)

@@ -36,6 +36,7 @@ from fractions import Fraction
 
 import numpy as np
 
+from . import _rust
 from .legacy.wallpaper_lattices import _symmetry_ops, _apply_to_site
 
 
@@ -165,6 +166,11 @@ def dsymbol(cell, ops=None):
 def canonical_key(sig, m01, m12):
     """Smallest breadth-first code over all start elements (see the module docstring)."""
     n = len(m01)
+    if n and (rs := _rust.get()) is not None:
+        try:
+            return rs.canonical_key([[int(y) for y in s] for s in sig], [int(x) for x in m01], [int(x) for x in m12])
+        except (ValueError, OverflowError) as err:
+            raise DSymbolError(str(err)) from None
     best = None
     for start in range(n):
         num = {start: 0}; order = [start]; k = 0
@@ -209,6 +215,11 @@ def network_key(key):
     So: equal network_key <=> same network drawn in the plane (same sites, bonds and faces meeting the same
     way), whatever the group and the cell. A mirror image has the same key.
     Input: a canonical key (rows m01, m12, s0, s1, s2). Output: a canonical key of the same form."""
+    if key and (rs := _rust.get()) is not None:
+        try:
+            return rs.network_key([[int(x) for x in r] for r in key])
+        except (ValueError, OverflowError) as err:
+            raise DSymbolError(str(err)) from None
     n = len(key)
     cls = {}
     cid = [cls.setdefault((r[0], r[1]), len(cls)) for r in key]
@@ -229,4 +240,9 @@ def network_key(key):
 def symmetry_index(key):
     """How many times larger the network's own symmetry is than the group the key was computed with:
     (elements of the key) / (elements of its minimal image). 1 = the group is the network's full symmetry."""
+    if key and (rs := _rust.get()) is not None:
+        try:
+            return int(rs.symmetry_index([[int(x) for x in r] for r in key]))
+        except (ValueError, OverflowError) as err:
+            raise DSymbolError(str(err)) from None
     return len(key) // len(network_key(key))

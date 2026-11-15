@@ -3,6 +3,7 @@ use papertilling_core::types::Cell2D;
 
 use crate::backend::{AppBackend, SurfaceTargetUi};
 use crate::canvas2d::{Canvas2D, Scene2D};
+use crate::combine_tab::CombineTabState;
 use crate::defects_tab::DefectsTabState;
 use crate::gallery_tab::GalleryTabState;
 use crate::surfaces_tab::SurfacesTabState;
@@ -13,16 +14,18 @@ pub enum NavTab {
     Gallery,
     Surfaces,
     Defects,
+    Combine,
 }
 
 impl NavTab {
-    const ALL: [Self; 3] = [Self::Gallery, Self::Surfaces, Self::Defects];
+    const ALL: [Self; 4] = [Self::Gallery, Self::Surfaces, Self::Defects, Self::Combine];
 
     fn label(self) -> &'static str {
         match self {
             Self::Gallery => "Gallery (17 Groups & 21 Named)",
             Self::Surfaces => "Surfaces (2D Net + 3D)",
             Self::Defects => "Defects (T, D, Wa-Wd)",
+            Self::Combine => "Combine (Live Fusion & Cores)",
         }
     }
 }
@@ -41,6 +44,7 @@ pub struct PapertillingApp {
     gallery: GalleryTabState,
     surfaces: SurfacesTabState,
     defects: DefectsTabState,
+    combine: CombineTabState,
 }
 
 impl PapertillingApp {
@@ -61,6 +65,7 @@ impl PapertillingApp {
         let gallery = GalleryTabState::new(&backend, &mut canvas2d);
         let mut surfaces = SurfacesTabState::new();
         let defects = DefectsTabState::new(gallery.active_item(), &backend);
+        let combine = CombineTabState::new(gallery.active_item(), &backend);
 
         let active_tab = if smoke_test {
             surfaces.activate_and_sync(
@@ -88,6 +93,7 @@ impl PapertillingApp {
             gallery,
             surfaces,
             defects,
+            combine,
         }
     }
 
@@ -117,6 +123,11 @@ impl PapertillingApp {
                     true,
                 );
             }
+            NavTab::Combine => {
+                let item = self.gallery.active_item();
+                self.combine.ensure_compared(item, &self.backend);
+                self.combine.sync_to_canvas(item, &mut self.canvas2d, true);
+            }
         }
     }
 
@@ -125,6 +136,7 @@ impl PapertillingApp {
             NavTab::Gallery => "lattice_gallery.svg",
             NavTab::Surfaces => "surface_net.svg",
             NavTab::Defects => "defect_crystal.svg",
+            NavTab::Combine => "combined_defects.svg",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 2D scene (SVG or PNG)")
@@ -160,6 +172,16 @@ impl PapertillingApp {
                 if ui.button("Export SVG / PNG...").clicked() && !self.smoke_test {
                     self.export_dialog();
                 }
+                if ui
+                    .button("Import .json...")
+                    .on_hover_text("Import a Notebook 3 defect configuration (.json)")
+                    .clicked()
+                    && !self.smoke_test
+                {
+                    self.active_tab = NavTab::Combine;
+                    self.combine
+                        .import_json_dialog(&self.backend, &mut self.canvas2d);
+                }
             });
         });
     }
@@ -178,8 +200,15 @@ impl PapertillingApp {
                                 &mut self.canvas2d,
                             );
                             if changed {
+                                let active = self.gallery.active_item().clone();
                                 self.defects.reload_for_item(
-                                    self.gallery.active_item(),
+                                    &active,
+                                    &self.backend,
+                                    &mut self.canvas2d,
+                                    false,
+                                );
+                                self.combine.reload_for_item(
+                                    &active,
                                     &self.backend,
                                     &mut self.canvas2d,
                                     false,
@@ -200,14 +229,21 @@ impl PapertillingApp {
                                     &self.backend,
                                     &mut self.canvas2d,
                                 );
+                                let active = self.gallery.active_item().clone();
                                 self.defects.reload_for_item(
-                                    self.gallery.active_item(),
+                                    &active,
+                                    &self.backend,
+                                    &mut self.canvas2d,
+                                    false,
+                                );
+                                self.combine.reload_for_item(
+                                    &active,
                                     &self.backend,
                                     &mut self.canvas2d,
                                     false,
                                 );
                                 self.surfaces.activate_and_sync(
-                                    self.gallery.active_item(),
+                                    &active,
                                     &self.backend,
                                     &mut self.canvas2d,
                                     &mut self.view3d,
@@ -217,6 +253,15 @@ impl PapertillingApp {
                         NavTab::Defects => {
                             let item = self.gallery.active_item().clone();
                             self.defects.show_side_panel(
+                                ui,
+                                &item,
+                                &self.backend,
+                                &mut self.canvas2d,
+                            );
+                        }
+                        NavTab::Combine => {
+                            let item = self.gallery.active_item().clone();
+                            self.combine.show_side_panel(
                                 ui,
                                 &item,
                                 &self.backend,
@@ -274,6 +319,11 @@ impl PapertillingApp {
                 ui.add_space(2.0);
                 self.canvas2d.show(ui);
             }
+            NavTab::Combine => {
+                let item = self.gallery.active_item().clone();
+                self.combine
+                    .show_central(ui, &item, &self.backend, &mut self.canvas2d);
+            }
         });
     }
 }
@@ -319,5 +369,90 @@ impl eframe::App for PapertillingApp {
         self.show_top_bar(ui);
         self.show_side_panel(ui);
         self.show_central_viewports(ui);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::combine_tab::ToolMode;
+    use crate::live_combine::spec_world_pos;
+    use papertilling_core::defect::combine_types::{
+        ClassifiedCharge, EquivalentSingleReport, NotebookConfigJson,
+    };
+    use papertilling_core::types::Isometry2;
+
+    #[test]
+    fn combine_pin_drag_snap_json_roundtrip_and_app_tabs() {
+        let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
+        app.switch_tab(NavTab::Combine);
+        assert_eq!(app.active_tab, NavTab::Combine);
+        assert!(app.canvas2d.counts().0 > 0);
+
+        let backend = AppBackend::new();
+        let square = backend.find_named("square").unwrap();
+        let oblique = backend.find_named("oblique").unwrap();
+        let mut canvas = Canvas2D::new(Scene2D::PeriodicCell {
+            cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: vec![[0.0, 0.0]], bonds: Vec::new() },
+            repeat: 2,
+            show_unit_cell: false,
+        });
+
+        let mut st = CombineTabState::new(square, &backend);
+        st.clear_defects(square, &backend, &mut canvas);
+
+        // Place +90 disclination near 1b (0.5, 0.5), then drag/snap to (1.0, 0.0)
+        st.tool_mode = ToolMode::PlaceDisclination;
+        st.selected_angle_deg = 90;
+        st.place_at_world([0.48, 0.53], square, &backend, &mut canvas);
+        assert_eq!(st.specs.len(), 1);
+        assert!((spec_world_pos(&st.info, 0, &st.specs[0])[0] - 0.5).abs() < 1e-6);
+        assert!(!st.move_pin_to(0, [0.49, 0.51], square, &backend, &mut canvas));
+        assert!(st.move_pin_to(0, [1.03, -0.04], square, &backend, &mut canvas));
+        assert!((spec_world_pos(&st.info, 0, &st.specs[0])[0] - 1.0).abs() < 1e-6);
+        assert!(!st.move_pin_to(99, [0.0, 0.0], square, &backend, &mut canvas));
+
+        // Filter to 2c (2-fold bond midpoint) auto-snaps angle to 180 and point to (0.5, 0)
+        st.centre_filter_idx = 3;
+        st.place_at_world([0.47, 0.02], square, &backend, &mut canvas);
+        assert_eq!(st.specs.len(), 2);
+        assert!((spec_world_pos(&st.info, 1, &st.specs[1])[0] - 0.5).abs() < 1e-6);
+
+        // Dislocation placement and continuous drag
+        st.tool_mode = ToolMode::PlaceDislocation;
+        st.custom_mn = (1, 0);
+        st.place_at_world([0.25, -0.35], square, &backend, &mut canvas);
+        assert!(st.move_pin_to(2, [0.65, -0.15], square, &backend, &mut canvas));
+
+        // NotebookConfigJson round-trip handling both Err and Ok compare_result gracefully
+        st.compare_result = Some(Err(String::from("pending")));
+        let raw_err = st.to_notebook_json(square).to_json_pretty().unwrap();
+        let cfg_err = NotebookConfigJson::from_json_str(&raw_err).unwrap();
+        assert!(cfg_err.summary.is_none() && cfg_err.format == "papertilling.config.v1");
+
+        st.compare_result = Some(Ok(EquivalentSingleReport {
+            charge: ClassifiedCharge {
+                kind: String::from("dislocation"), angle: 0.0, holonomy: Isometry2::IDENTITY,
+                b: Some([1.0, 0.0]), lattice_vector: Some(true), b_rep: Some([1.0, 0.0]),
+                length: Some(1.0), centre: None, centre_class: None, label: String::from("T1 (1,0)"),
+                single: None, loop_sum: [1.0, 0.0],
+            },
+            kind: String::from("dislocation"), single: None, candidates: Vec::new(),
+            matches: vec![String::from("V1")], equivalent: true, verdict: String::from("matches V1"),
+            scan: None, core_nodes: 4, core_edges: 4, config_core: None, gallery: Vec::new(),
+        }));
+        let raw_ok = st.to_notebook_json(square).to_json_pretty().unwrap();
+        let cfg_ok = NotebookConfigJson::from_json_str(&raw_ok).unwrap();
+        assert!(cfg_ok.summary.as_ref().is_some_and(|s| s.equivalent && s.matches == ["V1"]));
+
+        let mut st2 = CombineTabState::new(oblique, &backend);
+        assert!(st2.load_notebook_json(&cfg_ok, &backend, &mut canvas).is_ok());
+        assert_eq!(st2.effective_item(oblique).group, "p4m");
+        assert_eq!(st2.specs.len(), 3);
+
+        let mut bad_cfg = cfg_ok;
+        bad_cfg.recipe.group = String::from("invalid_group");
+        assert!(st2.load_notebook_json(&bad_cfg, &backend, &mut canvas).is_err());
+        assert!(NotebookConfigJson::from_json_str("{not valid json").is_err());
     }
 }

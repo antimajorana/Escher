@@ -1,4 +1,8 @@
-//! PyO3 bindings (`papertilling_rs`) exposing `papertilling-core` Stages 0–4 to Python.
+//! PyO3 bindings (`papertilling_rs`) exposing `papertilling-core` Stages 0–5 to Python.
+
+mod stage5_py;
+
+use std::collections::BTreeMap;
 
 use papertilling_core::defect::DefectCatalogue;
 use papertilling_core::dsymbol::{self, DSymbolKey, KeyRow};
@@ -10,6 +14,11 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use serde::Serialize;
+
+pub use stage5_py::{
+    core_gallery_json, equivalent_single_json, isomorphic_cores, layer_signatures_irregular,
+    nearest_allowed_centre_json,
+};
 
 fn parse_key(rows: Vec<Vec<u32>>) -> Result<DSymbolKey, String> {
     let mut out = Vec::with_capacity(rows.len());
@@ -33,15 +42,68 @@ fn pure_dsymbol_from_recipe(recipe_json: &str) -> Result<String, String> {
     ds.to_json().map_err(|e| e.to_string())
 }
 
-fn pure_allowed_interval(recipe_json: &str, param: &str, lo: f64, hi: f64) -> Result<String, String> {
+fn parse_values_override(values_json: Option<&str>) -> Result<Option<BTreeMap<String, f64>>, String> {
+    match values_json {
+        Some(s) => serde_json::from_str(s).map(Some).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+fn pure_allowed_interval(
+    recipe_json: &str,
+    param: &str,
+    lo: f64,
+    hi: f64,
+    n: Option<usize>,
+    values_json: Option<&str>,
+    margin: Option<f64>,
+) -> Result<String, String> {
     let recipe: Recipe = serde_json::from_str(recipe_json).map_err(|e| e.to_string())?;
-    let res = allowed_interval(&recipe, param, lo, hi, None, None)?;
+    let vals_ov = parse_values_override(values_json)?;
+    let mut res = allowed_interval(&recipe, param, lo, hi, vals_ov.as_ref(), n)?;
+    if let Some(m) = margin
+        && res.current_ok
+        && (res.edges.0.is_some() || res.edges.1.is_some())
+    {
+        let x0 = match vals_ov.as_ref().and_then(|map| map.get(param).copied()) {
+            Some(v) => v,
+            None => {
+                allowed_interval(
+                    &recipe,
+                    param,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    vals_ov.as_ref(),
+                    Some(2),
+                )?
+                .interval
+                .0
+            }
+        };
+        let (lo_eff, hi_eff) = (lo.min(x0), hi.max(x0));
+        let m0 = 1e-4 * (hi_eff - lo_eff);
+        if let Some(ea) = res.edges.0 {
+            let g_lo = if res.interval.0 < x0 { res.interval.0 - m0 } else { ea.min(x0) };
+            res.interval.0 = (g_lo + m).min(x0);
+        }
+        if let Some(eb) = res.edges.1 {
+            let g_hi = if res.interval.1 > x0 { res.interval.1 + m0 } else { eb.max(x0) };
+            res.interval.1 = (g_hi - m).max(x0);
+        }
+    }
     serde_json::to_string(&res).map_err(|e| e.to_string())
 }
 
-fn pure_special_points(recipe_json: &str, param: &str, lo: f64, hi: f64) -> Result<String, String> {
+fn pure_special_points(
+    recipe_json: &str,
+    param: &str,
+    lo: f64,
+    hi: f64,
+    values_json: Option<&str>,
+) -> Result<String, String> {
     let recipe: Recipe = serde_json::from_str(recipe_json).map_err(|e| e.to_string())?;
-    let res = special_points(&recipe, param, lo, hi, None)?;
+    let vals_ov = parse_values_override(values_json)?;
+    let res = special_points(&recipe, param, lo, hi, vals_ov.as_ref())?;
     serde_json::to_string(&res).map_err(|e| e.to_string())
 }
 
@@ -84,7 +146,11 @@ struct CatalogueJson<'a> {
     glide_breaking: &'a [papertilling_core::defect::GlideBreakingEntry],
 }
 
-fn pure_defect_catalogue(group: &str, cell_json: &str, frame_json: Option<&str>) -> Result<String, String> {
+fn pure_defect_catalogue(
+    group: &str,
+    cell_json: &str,
+    frame_json: Option<&str>,
+) -> Result<String, String> {
     let cell: Cell2D = serde_json::from_str(cell_json).map_err(|e| e.to_string())?;
     let frame = match frame_json {
         Some(s) => serde_json::from_str(s).map_err(|e| e.to_string())?,
@@ -151,13 +217,30 @@ pub fn dsymbol_from_recipe_json(recipe_json: &str) -> PyResult<String> {
 }
 
 #[pyfunction]
-pub fn allowed_interval_json(recipe_json: &str, param: &str, lo: f64, hi: f64) -> PyResult<String> {
-    pure_allowed_interval(recipe_json, param, lo, hi).map_err(PyValueError::new_err)
+#[pyo3(signature = (recipe_json, param, lo, hi, n=None, values_json=None, margin=None))]
+pub fn allowed_interval_json(
+    recipe_json: &str,
+    param: &str,
+    lo: f64,
+    hi: f64,
+    n: Option<usize>,
+    values_json: Option<&str>,
+    margin: Option<f64>,
+) -> PyResult<String> {
+    pure_allowed_interval(recipe_json, param, lo, hi, n, values_json, margin)
+        .map_err(PyValueError::new_err)
 }
 
 #[pyfunction]
-pub fn special_points_json(recipe_json: &str, param: &str, lo: f64, hi: f64) -> PyResult<String> {
-    pure_special_points(recipe_json, param, lo, hi).map_err(PyValueError::new_err)
+#[pyo3(signature = (recipe_json, param, lo, hi, values_json=None))]
+pub fn special_points_json(
+    recipe_json: &str,
+    param: &str,
+    lo: f64,
+    hi: f64,
+    values_json: Option<&str>,
+) -> PyResult<String> {
+    pure_special_points(recipe_json, param, lo, hi, values_json).map_err(PyValueError::new_err)
 }
 
 #[pyfunction]
@@ -167,7 +250,11 @@ pub fn surface_table_json(group: &str, cell_json: &str) -> PyResult<String> {
 
 #[pyfunction]
 #[pyo3(signature = (group, cell_json, frame_json=None))]
-pub fn defect_catalogue_json(group: &str, cell_json: &str, frame_json: Option<&str>) -> PyResult<String> {
+pub fn defect_catalogue_json(
+    group: &str,
+    cell_json: &str,
+    frame_json: Option<&str>,
+) -> PyResult<String> {
     pure_defect_catalogue(group, cell_json, frame_json).map_err(PyValueError::new_err)
 }
 
@@ -183,6 +270,11 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(special_points_json, m)?)?;
     m.add_function(wrap_pyfunction!(surface_table_json, m)?)?;
     m.add_function(wrap_pyfunction!(defect_catalogue_json, m)?)?;
+    m.add_function(wrap_pyfunction!(isomorphic_cores, m)?)?;
+    m.add_function(wrap_pyfunction!(layer_signatures_irregular, m)?)?;
+    m.add_function(wrap_pyfunction!(equivalent_single_json, m)?)?;
+    m.add_function(wrap_pyfunction!(core_gallery_json, m)?)?;
+    m.add_function(wrap_pyfunction!(nearest_allowed_centre_json, m)?)?;
     Ok(())
 }
 
@@ -190,7 +282,9 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use papertilling_core::dsymbol;
 
-    use super::{parse_key, pure_dsymbol_from_recipe, pure_special_points, version};
+    use super::{
+        parse_key, pure_allowed_interval, pure_dsymbol_from_recipe, pure_special_points, version,
+    };
 
     #[test]
     fn wrapper_version_and_stage12_helpers() {
@@ -205,12 +299,44 @@ mod tests {
         assert_eq!(dsymbol::symmetry_index(&p2_sq).unwrap(), 4);
         assert!(parse_key(vec![vec![4, 4, 0]]).is_err());
 
-        let kagome_json = r#"{"group":"p6m","sites":[[0.5,0.0]],"bonds":[[[0.5,0.0],[0.5,0.5]]],"a":1.0}"#;
+        let kagome_json =
+            r#"{"group":"p6m","sites":[[0.5,0.0]],"bonds":[[[0.5,0.0],[0.5,0.5]]],"a":1.0}"#;
         let ds_json = pure_dsymbol_from_recipe(kagome_json).unwrap();
         assert!(ds_json.contains("\"size\":2"));
 
         let p2_ob_json = r#"{"group":"p2","sites":[[0.0,0.0]],"bonds":[[[0.0,0.0],[1.0,0.0]],[[0.0,0.0],[0.0,1.0]]],"a":1.0,"b":2.5,"gamma":70.0}"#;
-        let sp_json = pure_special_points(p2_ob_json, "gamma", 45.0, 135.0).unwrap();
+        let sp_json = pure_special_points(p2_ob_json, "gamma", 45.0, 135.0, None).unwrap();
         assert!(sp_json.contains("\"group\":\"pmm\""));
+
+        // Overriding gamma=90 via values_json makes b=1 hit p4m instead of cmm!
+        let sp_ov = pure_special_points(
+            p2_ob_json,
+            "b",
+            0.4,
+            3.0,
+            Some(r#"{"gamma":90.0,"b":2.5}"#),
+        )
+        .unwrap();
+        assert!(sp_ov.contains("\"group\":\"p4m\""));
+
+        // Rotating-squares p4g family (t1 = (-0.324 + 0.176)/2 = -0.074) with custom n, values_json, and margin.
+        let p4g_json = r#"{"group":"p4g","sites":[[-0.324,0.176]],"bonds":[[[-0.324,0.176],[0.324,0.824]],[[-0.324,0.176],[0.176,0.324]]],"a":1.0}"#;
+        let ai_default =
+            pure_allowed_interval(p4g_json, "t1", -0.574, 0.426, Some(101), None, None).unwrap();
+        let ai_wider_margin = pure_allowed_interval(
+            p4g_json,
+            "t1",
+            -0.574,
+            0.426,
+            Some(101),
+            Some(r#"{"t1":-0.074}"#),
+            Some(0.01),
+        )
+        .unwrap();
+        let v_def: serde_json::Value = serde_json::from_str(&ai_default).unwrap();
+        let v_wid: serde_json::Value = serde_json::from_str(&ai_wider_margin).unwrap();
+        assert!(v_def["current_ok"].as_bool().unwrap());
+        assert!(v_wid["interval"][0].as_f64().unwrap() > v_def["interval"][0].as_f64().unwrap());
+        assert!(v_wid["interval"][1].as_f64().unwrap() < v_def["interval"][1].as_f64().unwrap());
     }
 }

@@ -11,16 +11,35 @@ Core graph: Configuration.core_graph (graph-only rule, see build.py). Charges: b
 """
 from __future__ import annotations
 
+import json
 import string
 import warnings
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
 
+from .. import _rust
 from ..legacy import fusion_framework as ff
 from . import fast as _fast
 from .build import (Configuration, build, graph_core, isomorphic_cores, lattice_data, patch_rim, same_charge,
                     _norm)
+
+
+def _iso_cores(G1: nx.Graph, G2: nx.Graph, fast: bool | None = None) -> bool:
+    if (rs := _rust.get()) is not None and _fast.enabled(fast):
+        n1, n2 = G1.number_of_nodes(), G2.number_of_nodes()
+        if n1 != n2 or G1.number_of_edges() != G2.number_of_edges():
+            return False
+        if n1 == 0:
+            return True
+        i1 = {v: k for k, v in enumerate(G1.nodes)}
+        i2 = {v: k for k, v in enumerate(G2.nodes)}
+        return bool(rs.isomorphic_cores(
+            n1, [int(G1.nodes[v]["deg"]) for v in G1.nodes], [(i1[u], i1[v]) for u, v in G1.edges],
+            n2, [int(G2.nodes[v]["deg"]) for v in G2.nodes], [(i2[u], i2[v]) for u, v in G2.edges],
+        ))
+    return isomorphic_cores(G1, G2)
 
 _DISLOC_CACHE: dict = {}
 _DISLOC_BUILDS: dict = {}               # same keys: the legacy builds behind each core
@@ -73,7 +92,7 @@ def dislocation_core_list(lattice, b, radius: int = 2, grid: int = 3, max_candid
             except ValueError:
                 skipped += 1
                 continue
-            same = [k for k, o in enumerate(out) if isomorphic_cores(H, o["graph"])]
+            same = [k for k, o in enumerate(out) if _iso_cores(H, o["graph"], fast)]
             if same:
                 merged.append(dict(name=f"{'Volterra' if f['volterra'] else 'completion'} {f['name']}",
                                    volterra=f["volterra"], equals=same[0], chords=list(f["chords"])))
@@ -133,14 +152,14 @@ def equivalent_single(config: Configuration, radius: int = 2, grid: int = 3, sho
         res["gallery"] = core_gallery(lat, q["b"], radius=radius, grid=grid, draw=False, fast=fast)
         res["scan"] = info
         res["candidates"] = [dict((k, v) for k, v in c.items() if k != "graph") for c in cands]
-        res["matches"] = [c["name"] for c in cands if isomorphic_cores(H, c["graph"])]
+        res["matches"] = [c["name"] for c in cands if _iso_cores(H, c["graph"], fast)]
         if not res["matches"] and len(config.specs) == 1 and config.specs[0].get("kind") == "dislocation":
             # one dislocation IS a single defect; its cut end is simply not one of the scanned positions
             res["matches"] = ["its own core (the configuration is one dislocation; its cut end is not among the scanned ones)"]
     elif q["kind"] == "disclination" and q["single"] is not None:
         s = q["single"]
         single = build(lat, dict(kind="disclination", angle=s["angle"], at=s["at"]), picture="raw", fast=fast)
-        ok = isomorphic_cores(H, single.core_graph(radius))
+        ok = _iso_cores(H, single.core_graph(radius), fast)
         res["candidates"] = [dict(name=f"single {s['angle']:+g} deg at {np.round(s['at'], 4).tolist()}")]
         res["matches"] = [res["candidates"][0]["name"]] if ok else []
     elif q["kind"] == "vacuum":
@@ -206,7 +225,7 @@ def compare(c1: Configuration, c2: Configuration, radius: int = 2) -> dict:
     q1, q2 = c1.total_charge(), c2.total_charge()
     H1, H2 = c1.core_graph(radius), c2.core_graph(radius)
     return dict(same_charge=same_charge(lat, q1, q2), same_charge_up_to_mirror=same_charge(lat, q1, q2, mirror=True),
-                same_core=isomorphic_cores(H1, H2),
+                same_core=_iso_cores(H1, H2),
                 details=dict(charge1=q1["label"], charge2=q2["label"],
                              core1=(H1.number_of_nodes(), H1.number_of_edges()),
                              core2=(H2.number_of_nodes(), H2.number_of_edges())))
@@ -226,7 +245,7 @@ def classify(configs, radius: int = 2, names=None, show: bool = True) -> list[in
     for i, c in enumerate(configs):
         for k, j in enumerate(reps):
             if same_charge(lat, c.total_charge(), configs[j].total_charge()) and \
-                    isomorphic_cores(c.core_graph(radius), configs[j].core_graph(radius)):
+                    _iso_cores(c.core_graph(radius), configs[j].core_graph(radius)):
                 labels.append(k)
                 break
         else:
@@ -240,3 +259,125 @@ def classify(configs, radius: int = 2, names=None, show: bool = True) -> list[in
             print(f"{names[i]:{w}s}  {string.ascii_uppercase[labels[i] % 26]:5s}  "
                   f"{str((H.number_of_nodes(), H.number_of_edges())):19s}  {c.total_charge()['label']}")
     return labels
+
+
+def _resolve_family(config: Configuration, lattice=None, label: str = ""):
+    from ..legacy.lattice_families import Family
+    if lattice is None:
+        fam = Family.from_cell(config.lattice.cell)
+        lbl = label or getattr(config.lattice.cell, "label", "") or fam.group
+    elif hasattr(lattice, "family"):
+        fam = lattice.family
+        lbl = label or getattr(fam, "label", "") or fam.group
+    elif hasattr(lattice, "recipe") and hasattr(lattice, "frame"):
+        fam = lattice
+        lbl = label or getattr(fam, "label", "") or fam.group
+    elif isinstance(lattice, dict):
+        fam = Family.from_recipe(lattice)
+        lbl = label or fam.group
+    elif isinstance(lattice, str):
+        fam = Family.from_cell(lattice)
+        lbl = label or lattice
+    elif hasattr(lattice, "cell") and not callable(lattice.cell):
+        fam = Family.from_cell(lattice.cell)
+        lbl = label or getattr(lattice.cell, "label", "") or fam.group
+    else:
+        fam = Family.from_cell(lattice)
+        lbl = label or getattr(lattice, "label", "") or fam.group
+    return fam, str(lbl)
+
+
+def _serialize_spec(s: dict) -> dict:
+    if s["kind"] == "dislocation":
+        out: dict = {"kind": "dislocation", "b": [float(x) for x in s["b"]]}
+        if s.get("at") is not None:
+            out["at"] = [float(x) for x in s["at"]]
+    else:
+        out = {"kind": "disclination", "angle": float(s["angle"]), "at": [float(x) for x in s["at"]]}
+    if s.get("cut") is not None:
+        out["cut"] = [float(x) for x in s["cut"]]
+    return out
+
+
+def config_to_dict(config: Configuration, *, lattice=None, label: str = "", grid: int = 2, radius: int = 2,
+                   include_summary: bool = True) -> dict:
+    """Export a Configuration to the portable `NotebookConfigJson` dict (`papertilling.config.v1`)."""
+    fam, lbl = _resolve_family(config, lattice=lattice, label=label)
+    raw = fam.recipe()
+    recipe: dict = {
+        "group": str(raw["group"]),
+        "sites": [[float(c) for c in p] for p in raw["sites"]],
+        "bonds": [[[float(c) for c in p], [float(c) for c in q]] for p, q in raw["bonds"]],
+        "a": float(raw.get("a", 1.0)),
+    }
+    if raw.get("b") is not None:
+        recipe["b"] = float(raw["b"])
+    if raw.get("gamma") is not None:
+        recipe["gamma"] = float(raw["gamma"])
+    Q, o0 = fam.frame
+    r_val = config.report.get("R")
+    opts: dict = {
+        "r_patch": None if r_val is None else float(r_val),
+        "picture": str(config.defect.info.get("picture", "raw")),
+        "grid": int(grid),
+        "radius": int(radius),
+    }
+    out: dict = {
+        "format": "papertilling.config.v1",
+        "lattice_label": lbl,
+        "group": str(fam.group),
+        "recipe": recipe,
+        "frame": {"q": np.asarray(Q, float).tolist(), "origin": np.asarray(o0, float).tolist()},
+        "defects": [_serialize_spec(s) for s in config.specs],
+        "options": opts,
+    }
+    if include_summary:
+        eq = equivalent_single(config, radius=radius, grid=grid, show=False)
+        out["summary"] = {
+            "charge": str(eq["charge"]),
+            "kind": str(eq["kind"]),
+            "equivalent": bool(eq["equivalent"]),
+            "matches": [str(m) for m in eq["matches"]],
+            "verdict": str(eq["verdict"]),
+        }
+    return out
+
+
+def save_config(config: Configuration, path, **kw) -> Path:
+    """Write `config` as a pretty UTF-8 `.json` file (`NotebookConfigJson`) and return its `Path`."""
+    dst = Path(path)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(json.dumps(config_to_dict(config, **kw), indent=2) + "\n", encoding="utf8")
+    return dst
+
+
+def load_config(source, *, picture: str | None = None, R: float | None = None,
+                fast: bool | None = None) -> Configuration:
+    """Rebuild a `Configuration` from a `.json` file path, JSON string, or `NotebookConfigJson` dict."""
+    if isinstance(source, dict):
+        data = source
+    elif isinstance(source, Path):
+        data = json.loads(source.read_text(encoding="utf8"))
+    elif isinstance(source, str):
+        s = source.lstrip()
+        data = json.loads(source) if s.startswith("{") else json.loads(Path(source).read_text(encoding="utf8"))
+    else:
+        raise TypeError("source must be a path, JSON string, or dict")
+    fmt = data.get("format", "papertilling.config.v1")
+    if fmt != "papertilling.config.v1":
+        raise ValueError(f"unsupported configuration format {fmt!r}")
+    from ..legacy.lattice_families import Family
+    fam = Family.from_recipe(data["recipe"])
+    fr = data.get("frame")
+    if isinstance(fr, dict) and "q" in fr and "origin" in fr:
+        fam.frame = (np.asarray(fr["q"], float), np.asarray(fr["origin"], float))
+    specs = []
+    for raw in data["defects"]:
+        sp = dict(raw)
+        if sp.get("kind") == "disclination" and "angle" not in sp and "angle_deg" in sp:
+            sp["angle"] = sp.pop("angle_deg")
+        specs.append(sp)
+    opts = data.get("options") or {}
+    r_use = R if R is not None else opts.get("r_patch")
+    pic_use = picture if picture is not None else opts.get("picture", "relaxed")
+    return build(fam.cell(), *specs, R=r_use, picture=pic_use, fast=fast)

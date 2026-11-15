@@ -11,11 +11,7 @@ pub struct Vertex3d {
 }
 
 impl Vertex3d {
-    pub const ZERO: Self = Self {
-        position: [0.0; 3],
-        normal: [0.0, 0.0, 1.0],
-        color: [0.0; 4],
-    };
+    pub const ZERO: Self = Self { position: [0.0; 3], normal: [0.0, 0.0, 1.0], color: [0.0; 4] };
 }
 
 #[derive(Clone, Debug, Default)]
@@ -543,33 +539,20 @@ mod tests {
         let kagome = backend.find_named("kagome").unwrap();
         let params = SurfaceBuildParamsUi::default();
 
-        // 1. Torus with curved 3D bond polylines
-        let (torus, rep_t) = backend
-            .build_surface(kagome, SurfaceTargetUi::Torus, &params)
-            .unwrap();
+        let (torus, rep_t) = backend.build_surface(kagome, SurfaceTargetUi::Torus, &params).unwrap();
         assert!(rep_t.ok && torus.chi == 0);
         let gpu_torus = mesh_from_surface(&torus, false);
-        assert!(gpu_torus.faces.len() > torus.faces.len() * 3);
-        assert!(gpu_torus.wires.len() > torus.bonds.len() * 2);
-        assert!(gpu_torus.faces.iter().all(|v| {
-            (v.position[0].powi(2) + v.position[1].powi(2) + v.position[2].powi(2)).sqrt() <= 1.15
-        }));
+        assert!(gpu_torus.faces.len() > torus.faces.len() * 3 && gpu_torus.wires.len() > torus.bonds.len() * 2);
+        assert!(gpu_torus.faces.iter().all(|v| (v.position[0].powi(2) + v.position[1].powi(2) + v.position[2].powi(2)).sqrt() <= 1.15));
 
-        // 2. Projective plane quotient vs antipodal S^2 double cover
-        let (rp2, rep_p) = backend
-            .build_surface(kagome, SurfaceTargetUi::ProjectivePlane, &params)
-            .unwrap();
+        let (rp2, rep_p) = backend.build_surface(kagome, SurfaceTargetUi::ProjectivePlane, &params).unwrap();
         assert!(rep_p.ok && rp2.chi == 1 && rp2.cover.is_some());
-        let gpu_quot = mesh_from_surface(&rp2, false);
-        let gpu_cov = mesh_from_surface(&rp2, true);
+        let (gpu_quot, gpu_cov) = (mesh_from_surface(&rp2, false), mesh_from_surface(&rp2, true));
         assert_eq!(gpu_cov.vertex_count, 2 * gpu_quot.vertex_count);
         assert_eq!(gpu_cov.face_count, 2 * gpu_quot.face_count);
         assert!(gpu_cov.faces.len() > gpu_quot.faces.len());
 
-        // 3. Genus-2 handlebody with negative-curvature cones
-        let (g2, rep_g2) = backend
-            .build_surface(kagome, SurfaceTargetUi::Genus2, &params)
-            .unwrap();
+        let (g2, rep_g2) = backend.build_surface(kagome, SurfaceTargetUi::Genus2, &params).unwrap();
         assert!(rep_g2.ok && g2.chi == -2);
         let gpu_g2 = mesh_from_surface(&g2, false);
         assert_eq!(gpu_g2.vertex_count, g2.xyz.len());

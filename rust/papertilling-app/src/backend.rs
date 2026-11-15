@@ -1,9 +1,14 @@
 use std::sync::OnceLock;
 
+use papertilling_core::defect::combine_types::{EquivalentSingleReport, NotebookConfigJson};
+use papertilling_core::defect::surgery::DefectSpec;
 use papertilling_core::types::{
     BuiltCrystal, Cell2D, Frame2D, Recipe, SurfaceCheckReport, SurfaceMesh,
 };
 
+use crate::live_combine::{
+    self, CombineBuildOptions, CombineBuildOutput, CombineLatticeInfo,
+};
 use crate::live_ops;
 use crate::live_plane::{self, PlaneCatalogues};
 
@@ -411,5 +416,49 @@ impl AppBackend {
         relaxed: bool,
     ) -> (BuiltCrystal, DefectReadoutUi) {
         live_ops::build_defect_patch(item, selection, radius, relaxed)
+    }
+
+    pub fn combine_lattice_info(&self, item: &CatalogueItemUi) -> CombineLatticeInfo {
+        live_combine::combine_lattice_info(item)
+    }
+
+    pub fn snap_disclination(
+        &self,
+        item: &CatalogueItemUi,
+        info: &CombineLatticeInfo,
+        angle_deg: f64,
+        centre_id_filter: Option<&str>,
+        near: [f64; 2],
+    ) -> ([f64; 2], String) {
+        live_combine::snap_disclination_centre(item, info, angle_deg, centre_id_filter, near)
+    }
+
+    pub fn build_combined(
+        &self,
+        item: &CatalogueItemUi,
+        info: &CombineLatticeInfo,
+        specs: &[DefectSpec],
+        opts: &CombineBuildOptions,
+    ) -> CombineBuildOutput {
+        live_combine::build_combined_crystal(item, info, specs, opts)
+    }
+
+    pub fn equivalent_single(
+        &self,
+        item: &CatalogueItemUi,
+        info: &CombineLatticeInfo,
+        specs: &[DefectSpec],
+        crystal: &BuiltCrystal,
+        core_radius: usize,
+        grid: usize,
+    ) -> Result<EquivalentSingleReport, String> {
+        live_combine::run_equivalent_single(item, info, specs, crystal, core_radius, grid)
+    }
+
+    pub fn item_from_notebook_json(
+        &self,
+        cfg: &NotebookConfigJson,
+    ) -> Result<CatalogueItemUi, String> {
+        live_combine::item_from_notebook_json(cfg, &self.named)
     }
 }

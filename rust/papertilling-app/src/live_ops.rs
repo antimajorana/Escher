@@ -213,7 +213,7 @@ pub fn catalogue_for_lattice(item: &CatalogueItemUi) -> DefectCatalogueUi {
     DefectCatalogueUi { dislocations, centres, disclinations, walls }
 }
 
-fn summarize_rings_and_core(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo) -> String {
+pub(crate) fn summarize_rings_and_core(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo) -> String {
     let faces = frame_faces(crystal);
     let ring_str = if faces.len() <= 1 {
         format!("V={}, E={}", crystal.pos.len(), crystal.edges.len())
@@ -233,7 +233,7 @@ fn summarize_rings_and_core(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo) 
     ring_str
 }
 
-fn build_pristine_disk(info: &LatticeCoreInfo, radius: f64) -> BuiltCrystal {
+pub(crate) fn build_pristine_disk(info: &LatticeCoreInfo, radius: f64) -> BuiltCrystal {
     let keys = info.lat.sites_in_disk([0.0, 0.0], radius.max(2.5));
     let n = keys.len();
     let idx_map: HashMap<_, usize> = keys.iter().copied().enumerate().map(|(i, k)| (k, i)).collect();

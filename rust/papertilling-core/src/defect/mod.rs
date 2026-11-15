@@ -3,11 +3,19 @@
 
 pub mod catalogue;
 pub mod charge;
+pub mod combine_api;
+pub mod combine_types;
 pub mod cone_builder;
 pub mod cone_geometry;
+pub mod core_gallery;
 pub mod core_graph;
+pub mod equivalence;
+#[cfg(test)]
+mod stage5_gate_tests;
 pub mod surgery;
 mod sym_helper;
+pub mod volterra_patch;
+pub mod volterra_scan;
 pub mod wall_build;
 pub mod walls;
 

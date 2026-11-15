@@ -18,16 +18,16 @@ use crate::types::{BuiltCrystal, Cell2D};
 pub enum DefectSpec {
     Dislocation {
         b: [f64; 2],
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<[f64; 2]>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         cut: Option<[f64; 2]>,
     },
     Disclination {
-        #[serde(alias = "angle")]
+        #[serde(rename = "angle", alias = "angle_deg")]
         angle_deg: f64,
         at: [f64; 2],
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         cut: Option<[f64; 2]>,
     },
 }

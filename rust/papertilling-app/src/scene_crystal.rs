@@ -3,16 +3,28 @@ use std::collections::{HashMap, HashSet};
 use papertilling_core::types::BuiltCrystal;
 
 use crate::scene2d::{
-    CirclePrim, LinePrim, PolyPrim, ScenePrimitives, bond_palette, compute_bbox, ring_tint_rgba,
-    site_palette,
+    CirclePrim, LinePrim, PolyPrim, ScenePrimitives, TextPrim, bond_palette, compute_bbox,
+    ring_tint_rgba, site_palette,
 };
 
 pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &str) -> ScenePrimitives {
     let mut polygons = Vec::new();
     let mut lines = Vec::new();
     let mut circles = Vec::new();
+    let mut labels = Vec::new();
 
     for (ring_pts, is_core) in extract_crystal_faces(crystal) {
+        if is_core && !ring_pts.is_empty() {
+            let k = ring_pts.len() as f32;
+            let cx = ring_pts.iter().map(|p| p[0]).sum::<f32>() / k;
+            let cy = ring_pts.iter().map(|p| p[1]).sum::<f32>() / k;
+            labels.push(TextPrim {
+                pos: [cx, cy],
+                text: ring_pts.len().to_string(),
+                color: [42, 48, 58, 225],
+                size_px: 10.5,
+            });
+        }
         let fill = if is_core {
             ring_tint_rgba(ring_pts.len())
         } else {
@@ -80,6 +92,7 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
     }
 
     let cone_set: HashSet<usize> = crystal.cone_sites.iter().copied().collect();
+    let anom_deg = interior_anomalous_degrees(crystal);
     for (u, p) in crystal.pos.iter().enumerate() {
         let pos = [p[0] as f32, p[1] as f32];
         let side = crystal.side.get(u).copied().flatten();
@@ -97,6 +110,20 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
                 max_px: 11.5,
                 fill: [235, 52, 38, 75],
                 stroke: ([224, 36, 28, 255], 2.1),
+            });
+        } else if let Some(&is_under) = anom_deg.get(&u) {
+            let scol = if is_under {
+                [198, 40, 40, 235]
+            } else {
+                [106, 27, 154, 235]
+            };
+            circles.push(CirclePrim {
+                center: pos,
+                radius_world: 0.135,
+                min_px: 5.0,
+                max_px: 10.0,
+                fill: [0, 0, 0, 0],
+                stroke: (scol, 1.8),
             });
         }
         circles.push(CirclePrim {
@@ -121,11 +148,61 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
         polygons,
         lines,
         circles,
-        labels: Vec::new(),
+        labels,
         title: title.to_owned(),
         note: note.to_owned(),
         bbox,
     }
+}
+
+fn interior_anomalous_degrees(crystal: &BuiltCrystal) -> HashMap<usize, bool> {
+    let n = crystal.pos.len();
+    if n < 12 || crystal.wall_sigma.is_some() || crystal.is_non_orientable {
+        return HashMap::new();
+    }
+    let nf = n as f64;
+    let cx = crystal.pos.iter().map(|p| p[0]).sum::<f64>() / nf;
+    let cy = crystal.pos.iter().map(|p| p[1]).sum::<f64>() / nf;
+    let max_r = crystal
+        .pos
+        .iter()
+        .map(|p| (p[0] - cx).hypot(p[1] - cy))
+        .fold(0.0_f64, f64::max);
+    let inner_cut = 0.70 * max_r;
+
+    let mut deg = vec![0_usize; n];
+    for &(u, v) in &crystal.edges {
+        if u < n && v < n {
+            deg[u] += 1;
+            deg[v] += 1;
+        }
+    }
+    let mut hist: HashMap<(usize, usize), usize> = HashMap::new();
+    for u in 0..n {
+        if (crystal.pos[u][0] - cx).hypot(crystal.pos[u][1] - cy) <= inner_cut {
+            let b = crystal.basis_idx.get(u).copied().unwrap_or(0);
+            *hist.entry((b, deg[u])).or_insert(0) += 1;
+        }
+    }
+    let mut modal: HashMap<usize, (usize, usize)> = HashMap::new();
+    for ((b, d), cnt) in hist {
+        let entry = modal.entry(b).or_insert((d, 0));
+        if cnt > entry.1 {
+            *entry = (d, cnt);
+        }
+    }
+    let mut out = HashMap::new();
+    for u in 0..n {
+        if (crystal.pos[u][0] - cx).hypot(crystal.pos[u][1] - cy) <= inner_cut {
+            let b = crystal.basis_idx.get(u).copied().unwrap_or(0);
+            if let Some(&(z0, _)) = modal.get(&b)
+                && deg[u] != z0
+            {
+                out.insert(u, deg[u] < z0);
+            }
+        }
+    }
+    out
 }
 
 fn extract_crystal_faces(crystal: &BuiltCrystal) -> Vec<(Vec<[f32; 2]>, bool)> {
