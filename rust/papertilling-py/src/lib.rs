@@ -1,9 +1,15 @@
-//! PyO3 bindings (`papertilling_rs`) exposing `papertilling-core` to Python.
+//! PyO3 bindings (`papertilling_rs`) exposing `papertilling-core` Stages 0–4 to Python.
 
+use papertilling_core::defect::DefectCatalogue;
 use papertilling_core::dsymbol::{self, DSymbolKey, KeyRow};
+use papertilling_core::plane::family::LatticeFamily;
+use papertilling_core::plane::tuning::{allowed_interval, special_points};
+use papertilling_core::surface::surface_table;
+use papertilling_core::types::{Cell2D, Frame2D, Recipe};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
+use serde::Serialize;
 
 fn parse_key(rows: Vec<Vec<u32>>) -> Result<DSymbolKey, String> {
     let mut out = Vec::with_capacity(rows.len());
@@ -18,6 +24,87 @@ fn parse_key(rows: Vec<Vec<u32>>) -> Result<DSymbolKey, String> {
 
 fn key_to_pytuple<'py>(py: Python<'py>, key: Vec<KeyRow>) -> PyResult<Bound<'py, PyTuple>> {
     PyTuple::new(py, key)
+}
+
+fn pure_dsymbol_from_recipe(recipe_json: &str) -> Result<String, String> {
+    let recipe: Recipe = serde_json::from_str(recipe_json).map_err(|e| e.to_string())?;
+    let fam = LatticeFamily::from_recipe(&recipe, None)?;
+    let ds = fam.dsymbol()?;
+    ds.to_json().map_err(|e| e.to_string())
+}
+
+fn pure_allowed_interval(recipe_json: &str, param: &str, lo: f64, hi: f64) -> Result<String, String> {
+    let recipe: Recipe = serde_json::from_str(recipe_json).map_err(|e| e.to_string())?;
+    let res = allowed_interval(&recipe, param, lo, hi, None, None)?;
+    serde_json::to_string(&res).map_err(|e| e.to_string())
+}
+
+fn pure_special_points(recipe_json: &str, param: &str, lo: f64, hi: f64) -> Result<String, String> {
+    let recipe: Recipe = serde_json::from_str(recipe_json).map_err(|e| e.to_string())?;
+    let res = special_points(&recipe, param, lo, hi, None)?;
+    serde_json::to_string(&res).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct SurfaceRowSummary {
+    surface: String,
+    status: String,
+    sites: Option<usize>,
+    cones: String,
+    reason: String,
+}
+
+fn pure_surface_table(group: &str, cell_json: &str) -> Result<String, String> {
+    let cell: Cell2D = serde_json::from_str(cell_json).map_err(|e| e.to_string())?;
+    let rows: Vec<SurfaceRowSummary> = surface_table(group, &cell)
+        .into_iter()
+        .map(|r| SurfaceRowSummary {
+            surface: r.surface,
+            status: r.status,
+            sites: r.sites,
+            cones: r.cones,
+            reason: r.reason,
+        })
+        .collect();
+    serde_json::to_string(&rows).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+struct CatalogueJson<'a> {
+    group: &'a str,
+    chiral: bool,
+    r0: f64,
+    dislocations: &'a [papertilling_core::defect::DislocationEntry],
+    centre_classes: &'a [papertilling_core::defect::CentreClassEntry],
+    disclinations: &'a [papertilling_core::defect::DisclinationEntry],
+    mirrors: &'a [papertilling_core::defect::MirrorLineEntry],
+    domain_walls: &'a [papertilling_core::defect::DomainWallEntry],
+    twin_walls: &'a [papertilling_core::defect::TwinWallEntry],
+    mobius_seams: &'a [papertilling_core::defect::MobiusSeamEntry],
+    glide_breaking: &'a [papertilling_core::defect::GlideBreakingEntry],
+}
+
+fn pure_defect_catalogue(group: &str, cell_json: &str, frame_json: Option<&str>) -> Result<String, String> {
+    let cell: Cell2D = serde_json::from_str(cell_json).map_err(|e| e.to_string())?;
+    let frame = match frame_json {
+        Some(s) => serde_json::from_str(s).map_err(|e| e.to_string())?,
+        None => Frame2D::default(),
+    };
+    let cat = DefectCatalogue::new(group, &cell, frame);
+    let view = CatalogueJson {
+        group: &cat.group,
+        chiral: cat.chiral,
+        r0: cat.r0,
+        dislocations: &cat.dislocations,
+        centre_classes: &cat.centre_classes,
+        disclinations: &cat.disclinations,
+        mirrors: &cat.mirrors,
+        domain_walls: &cat.domain_walls,
+        twin_walls: &cat.twin_walls,
+        mobius_seams: &cat.mobius_seams,
+        glide_breaking: &cat.glide_breaking,
+    };
+    serde_json::to_string(&view).map_err(|e| e.to_string())
 }
 
 /// Return the `papertilling-core` crate version string.
@@ -58,6 +145,32 @@ pub fn symmetry_index(key: Vec<Vec<u32>>) -> PyResult<usize> {
     dsymbol::symmetry_index(&parsed).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+#[pyfunction]
+pub fn dsymbol_from_recipe_json(recipe_json: &str) -> PyResult<String> {
+    pure_dsymbol_from_recipe(recipe_json).map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+pub fn allowed_interval_json(recipe_json: &str, param: &str, lo: f64, hi: f64) -> PyResult<String> {
+    pure_allowed_interval(recipe_json, param, lo, hi).map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+pub fn special_points_json(recipe_json: &str, param: &str, lo: f64, hi: f64) -> PyResult<String> {
+    pure_special_points(recipe_json, param, lo, hi).map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+pub fn surface_table_json(group: &str, cell_json: &str) -> PyResult<String> {
+    pure_surface_table(group, cell_json).map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (group, cell_json, frame_json=None))]
+pub fn defect_catalogue_json(group: &str, cell_json: &str, frame_json: Option<&str>) -> PyResult<String> {
+    pure_defect_catalogue(group, cell_json, frame_json).map_err(PyValueError::new_err)
+}
+
 #[pymodule]
 fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", papertilling_core::VERSION)?;
@@ -65,6 +178,11 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(canonical_key, m)?)?;
     m.add_function(wrap_pyfunction!(network_key, m)?)?;
     m.add_function(wrap_pyfunction!(symmetry_index, m)?)?;
+    m.add_function(wrap_pyfunction!(dsymbol_from_recipe_json, m)?)?;
+    m.add_function(wrap_pyfunction!(allowed_interval_json, m)?)?;
+    m.add_function(wrap_pyfunction!(special_points_json, m)?)?;
+    m.add_function(wrap_pyfunction!(surface_table_json, m)?)?;
+    m.add_function(wrap_pyfunction!(defect_catalogue_json, m)?)?;
     Ok(())
 }
 
@@ -72,10 +190,10 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use papertilling_core::dsymbol;
 
-    use super::{parse_key, version};
+    use super::{parse_key, pure_dsymbol_from_recipe, pure_special_points, version};
 
     #[test]
-    fn wrapper_version_and_key_parsing() {
+    fn wrapper_version_and_stage12_helpers() {
         assert_eq!(version(), "0.2.0");
         let p2_sq = parse_key(vec![
             vec![4, 4, 1, 2, 1],
@@ -86,5 +204,13 @@ mod tests {
         .unwrap();
         assert_eq!(dsymbol::symmetry_index(&p2_sq).unwrap(), 4);
         assert!(parse_key(vec![vec![4, 4, 0]]).is_err());
+
+        let kagome_json = r#"{"group":"p6m","sites":[[0.5,0.0]],"bonds":[[[0.5,0.0],[0.5,0.5]]],"a":1.0}"#;
+        let ds_json = pure_dsymbol_from_recipe(kagome_json).unwrap();
+        assert!(ds_json.contains("\"size\":2"));
+
+        let p2_ob_json = r#"{"group":"p2","sites":[[0.0,0.0]],"bonds":[[[0.0,0.0],[1.0,0.0]],[[0.0,0.0],[0.0,1.0]]],"a":1.0,"b":2.5,"gamma":70.0}"#;
+        let sp_json = pure_special_points(p2_ob_json, "gamma", 45.0, 135.0).unwrap();
+        assert!(sp_json.contains("\"group\":\"pmm\""));
     }
 }

@@ -291,9 +291,8 @@ def _twin_setup(cat):
         u = _canon_dir(g.A @ np.array(m, float)); n = _rot90(u)
         per, dl = cat._line_data(u)
         hs = []
-        for x in sorted(float(x) % dl for x in cat.cell.basis @ n):
-            x = 0.0 if dl - x < 1e-9 else x
-            if not any(abs(x - y) < 1e-7 for y in hs):
+        for x in sorted(0.0 if dl - z < 1e-9 else z for z in (float(x) % dl for x in cat.cell.basis @ n)):
+            if not any(min(abs(x - y), dl - abs(x - y)) < 1e-7 for y in hs):
                 hs.append(x)
         ivs = [("site", h, h) for h in hs] + [("gap", hs[i], hs[i + 1] if i + 1 < len(hs) else hs[0] + dl) for i in range(len(hs))]
         mir = [ln["offset"] for ln in cat.all_lines if ln["glide"] == 0.0 and np.allclose(ln["direction"], u, atol=1e-6)]

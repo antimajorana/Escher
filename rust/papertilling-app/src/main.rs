@@ -1,7 +1,15 @@
 mod app;
+mod backend;
 mod canvas2d;
+mod defects_tab;
 mod export;
+mod gallery_tab;
+mod live_ops;
+mod live_plane;
 mod mesh3d;
+mod scene2d;
+mod scene_crystal;
+mod surfaces_tab;
 mod view3d;
 
 use std::process::ExitCode;
@@ -26,8 +34,8 @@ fn main() -> ExitCode {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("papertilling — Stage 0")
-            .with_inner_size([1280.0, 800.0]),
+            .with_title("papertilling — Desktop Explorer")
+            .with_inner_size([1360.0, 840.0]),
         depth_buffer: view3d::DEPTH_BITS,
         ..Default::default()
     };

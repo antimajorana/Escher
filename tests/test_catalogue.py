@@ -207,3 +207,19 @@ def test_glide_reflection_twin_is_not_in_G(name, square):
         # sites on one line mod 0.866 -> 1 line + 1 gap. Total 6. sigma in G: the zigzag gap holds the
         # mirror y = 1/2, the armchair line through the sites is a mirror: 2.
         assert len(tw) == 6 and sum(w["sigma_in_G"] for w in tw.values()) == 2
+
+
+def test_twin_walls_wraparound_orbit_stabiliser():
+    """Regression for 1-ULP dl - x < 1e-9 wrap-around in _twin_setup: hs must stay strictly sorted so gap
+    intervals have hi > lo and twin-wall classes satisfy orbit-stabiliser on zigzag (8) and brick_pg (16)."""
+    zz = DefectCatalogue("zigzag")
+    assert len(zz.twin_walls) == 8
+    assert all(w["interval"][2] > w["interval"][1] for w in zz.twin_walls if not w["through_site"])
+
+    bp = DefectCatalogue("brick_pg")
+    assert len(bp.twin_walls) == 16
+    assert sum(w["class_size"] for w in bp.twin_walls) == 32
+    assert all(w["interval"][2] > w["interval"][1] for w in bp.twin_walls if not w["through_site"])
+    gb = {w["id"]: w["same_as_twin"] for w in bp.glide_breaking}
+    assert gb["Wd1"] != gb["Wd2"] and gb["Wd1"] is not None and gb["Wd2"] is not None
+

@@ -4,6 +4,7 @@ pub mod defect;
 pub mod dsymbol;
 pub mod plane;
 pub mod surface;
+pub mod types;
 
 /// Crate version matching the workspace and Python package.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
