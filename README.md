@@ -74,6 +74,22 @@ A "kind" of site or bond is an orbit under the group.
 
 ![A dislocation in the Kagome lattice](docs/img/defect.png)
 
+## Lattices on surfaces
+
+```python
+from papertilling.surfaces import torus, cylinder, mobius_band, klein_bottle, sphere, projective_plane, genus_surface
+S = sphere(pt.named("honeycomb"), size=(1, 1))   # C60: 60 sites, 12 pentagons (12 disclinations of +60 deg)
+S.checks(); S.show()
+```
+
+A periodic lattice fits without defects only on flat surfaces: the cylinder, the torus, the Moebius band and the Klein bottle (the last
+two need a mirror or glide line). Every other closed surface needs disclinations whose Frank angles add up to 360 deg x chi
+(Gauss-Bonnet): +720 deg on a sphere, +360 deg on a projective plane, -720 deg x (g - 1) on a surface of genus g. The sphere and the
+projective plane are built by folding the lattice onto a polyhedron whose corners are its own rotation centres; each gluing is tested to
+be a symmetry of the lattice, and the construction is refused otherwise. Higher genus uses two sheets of a torus joined along slits
+(each slit end is a -360 deg disclination) and works for every lattice. 3D pictures of the torus and the Klein bottle are necessarily
+distorted (a flat torus has no undistorted shape in 3D; a Klein bottle passes through itself); the flat pieces are exact.
+
 ## Notebooks
 
 In `notebooks/` (they need the `notebooks` extra and a Jupyter kernel of the Python in which `papertilling` is installed):

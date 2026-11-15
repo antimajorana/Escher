@@ -156,6 +156,94 @@ The table gives, for each: the group written on the original sheet, the **measur
 ("code", """K = named("Shastry-Sutherland")
 print(K)
 print(K.code())          # paste this line into the LATTICE cell of Notebooks 2 and 3, or write L = named("Shastry-Sutherland") there"""),
+("md", r"""
+## 8. The lattice on other surfaces
+
+**Which surfaces can carry a lattice without any defect?** Exactly the **flat** ones: the plane, the cylinder, the torus, the Moebius band and the Klein bottle. Each is the plane with some points glued together, and the gluing must be a symmetry of the lattice, so that every site keeps exactly the neighbourhood it had in the plane: same bonds, same lengths, same angles.
+* **cylinder**: points a lattice vector **C** apart are glued (like the (n, m) of a nanotube); open at both ends;
+* **torus**: points **T1** apart and points **T2** apart are glued (a finite crystal with periodic boundary conditions);
+* **Moebius band** and **Klein bottle**: the gluing is a **glide** (reflect across a line, then slide along it), so the sheet comes back mirrored. That needs a mirror or glide line in the group: impossible for p1, p2, p3, p4, p6 (chiral lattices).
+
+**Every other closed surface needs disclinations.** Walking round a disclination of Frank angle alpha turns a direction by 360 - alpha degrees instead of 360. The theorem of Gauss and Bonnet says that on a closed surface the Frank angles always add up to **360 deg x chi**, where chi = V - E + F (sites minus bonds plus faces) is the Euler characteristic:
+
+| surface | chi | Frank angles must add up to |
+|---|---|---|
+| torus, Klein bottle | 0 | 0 (no defect needed) |
+| sphere | 2 | +720 deg (for example 12 x 60 deg: the 12 pentagons of a football) |
+| projective plane | 1 | +360 deg |
+| surface with g holes (genus g) | 2 - 2g | -720 deg x (g - 1) |
+
+Each picture below has two parts: the **flat piece** (the region of the plane that is glued up; edges with the same arrow are glued) and a **3D shape**. The flat piece is exact. The 3D shape is exact for the cylinder, but a flat torus has no undistorted shape in 3D (the doughnut stretches the bonds outside and squeezes them inside), and a Klein bottle must pass through itself in 3D.
+
+`S.checks()` verifies each surface: no bond from a site to itself, no doubled bond, every site with its plane number of bonds (away from an open edge), and V - E + F = chi. Sizes are integer vectors in units of the primitive cell vectors of `L.cell()`.
+"""),
+("md", r"""
+**First, which surfaces this lattice can have.** `surface_table(SURF)` tries all eight and says, for each:
+* **OK**: built, and every check passed;
+* **IMPOSSIBLE**: proved from the lattice's symmetry, for every lattice of its group: no mirror or glide line means no Moebius band, Klein bottle or projective plane (those need a gluing that reverses orientation, and it must be a symmetry); no rotation centre (p1, pm, pg, cm) means no sphere or projective plane (a disclination must be a rotation of the lattice, so without rotations every Frank angle is 0 or negative, while Gauss-Bonnet needs +720 or +360 deg);
+* **NOT FOUND**: this construction failed at every size and centre tried (for example, a corner would fold a bond onto itself). That is not a proof that the surface is impossible; the line says what was tried.
+"""),
+("code", """from papertilling.surfaces import surface_table
+SURF = L_now                         # the lattice chosen above (or e.g. named("Kagomé"))
+table = surface_table(SURF)          # about 10-60 s: sizes are retried for NOT FOUND"""),
+("code", """from papertilling.surfaces import torus, cylinder, mobius_band, klein_bottle, glides, sphere, projective_plane, genus_surface
+SURF = L_now                        # the lattice chosen above (or e.g. named("Kagomé"))
+
+for make in (torus, cylinder):      # sizes: torus(SURF, T1, T2), cylinder(SURF, wrap, length); default about 220 sites
+    S = make(SURF)
+    S.show(); plt.show()
+    S.checks()"""),
+("code", """if glides(SURF):
+    for make in (mobius_band, klein_bottle):
+        S = make(SURF)
+        S.show(); plt.show()
+        S.checks()
+else:
+    print(f"{SURF.group} has no mirror or glide line: no Moebius band and no Klein bottle for this lattice.")"""),
+("md", r"""
+### The sphere: the lattice folded onto a polyhedron
+
+The lattice is cut into congruent flat pieces whose corners sit at its own rotation centres of the highest order n, and the pieces are folded onto a polyhedron: an **icosahedron** for n = 6 (12 corners, each a disclination of +60 deg), a **cube** for n = 4 (8 x +90), an **octahedron** for n = 3 (6 x +120), a **pillow** for n = 2 (4 x +180). These are the smallest disclinations the lattice allows, and they add up to +720 deg, as Gauss-Bonnet requires. Away from the 12 (8, 6, 4) corners, every site has exactly its plane neighbourhood.
+
+* `size=(h, k)`: the edge of a piece is the lattice vector h b1 + k b2 between two centres (like the (h, k) of fullerenes and virus capsids). Honeycomb (1, 1) is C60: 60 sites, 12 pentagons, 20 hexagons.
+* `centre=`: which class of rotation centres carries the corners (`"1a"`, `"site"`, `"face centre"`). By default a face centre, so that no site loses a bond (honeycomb: the disclinations are pentagons). On the square lattice, `centre="site"` gives the cube (8 three-bond sites); the default, the plaquette centres, gives 8 triangles instead.
+* Every gluing between pieces is tested: it must be a symmetry of the lattice, otherwise the construction is refused (a p3 lattice cannot fold onto an icosahedron, because a 60 deg rotation is not one of its symmetries; it folds onto an octahedron). A corner that would fold a bond onto itself, or shrink a face below 3 sides, is refused too. p1, pm, pg and cm have no rotation centre: no sphere.
+
+The 3D shape is the polyhedron pushed onto a sphere, so bonds near the corners look shorter; the flat net on the left is exact.
+"""),
+("code", """try:
+    S = sphere(SURF)                 # e.g. sphere(SURF, size=(1, 1)), sphere(SURF, centre="site")
+    S.show(); plt.show()
+    S.checks()
+    kinds = sorted({(c["label"], c["location"], c["angle"]) for c in S.cones})
+    print(len(S.cones), "disclinations:", "; ".join(f"{a:+g} deg at {lab} ({loc})" for lab, loc, a in kinds))
+except ValueError as err:
+    print("no sphere for this lattice:", err)"""),
+("md", r"""
+### The projective plane
+
+A closed surface with chi = 1: a sphere with every point glued to the opposite point. Here: half of the polyhedron (a hemi-icosahedron, hemi-cube, hemi-octahedron or hemi-pillow), with opposite edges glued after a **reflection**. So it carries half as many disclinations (+360 deg in total), and it needs a reflection or glide among the lattice's symmetries that matches the gluing: refused for chiral lattices (p2, p3, p4, p6) and for groups without rotations. Honeycomb (1, 1) gives 30 sites, 6 pentagons and 10 hexagons. The 3D picture shows the double cover (a sphere): the two sites with the same colour are the same site of the projective plane.
+"""),
+("code", """try:
+    S = projective_plane(SURF)       # default size (1, 1); try (1, 0) or (2, 0) if refused
+    S.show(); plt.show()
+    S.checks()
+except ValueError as err:
+    print("no projective plane at this size:", err)"""),
+("md", r"""
+### Surfaces with g holes (genus g)
+
+They need negative disclinations adding up to -720 deg x (g - 1). The construction used here works for every lattice, including p1: take two copies (sheets) of a torus of the lattice, cut both along g - 1 slits, and glue each side of a slit to the opposite side on the other sheet. Going once round an end of a slit takes you to the other sheet; going round twice brings you back, after 720 deg instead of 360 deg. So each slit end is a disclination of **-360 deg**, sitting in a face, which becomes one face with twice as many sides. Every site keeps its plane neighbourhood. There are 2(g - 1) slit ends, and 2(g - 1) x (-360) = -720 (g - 1), as required.
+
+The picture is the two sheets side by side with the slits (red), their ends (stars) and the bonds that change sheet; a genus-g surface with this geometry has no simple 3D shape.
+"""),
+("code", """for g in (2, 3):
+    try:
+        S = genus_surface(SURF, g=g)             # torus_size=(6, 6) cells by default; enlarge it for more holes
+        S.plot_net(); plt.show()
+        S.checks()
+    except ValueError as err:
+        print(f"genus {g}: refused:", err)"""),
 ]
 
 # ------------------------------------------------------------------------------------------------
@@ -187,7 +275,30 @@ For one lattice from Notebook 1, this notebook lists every **crystalline-symmetr
 * **(c) Moebius seams**: one per class of mirror or glide line; the sheet becomes non-orientable.
 * **(d) glide-breaking walls**: on a glide line, the pure reflection instead of the glide: the two sides are off by the glide translation along the wall (a stacking fault).
 
+**The cut-and-glue recipe for each kind.** Every defect here is made by the same Volterra procedure: cut the crystal, move one side by an isometry sigma, glue it back. What differs is the shape of the cut and the kind of sigma:
+
+| cut | sigma | defect |
+|---|---|---|
+| half-line ending at a point | translation by a lattice vector **b** | dislocation (point) |
+| half-line ending at a rotation centre | rotation by alpha about that centre | disclination (point) |
+| half-line ending at a point | reflection or glide | impossible on an ordinary sheet: going once round the end would bring you back mirrored, and a small loop on a sheet cannot reverse orientation |
+| whole line, glued back to itself across the cut | reflection or glide of the lattice | (c) Moebius seam: the sheet becomes non-orientable |
+| whole line, one side replaced by its mirror image across the line | reflection that is not a symmetry | (b) twin wall (invisible on a mirror line of the lattice) |
+| whole line on a glide line, one side reflected | the bare reflection instead of the glide | (d) glide-breaking wall: the sides are off by the glide translation along the wall |
+| whole line, one side replaced by a moved copy | an isometry that keeps the pattern of symmetry elements but is not a symmetry (normaliser) | (a) domain wall: chirality, rotation or antiphase domains |
+
+**Can a wall end inside the crystal?** Walk once round the would-be end: you cross the wall once, so you come back moved by the mismatch sigma between the two sides. But sigma is only defined up to the lattice's own symmetries g: side B is sigma(lattice), and that equals sigma g (lattice) for every g in G. The end must be a point defect carrying one of these sigma g, and on an ordinary sheet a point defect can only carry an orientation-preserving one (a translation or a rotation). So: **a wall can end exactly when some sigma g preserves orientation.**
+* **Antiphase wall** (sigma a translation): it can end, at a partial dislocation with that Burgers vector.
+* **Rotation domain wall** (sigma a rotation): it can end, at a partial disclination.
+* **Glide-breaking wall**: sigma = the bare reflection, and the lattice has the glide g on that line; sigma g^-1 is a translation by the glide's slide (half a period along the line). It can end, at a partial dislocation whose Burgers vector is that slide.
+* **Twin wall** (sigma a reflection across the wall): if the lattice has any mirror or glide line m, then sigma m is a rotation (two reflections make a rotation), so the twin wall is really a **tilt boundary** and can end at a partial disclination whose angle is twice the angle between the wall and that mirror line. Only on a **chiral** lattice (p1, p2, p3, p4, p6), where every sigma g reverses orientation, can a twin wall not end.
+* **Chirality domain wall** (a mirror image of a chiral lattice): every sigma g reverses orientation, so it cannot end. It runs to the edge of the crystal, closes into a loop, or meets other walls.
+
+(Argument from the holonomy: proved result; formal verification not performed. These endings are not computed by the package.)
+
 **Status.** Classes: proved by a one-line argument from the definitions (formal verification not performed). Lists and pictures: computational evidence. For p1, pm, pg and cm the normaliser is continuous: the list (a) is a set of representatives, marked incomplete.
+
+**Pictures.** Each defect is first built with the sites in their rigid cut-and-reglue positions. Where that would make bonds cross or overlap (near a wall line, or at some dislocation cores), the picture is redrawn: the bonds relax like springs, locally around the bad region first, and only if needed over the whole patch. The bonds themselves are never changed. A Moebius seam is the exception: a non-orientable seam cannot lie flat, so the bonds across it are drawn as dotted stubs.
 '''),
 ("code", '''import warnings; warnings.filterwarnings("ignore", category=DeprecationWarning)
 %matplotlib inline
@@ -267,11 +378,15 @@ from papertilling.defects.config import equivalent_single, compare, classify''')
 ## 0. Control: a known example on the square lattice
 
 +90 at the site (0, 0) and -90 at the face centre (1/2, 1/2) of the square lattice.
+
+**How the crystals are drawn.** `build` first places the sites by cutting and regluing the plane once per defect (the "raw" picture, `picture="raw"`). With two or more disclinations the raw picture is not a faithful drawing: each disclination stretches the angles around its own centre, and for a +alpha/-alpha pair the two stretches do not cancel, so the far field covers more than 360 deg and folds over itself along the cut (for +-90 deg it covers about 384 deg). The graph (who is bonded to whom) is right; only the positions are wrong. The default `picture="relaxed"` therefore lets the bonds relax like springs, and if the result still has crossing bonds or folded faces it redraws the crystal: first only around the bad region, and if needed the whole crystal with its rim pinned to a circle and each site placed at the average of its neighbours (by Tutte's theorem that drawing has no crossing bonds when the crystal's graph is 3-connected, which most crystals are). If no stage gives a clean picture, the least bad one is kept and the plot title says how many crossings or overlaps remain. `c.defect.info["drawing"]` says which stage was used.
+
+A configuration whose Frank angles do not add up to 0 cannot have an undistorted far field in the plane: a net +alpha makes the plane a cone, and the drawing must squeeze it (or, for a net negative angle, crowd it). Only net-zero configurations look like the perfect lattice far away.
 '''),
 ("code", '''sq = "square"
-pair = build(sq, dict(kind="disclination", angle=90, at=(0, 0)), dict(kind="disclination", angle=-90, at=(0.5, 0.5)), picture="raw")
+pair = build(sq, dict(kind="disclination", angle=90, at=(0, 0)), dict(kind="disclination", angle=-90, at=(0.5, 0.5)))
 pair.inspect()
-single = build(sq, dict(kind="dislocation", b=(1, 0), at=(0.371, 0.413)), picture="raw")
+single = build(sq, dict(kind="dislocation", b=(1, 0), at=(0.371, 0.413)))
 print({k: v for k, v in compare(pair, single).items() if k != "details"})
 fig, axs = plt.subplots(1, 2, figsize=(13, 6.5))
 pair.plot(ax=axs[0], title="+90 site, -90 face"); single.plot(ax=axs[1], title="unit dislocation")
@@ -311,7 +426,7 @@ configs = {
                                                           dict(kind="disclination", angle=-alpha, at=centre(labels[-1]))],
     "shortest dislocation": [dict(kind="dislocation", b=cat.dislocations[0]["b"], at=A @ np.array([0.371, 0.413]))],
 }
-built = {name: build(L, *specs, picture="raw") for name, specs in configs.items()}
+built = {name: build(L, *specs) for name, specs in configs.items()}
 fig, axs = plt.subplots(1, len(built), figsize=(6.5 * len(built), 6.5))
 for ax, (name, c) in zip(np.atleast_1d(axs), built.items()):
     c.plot(ax=ax, title=name)
@@ -331,9 +446,18 @@ plt.show()'''),
     r = equivalent_single(c, grid=2)
     print(f"{name:40s} -> {r['verdict']}")'''),
 ("md", r'''
+### See the cores
+
+`equivalent_single(c, show=True)` draws the configuration's own core (first panel) next to every core of the single dislocation with the same charge: **Volterra cores** (cut and reglue only; the orange ring is the face that is not in the perfect lattice, red circles mark sites that lost a bond) in one row, and, when they exist, **completion cores** (a Volterra core healed by extra bonds, drawn as dashed magenta lines) in the next. The core that matches the configuration is framed in green. When the match is a completion core, the Volterra cores are always shown too, so you can see what was healed; at most 5 completion cores are drawn when there is a match (`r["gallery"]` holds them all).
+
+The list of cores comes from a finite scan of cut positions (`grid`): a larger grid can find more cores, and the numbering ("completion core 7") belongs to that scan. The ring sizes in a title belong to the build that first reached that core; the same core can be reached with an extra perfect-size ring.
+'''),
+("code", '''pair = built[f"+{alpha:g} {labels[0]} / -{alpha:g} {labels[-1]}"]
+r = equivalent_single(pair, grid=2, show=True)'''),
+("md", r'''
 ## 4. Your own configuration
 
-Edit the list and run. `picture="relaxed"` relaxes the drawing (slower; the graph is the same).
+Edit the list and run. `picture="relaxed"` (the default) gives a faithful drawing; `picture="raw"` the unrelaxed cut-and-reglue positions (faster; with several disclinations they overlap along the cuts). The graph is the same in both.
 '''),
 ("code", '''mine = build(L,
              dict(kind="disclination", angle=alpha, at=centre(labels[0])),

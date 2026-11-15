@@ -2,7 +2,8 @@
 
     cat = DefectCatalogue("square")            # UnitCell, legacy Family, recipe dict, or catalogue name
     cat.summary()                              # printed tables, one per kind, with counts
-    cat.dislocations[0].build().plot()         # any entry: build(R=...) -> legacy Defect, plot(ax)
+    cat.dislocations[0].build().plot()         # any entry: build(R=...) -> legacy Defect (rigid picture)
+    cat.dislocations[0].plot()                 # entry.plot(ax, R): a planar picture (entry.picture(R))
     cat.show("disclinations")                  # small multiples
 
 CLASSIFICATION (author, 2026-11-13: "homotopy classification"; definitions, set by the author in docs/DEVELOPMENT.md)
@@ -164,9 +165,35 @@ class DefectEntry(dict):
         """The defect, built by the legacy engine: a lab_defects.Defect."""
         return self._builder(R=R, **kw)
 
-    def plot(self, ax=None, R=None, title=None, **kw):
+    def picture(self, R=None):
+        """(Defect, info): a copy of build(R) drawn as a planar picture (draw.embedded_copy: the rigid legacy
+        picture if it has no crossing, fold, overlap or crowded site; else, for a wall, the wall opened (side B
+        moved rigidly off the wall line); else relaxed, or repaired locally round the bad sites, or a Tutte
+        embedding; if none is clean, the rigid picture, info['stage'] = 'rigid'). info['note'] (draw.
+        drawing_note) says what the picture keeps. A Moebius seam keeps its stub picture (info None)."""
         d = self.build(R=R)
-        return d.plot(ax=ax, field=self._field, title=title or self.get("label", self["id"]), **kw)
+        if self["kind"] == "mobius_seam":
+            return d, None
+        from .draw import embedded_copy
+        # a glide-breaking wall that cannot be opened cleanly is repaired locally (a few per lattice, 1-3 s each);
+        # other walls (often many, e.g. the twin walls of p1 lattices) fall back to the rigid picture with a note
+        return embedded_copy(d, wall_local=self["kind"] == "glide_breaking")
+
+    def plot(self, ax=None, R=None, title=None, embedded=True, wrap=None, **kw):
+        """Draw the entry; embedded=False draws the rigid legacy picture as built. When the picture keeps
+        crossings, overlaps, crowded sites or folds (or is the rigid fallback), a line saying how many is
+        added to the title. wrap: wrap the title and the note at this many characters."""
+        import textwrap
+        if embedded:
+            d, info = self.picture(R=R)
+        else:
+            d, info = self.build(R=R), None
+        title = title or self.get("label", self["id"])
+        note = (info or {}).get("note")
+        if wrap:
+            title = "\n".join(textwrap.fill(t, wrap) for t in str(title).split("\n"))
+            note = textwrap.fill(note, wrap) if note else note
+        return d.plot(ax=ax, field=self._field, title=f"{title}\n{note}" if note else title, **kw)
 
     def __repr__(self):
         return f"<{self['kind']} {self['id']}: {self.get('label', '')}>"
@@ -556,8 +583,9 @@ class DefectCatalogue:
             print(s)
         return s
 
-    def show(self, kind="disclinations", entries=None, R=None, ncols=4, size=3.2):
-        """Small multiples of the built defects of one kind (or of the given entries)."""
+    def show(self, kind="disclinations", entries=None, R=None, ncols=4, size=3.2, embedded=True):
+        """Small multiples of the built defects of one kind (or of the given entries); embedded: as
+        DefectEntry.plot. Titles and drawing notes are wrapped at 45 characters."""
         import matplotlib.pyplot as plt
         ents = list(entries if entries is not None else getattr(self, kind))
         if kind == "mirrors" and entries is None:
@@ -571,7 +599,7 @@ class DefectCatalogue:
             ax.axis("off")
         for e, ax in zip(ents, axs.ravel()):
             try:
-                e.plot(ax=ax, R=R, title=e.get("label", e["id"]))
+                e.plot(ax=ax, R=R, title=e.get("label", e["id"]), embedded=embedded, wrap=45)
             except Exception as ex:                      # show the refusal instead of stopping the figure
                 ax.set_title(f"{e['id']}: {type(ex).__name__}", fontsize=8)
         fig.suptitle(f"{self.label} ({self.group}): {kind}", fontsize=10)

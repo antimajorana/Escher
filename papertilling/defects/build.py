@@ -500,7 +500,11 @@ def build(lattice, *specs, R=None, picture="relaxed", centre=None, snap=False, c
           dict(kind="disclination", angle=deg, at=(cx, cy), cut=None)
     Disclination centres must be rotation centres allowing the angle (snap=True moves them to the
     nearest such centre instead of refusing). A dislocation cut c must satisfy cross2(c, b) < 0.
-    fast: None = fast path (fast.py, fast_relax.py) unless PAPERTILLING_LEGACY=1; False = legacy engines."""
+    fast: None = fast path (fast.py, fast_relax.py) unless PAPERTILLING_LEGACY=1; False = legacy engines.
+    picture: "raw" = the builder's composed maps (bonds stretched > 1.8x drawn as dotted stubs; can cross);
+    "relaxed" = the spring relaxation (fast_relax); if that picture has crossing bonds or folded faces it is
+    replaced by a planar one from draw.ensure_embedded (local Tutte repair or Tutte embedding, then the same
+    relaxation kept planar); defect.info['drawing'] says which stage drew it."""
     if picture not in ("relaxed", "raw"):
         raise ValueError("picture must be 'relaxed' or 'raw'")
     if len(specs) == 1 and isinstance(specs[0], (list, tuple)):
@@ -512,6 +516,9 @@ def build(lattice, *specs, R=None, picture="relaxed", centre=None, snap=False, c
     d, rep = _run(lat, sp, R=R, centre=centre, check=check, fast=fast)
     if picture == "relaxed":
         _fast.relax_picture(d, fast=fast)
+        if lat.planar:                       # a picture with crossing bonds or folded faces is redrawn
+            from .draw import ensure_embedded
+            ensure_embedded(d, overlaps=False)
     else:
         ff.mark_long_bonds(d)
     return Configuration(d, sp, lat, rep)
@@ -586,7 +593,11 @@ class Configuration:
         return out
 
     def plot(self, ax=None, title=None):
+        """Draw the crystal and its cores. When defect.info['drawing'] records crossings, overlaps, crowded
+        sites or folds left in the picture, a line saying how many is added to the title."""
         import matplotlib.pyplot as plt
+
+        from .draw import drawing_note
         d = self.defect
         ax = ax or plt.subplots(figsize=(6, 6))[1]
         d.plot(ax=ax, site_size=6)
@@ -597,7 +608,9 @@ class Configuration:
             if len(Q) > 2:
                 ax.fill(Q[:, 0], Q[:, 1], color=col, alpha=0.4, zorder=1)
             ax.scatter(Q[:, 0].mean(), Q[:, 1].mean(), s=150, facecolors="none", edgecolors=col, linewidths=1.6, zorder=5)
-        ax.set_title(title or self.total_charge()["label"], fontsize=8.5)
+        note = drawing_note(d.info.get("drawing"))
+        title = title or self.total_charge()["label"]
+        ax.set_title(f"{title}\n{note}" if note else title, fontsize=8.5)
         return ax
 
 

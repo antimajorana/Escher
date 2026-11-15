@@ -15,6 +15,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = Path.home() / "Documents" / "GitHub" / "papertilling"
+
+
+def _refuse_self_export(target):
+    """The script deletes what it exported before and copies ROOT into TARGET: never let the two be one folder."""
+    if Path(target).resolve() == ROOT or ROOT in Path(target).resolve().parents or Path(target).resolve() in ROOT.parents:
+        raise SystemExit(f"refusing to export: the target {target} is the source folder (or contains it). "
+                         "This repository is the working copy now; there is nothing to export.")
 MANIFEST = ".export_manifest"
 TOP_FILES = ["pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", ".gitignore"]
 TOP_DIRS = [".github", "docs"]
@@ -106,6 +113,7 @@ def scrub_notebook(path, report):
 
 def main():
     target = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_TARGET
+    _refuse_self_export(target)
     target.mkdir(parents=True, exist_ok=True)
     clean_previous(target)
     files = collect()
