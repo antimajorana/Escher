@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.16,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "papertilling-rs"
+version = "0.2.0"
+description = "Optional Rust acceleration module for papertilling"
+license = "GPL-3.0-only"
+authors = [{ name = "antimajorana" }]
+requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://github.com/antimajorana/papertilling"
+
+[tool.maturin]
+module-name = "papertilling_rs"
+bindings = "pyo3"
+features = ["extension-module"]

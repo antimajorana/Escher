@@ -3,11 +3,12 @@
     python tools/export_repo.py [TARGET]        default TARGET: ~/Documents/GitHub/papertilling
 
 Re-runnable: first deletes what TARGET/.export_manifest lists (the previous run), never touches TARGET/.git. Included: papertilling/ (.py .json .txt), tests/, the three notebooks, tools/ (without
-build_colab.py, vendor_legacy.py, bench/, *.out), pyproject.toml, README.md, LICENSE, CHANGELOG.md, .gitignore, .github/, docs/.
+build_colab.py, vendor_legacy.py, bench/, *.out), rust/ (without target/, wheels/, native binaries), pyproject.toml, README.md, LICENSE, CHANGELOG.md, AGENTS.md, .gitignore, .github/, docs/.
 legacy/SOURCES.txt is rewritten without local paths. At the end every text file is scanned for private strings; a hit in a
 notebook OUTPUT drops that output only, any other hit is listed and the exit status is 1 (the tree is still written).
 """
 import json
+import os
 import re
 import shutil
 import sys
@@ -23,22 +24,25 @@ def _refuse_self_export(target):
         raise SystemExit(f"refusing to export: the target {target} is the source folder (or contains it). "
                          "This repository is the working copy now; there is nothing to export.")
 MANIFEST = ".export_manifest"
-TOP_FILES = ["pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", ".gitignore"]
+TOP_FILES = ["pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", "AGENTS.md", ".gitignore"]
 TOP_DIRS = [".github", "docs"]
 NOTEBOOKS = ["1. Lattices of a wallpaper group.ipynb", "2. Defects of a lattice.ipynb", "3. Defect configurations.ipynb"]
 TOOLS_SKIP_NAMES = {"build_colab.py", "vendor_legacy.py"}
 PRIVATE = ["k" + "Drive", "C:" + chr(92) + "Users", "C:/" + "Users", "c:" + chr(92) + "Users", "App" + "Data", "jupyter" + "-venv",
            "@" + "gmail", "antimajo" + "rana"]       # written in pieces so that this file does not trip its own scan
-AUTHOR_LINE = re.compile(r"author|copyright|licen[sc]e|github.com/", re.I)      # lines where the author name may stand (also the repository address)
-AUTHOR_FILES = {"pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md"}
+AUTHOR_LINE = re.compile(r"author|copyright|licen[sc]e|github\.com/", re.I)      # lines where the author name may stand (also the repository address)
+AUTHOR_FILES = {"pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", "Cargo.toml"}
 SKIP_PARTS = {"__pycache__", ".pytest_cache", ".ipynb_checkpoints"}
-TEXT_EXT = {".py", ".json", ".txt", ".md", ".toml", ".yml", ".yaml", ".ipynb", ".cfg", ".ini", ".gitignore", ""}
+RUST_SKIP_DIRS = {"target", "wheels"}
+NATIVE_BIN_EXT = {".pyd", ".so", ".dylib", ".pdb", ".exe", ".dll", ".rlib", ".whl"}
+TEXT_EXT = {".py", ".json", ".txt", ".md", ".toml", ".yml", ".yaml", ".ipynb", ".cfg", ".ini", ".gitignore", ".rs", ".wgsl", ".lock", ""}
 
 
 def keep(p, root):
     rel = p.relative_to(root)
-    return p.is_file() and not (set(rel.parts) & SKIP_PARTS) and p.suffix != ".pyc" and not any(
-        part.endswith(".egg-info") for part in rel.parts)
+    return (p.is_file() and not (set(rel.parts) & SKIP_PARTS)
+            and p.suffix != ".pyc" and p.suffix not in NATIVE_BIN_EXT
+            and not any(part.endswith(".egg-info") for part in rel.parts))
 
 
 def collect():
@@ -56,6 +60,18 @@ def collect():
         rel = p.relative_to(ROOT / "tools")
         if keep(p, ROOT) and rel.parts[0] != "bench" and p.name not in TOOLS_SKIP_NAMES and p.suffix != ".out":
             out.append((p, p.relative_to(ROOT)))
+    rust_dir = ROOT / "rust"
+    if rust_dir.is_dir():
+        rust_files = []
+        for dirpath, dirnames, filenames in os.walk(rust_dir):
+            dirnames[:] = sorted(d for d in dirnames if d not in RUST_SKIP_DIRS and d not in SKIP_PARTS
+                                 and not d.endswith(".egg-info"))
+            dp = Path(dirpath)
+            for fn in sorted(filenames):
+                p = dp / fn
+                if keep(p, ROOT):
+                    rust_files.append((p, p.relative_to(ROOT)))
+        out.extend(sorted(rust_files, key=lambda x: x[1]))
     for n in TOP_FILES:
         out.append((ROOT / n, Path(n)))
     for d in TOP_DIRS:

@@ -15,3 +15,9 @@ htmlcov/
 .ruff_cache/
 .DS_Store
 .export_manifest
+/rust/target/
+/rust/wheels/
+*.pyd
+*.so
+*.dylib
+*.pdb

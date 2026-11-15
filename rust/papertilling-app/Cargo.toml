@@ -1,0 +1,18 @@
+[package]
+name = "papertilling-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Desktop explorer for 2D lattices, defects, and surfaces"
+
+[dependencies]
+bytemuck = { version = "1.25", features = ["derive"] }
+eframe = "0.37.0"
+egui = "0.37.0"
+egui_extras = { version = "0.37.0", default-features = false }
+papertilling-core = { path = "../papertilling-core" }
+png = "0.18.1"
+rfd = { version = "0.18.0", default-features = false, features = ["xdg-portal"] }

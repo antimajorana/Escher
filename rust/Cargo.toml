@@ -1,0 +1,11 @@
+[workspace]
+members = ["papertilling-core", "papertilling-py", "papertilling-app"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.95"
+license = "GPL-3.0-only"
+authors = ["antimajorana"]
+repository = "https://github.com/antimajorana/papertilling"
