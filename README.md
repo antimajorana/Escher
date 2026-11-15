@@ -10,7 +10,21 @@ The first lattice of each of the 17 groups (stored list, rule `points`):
 
 ![First lattice of each wallpaper group](docs/img/groups.png)
 
-## Install
+## Desktop app
+
+Pre-built native installers (no Python or Rust needed) are on the [Releases](https://github.com/antimajorana/papertilling/releases/latest) page:
+
+- **Windows (`x86_64`):** run `papertilling-*-windows-x86_64-setup.exe` (installs per-user with Start Menu and Desktop shortcuts; no Administrator rights required), or unpack `*-portable.zip`.
+- **macOS (Apple Silicon & Intel):** open `papertilling-*-macos-universal.dmg` and drag **Papertilling.app** to **Applications**.
+- **Linux (`x86_64`):** unpack `papertilling-*-linux-x86_64.tar.gz` and run `./install.sh` (installs to `~/.local` with desktop launcher icon).
+
+The desktop app has four live views: **Gallery** (all 664 stored lattices across the 17 wallpaper groups, 21 named lattices, Wyckoff positions, and parameter sliders), **Surfaces** (torus, cylinder, Moebius band, Klein bottle, sphere, projective plane, and higher-genus handlebodies in rotatable 3D), **Defects** (dislocations, disclinations, and domain/twin/Moebius/glide walls), and **Combine** (live multi-defect placement and dragging, topological charge in $\tilde{G}^+$, Volterra vs completion core gallery, and `.json` config exchange with Notebook 3).
+
+To build and launch from source instead (requires Rust 1.95+):
+
+    cargo run --release --manifest-path rust/Cargo.toml -p papertilling-app
+
+## Python install
 
 Python 3.10 or newer. From GitHub:
 

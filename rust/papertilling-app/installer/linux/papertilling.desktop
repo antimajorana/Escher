@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Papertilling
+GenericName=2D Lattice & Defect Explorer
+Comment=Explore planar lattices of the 17 wallpaper groups, crystalline defects, and surfaces
+Exec=papertilling-app
+Icon=papertilling
+Terminal=false
+Categories=Science;Physics;Mathematics;Education;Graphics;
+StartupWMClass=papertilling

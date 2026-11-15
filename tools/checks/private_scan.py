@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PRIVATE = ["k" + "Drive", "C:" + chr(92) + "Users", "C:/" + "Users", "c:" + chr(92) + "Users", "c:/" + "Users", "App" + "Data",
            "ANTIMA" + "~1", "jupyter" + "-venv", "@" + "gmail", "scratch" + "pad", "antimajo" + "rana"]   # in pieces: no self-hit
 AUTHOR_LINE = re.compile(r"author|copyright|licen[sc]e|github\.com/", re.I)
-TEXT_EXT = {".py", ".json", ".txt", ".md", ".toml", ".yml", ".yaml", ".ipynb", ".cfg", ".ini", ".gitignore", ".rs", ".wgsl", ".lock", ""}
+TEXT_EXT = {".py", ".json", ".txt", ".md", ".toml", ".yml", ".yaml", ".ipynb", ".cfg", ".ini", ".gitignore", ".rs", ".wgsl", ".lock",
+            ".iss", ".sh", ".desktop", ".plist", ""}
 
 
 def strings(obj):

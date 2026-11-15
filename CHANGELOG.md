@@ -10,6 +10,7 @@
 - Defect pictures: `build(..., picture="relaxed")` and the Notebook 2 entries are redrawn when bonds would cross, fold or overlap
   (`papertilling/defects/draw.py`); raw pictures are unchanged. Notebook 3 now draws relaxed pictures.
 - `tools/checks/drawing_check.py`: crossings, overlaps and folded faces of a drawn crystal.
+- Rust workspace (`rust/`): `papertilling-core` (17 wallpaper groups, D-symbols, parameter tuning, flat/polyhedral/genus-g surfaces, defect catalogues, surgery, planar drawing, $\tilde{G}^+$ equivalence, Volterra and completion core gallery), `papertilling-app` (native `eframe` + `wgpu` 2D/3D desktop explorer with live defect combining studio and `.json` config exchange with Notebook 3), `papertilling-py` (optional `papertilling-rs` PyO3 acceleration wheel with automatic `PAPERTILLING_NO_RUST=1` fallback), and Windows/macOS/Linux release installers.
 
 ## 0.2.0
 

@@ -59,6 +59,7 @@ falls back to its own code when `PAPERTILLING_NO_RUST=1` or when the wheel is ab
     cargo run --manifest-path rust/Cargo.toml -p papertilling-app --release                 # native desktop app
     cargo run --manifest-path rust/Cargo.toml -p papertilling-app --release -- --smoke-test # headless 2D + 3D smoke check
     cargo test --manifest-path rust/Cargo.toml --release --workspace                        # Rust workspace tests
+    python tools/build_windows_installer.py                                                 # build dist/papertilling-*-windows-x86_64-setup.exe
     maturin develop --release --manifest-path rust/papertilling-py/Cargo.toml               # install papertilling-rs into active venv
     PAPERTILLING_NO_RUST=1 python -m pytest -q                                              # force pure-Python fallback
 
