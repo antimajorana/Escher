@@ -10,6 +10,59 @@ use crate::canvas2d::Canvas2D;
 const LIVE_MOVE_SECS: f64 = 0.05;
 
 impl GalleryTabState {
+    /// Inline rename control bar (Enter to save, Esc to cancel, Reset name when custom alias is active).
+    pub fn show_rename_bar(&mut self, ui: &mut egui::Ui, backend: &mut AppBackend, canvas: &mut Canvas2D, id_salt: &str) {
+        ui.push_id(id_salt, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                if self.renaming {
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.rename_buf)
+                            .desired_width(165.0)
+                            .hint_text(&self.active_item.default_label),
+                    );
+                    if self.rename_focus_pending {
+                        resp.request_focus();
+                        self.rename_focus_pending = false;
+                    }
+                    let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if esc {
+                        self.cancel_rename();
+                    } else if (enter && (resp.lost_focus() || resp.has_focus())) || ui.small_button("Save").clicked() {
+                        self.commit_rename(backend, canvas);
+                    } else if ui.small_button("Cancel").clicked() {
+                        self.cancel_rename();
+                    }
+                    ui.small(format!("(id: {})", self.active_item.default_label));
+                } else {
+                    let title_resp = ui
+                        .add(
+                            egui::Label::new(egui::RichText::new(&self.active_item.label).strong())
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_text("Double-click to give this lattice a custom name");
+                    if title_resp.double_clicked() {
+                        self.begin_rename();
+                    }
+                    if self.active_item.has_custom_name() {
+                        ui.small(format!("[{}]", self.active_item.default_label));
+                    }
+                    if ui.small_button("✎ Rename").on_hover_text("Give this lattice a persistent custom name").clicked() {
+                        self.begin_rename();
+                    }
+                    if self.active_item.has_custom_name()
+                        && ui.small_button("Reset name").on_hover_text("Restore default catalogue name").clicked()
+                    {
+                        self.reset_active_lattice_name(backend, canvas);
+                    }
+                }
+            });
+            if let Some(note) = &self.alias_note {
+                ui.small(note);
+            }
+        });
+    }
+
     /// Draw the side panel. Returns true when another lattice was selected (group, rule, list entry, named
     /// lattice); slider moves are reported by `revision()` only.
     pub fn show_side_panel(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
@@ -91,7 +144,7 @@ impl GalleryTabState {
                         body.row(18.0, |mut row| {
                             row.col(|ui| {
                                 let tip = format!(
-                                    "{} ({}) â€” max {}-fold, {}",
+                                    "{} ({}) — max {}-fold, {}",
                                     g.symbol,
                                     g.crystal_system,
                                     g.max_rotation,
@@ -148,7 +201,8 @@ impl GalleryTabState {
                                 ui.label(it.index.to_string());
                             });
                             row.col(|ui| {
-                                if ui.selectable_label(self.selected_cat_idx == idx, &it.label).clicked() {
+                                let txt = it.display_with_orig();
+                                if ui.selectable_label(self.selected_cat_idx == idx, txt).clicked() {
                                     picked_cat = Some(idx);
                                 }
                             });
@@ -192,7 +246,8 @@ impl GalleryTabState {
                     for (idx, it) in named.iter().enumerate() {
                         body.row(18.0, |mut row| {
                             row.col(|ui| {
-                                if ui.selectable_label(self.selected_named_idx == idx, &it.label).clicked() {
+                                let txt = it.display_with_orig();
+                                if ui.selectable_label(self.selected_named_idx == idx, txt).clicked() {
                                     picked_named = Some(idx);
                                 }
                             });

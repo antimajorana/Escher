@@ -47,6 +47,10 @@ pub struct GalleryTabState {
     active_item: CatalogueItemUi,
     cell: Cell2D,
     revision: u64,
+    pub renaming: bool,
+    pub rename_buf: String,
+    rename_focus_pending: bool,
+    pub alias_note: Option<String>,
 }
 
 fn same_lattice(a: &CatalogueItemUi, b: &CatalogueItemUi) -> bool {
@@ -93,6 +97,10 @@ impl GalleryTabState {
             active_item: item.clone(),
             cell: t.cell,
             revision: 0,
+            renaming: false,
+            rename_buf: String::new(),
+            rename_focus_pending: false,
+            alias_note: None,
         };
         st.activate_item(item, backend, canvas, true);
         st.revision = 0;
@@ -189,7 +197,59 @@ impl GalleryTabState {
         self.base_item = item;
         self.pending_drag = None;
         self.last_move_secs = 0.0;
+        self.renaming = false;
+        self.rename_focus_pending = false;
+        self.alias_note = None;
         self.retune(canvas, reset_view);
+    }
+
+    pub fn begin_rename(&mut self) {
+        self.renaming = true;
+        self.rename_buf = self.active_item.label.clone();
+        self.rename_focus_pending = true;
+    }
+
+    pub fn cancel_rename(&mut self) {
+        self.renaming = false;
+        self.rename_focus_pending = false;
+    }
+
+    pub fn commit_rename(&mut self, backend: &mut AppBackend, canvas: &mut Canvas2D) {
+        let name = self.rename_buf.clone();
+        self.renaming = false;
+        self.rename_focus_pending = false;
+        self.rename_active_lattice(&name, backend, canvas);
+    }
+
+    pub fn rename_active_lattice(&mut self, new_name: &str, backend: &mut AppBackend, canvas: &mut Canvas2D) {
+        self.alias_note = backend
+            .set_lattice_alias(&self.base_item, new_name)
+            .err()
+            .map(|e| format!("Saved for session only ({e})"));
+        self.refresh_aliases(backend, canvas);
+    }
+
+    pub fn reset_active_lattice_name(&mut self, backend: &mut AppBackend, canvas: &mut Canvas2D) {
+        self.renaming = false;
+        self.rename_focus_pending = false;
+        self.alias_note = backend
+            .reset_lattice_alias(&self.base_item)
+            .err()
+            .map(|e| format!("Reset for session only ({e})"));
+        self.refresh_aliases(backend, canvas);
+    }
+
+    fn refresh_aliases(&mut self, backend: &AppBackend, canvas: &mut Canvas2D) {
+        for it in &mut self.catalogue {
+            it.label = backend.resolve_alias(it);
+        }
+        let next_lbl = backend.resolve_alias(&self.base_item);
+        if self.active_item.label != next_lbl || self.base_item.label != next_lbl {
+            self.base_item.label = next_lbl.clone();
+            self.active_item.label = next_lbl;
+            self.revision += 1;
+            self.sync_scene(canvas, false);
+        }
     }
 
     /// Move parameter `name` as the slider dragged to `raw` does (step grid, limits, snap onto a special value
@@ -243,8 +303,10 @@ impl GalleryTabState {
     }
 
     fn draw_cell(&self, cell: Cell2D, canvas: &mut Canvas2D, reset_view: bool) {
-        canvas.set_scene(
+        let title = format!("{} ({})", self.active_item.display_with_orig(), self.active_item.group);
+        canvas.set_scene_with_title(
             Scene2D::PeriodicCell { cell, repeat: self.repeat, show_unit_cell: self.show_unit_cell },
+            Some(title),
             reset_view,
         );
     }
@@ -255,10 +317,10 @@ impl GalleryTabState {
         self.draw_cell(cell, canvas, reset_view);
     }
 
-    /// View only: patch size (1..=6 cells each way).
+    /// View only: patch size (1..=6 cells each way), preserving current pan/zoom.
     pub fn set_repeat(&mut self, repeat: i32, canvas: &mut Canvas2D) {
         self.repeat = repeat.clamp(1, 6);
-        self.sync_scene(canvas, true);
+        self.sync_scene(canvas, false);
     }
 
     /// View only: draw the unit cell vectors.

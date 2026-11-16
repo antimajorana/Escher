@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod aliases;
 mod app;
 mod backend;
 mod canvas2d;
@@ -10,6 +11,7 @@ mod combine_ui;
 mod combine_worker;
 mod core_panel;
 mod defects_tab;
+mod defects_ui;
 mod export;
 mod gallery_tab;
 mod live_combine;
@@ -20,10 +22,13 @@ mod scene2d;
 mod scene_crystal;
 mod surfaces_tab;
 mod view3d;
+#[cfg(test)]
+mod features_gate_tests;
 
 use std::io::Cursor;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use app::PapertillingApp;
 
@@ -67,6 +72,9 @@ fn main() -> ExitCode {
         ..Default::default()
     };
 
+    let smoke_outcome = Arc::new(AtomicU8::new(0));
+    let smoke_for_app = Arc::clone(&smoke_outcome);
+
     let result = eframe::run_native(
         "papertilling",
         options,
@@ -78,16 +86,19 @@ fn main() -> ExitCode {
             } else {
                 (String::from("none"), String::from("none"))
             };
-            Ok(Box::new(PapertillingApp::new(
-                smoke_test,
-                adapter_name,
-                backend_name,
-            )))
+            Ok(Box::new(
+                PapertillingApp::new(smoke_test, adapter_name, backend_name)
+                    .with_smoke_outcome(smoke_for_app),
+            ))
         }),
     );
 
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) if !smoke_test || smoke_outcome.load(Ordering::Acquire) == 1 => ExitCode::SUCCESS,
+        Ok(()) => {
+            eprintln!("papertilling-app error: smoke test failed before finishing all stages");
+            ExitCode::FAILURE
+        }
         Err(err) => {
             eprintln!("papertilling-app error: {err}");
             ExitCode::FAILURE

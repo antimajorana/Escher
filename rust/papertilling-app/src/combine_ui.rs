@@ -8,6 +8,8 @@ use crate::canvas2d::Canvas2D;
 use crate::combine_tab::{CombineTabState, MANUAL_R_MAX, MANUAL_R_MIN, ToolMode};
 use crate::core_panel::show_core_panel;
 use crate::live_combine::{CombineDrawMode, spec_short_label, spec_world_pos};
+use crate::mesh3d::{DefectViewMode, show_sheet3d_controls};
+use crate::view3d::View3dState;
 
 impl CombineTabState {
     pub fn show_side_panel(&mut self, ui: &mut egui::Ui, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
@@ -17,10 +19,21 @@ impl CombineTabState {
             ui.label("Preparing lattice…");
             return;
         }
+        if let Some(err) = &self.init_error {
+            ui.colored_label(egui::Color32::DARK_RED, err);
+            if ui.button("Retry loading lattice").clicked() {
+                self.reload_for_item(gallery_item, backend, canvas, true);
+            }
+            ui.separator();
+            if ui.button("Import .json...").clicked() {
+                self.import_json_dialog(backend, canvas);
+            }
+            return;
+        }
         let (mut dirty, mut reset_view, mut trigger_compare) = (false, false, false);
         ui.horizontal_wrapped(|ui| {
             let item = self.effective_item(gallery_item);
-            ui.strong(format!("Lattice: {} ({})", item.label, item.group));
+            ui.strong(format!("Lattice: {} ({})", item.display_with_orig(), item.group));
             if self.override_item.is_some() && ui.small_button("Use Gallery").clicked() {
                 self.reload_for_item(gallery_item, backend, canvas, true);
             }
@@ -259,7 +272,14 @@ impl CombineTabState {
         }
     }
 
-    pub fn show_central(&mut self, ui: &mut egui::Ui, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
+    pub fn show_central(
+        &mut self,
+        ui: &mut egui::Ui,
+        gallery_item: &CatalogueItemUi,
+        backend: &AppBackend,
+        canvas: &mut Canvas2D,
+        view3d: &mut View3dState,
+    ) {
         let panel_h = if self.core_panel.collapsed { 28.0 } else { 246.0 };
         StripBuilder::new(ui)
             .clip(true)
@@ -267,36 +287,61 @@ impl CombineTabState {
             .size(Size::exact(panel_h))
             .vertical(|mut strip| {
                 strip.cell(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.strong("2D Live Combined Crystal [drag pin: move/snap | drag empty: pan | scroll: zoom | dbl-click: fit]");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.strong("View:");
+                        for vm in DefectViewMode::ALL {
+                            if ui.selectable_label(self.view_mode == vm, vm.label()).clicked() {
+                                self.view_mode = vm;
+                                self.view3d_dirty = true;
+                            }
+                        }
                         if self.is_building() {
                             ui.spinner();
                         }
                     });
-                    ui.add_space(2.0);
-                    let click_to_place = self.tool_mode != ToolMode::PanAndDrag;
-                    let preview_world = match (self.tool_mode, self.last_hover_world) {
-                        (ToolMode::PlaceDisclination, Some(hw)) if !self.info.centres.is_empty() => {
-                            let (cid, ang) = self.active_centre_and_angle();
-                            Some(backend.snap_disclination(self.effective_item(gallery_item), &self.info, ang, cid, hw).0)
+                    if self.view_mode.uses_3d() {
+                        let (kc, vc) = show_sheet3d_controls(ui, &mut self.sheet_opts, "comb_top_col");
+                        if vc {
+                            self.view3d_dirty = true;
                         }
-                        (ToolMode::PlaceDislocation, Some(hw)) => Some(hw),
-                        _ => None,
-                    };
-                    let markers = self.build_markers();
-                    let inter = canvas.show_interactive(ui, &markers, click_to_place, preview_world);
-                    self.last_hover_world = inter.hovered_world;
-                    if let Some((pin_idx, world)) = inter.dragged_marker {
-                        self.move_pin_to(pin_idx, world, gallery_item, backend, canvas);
-                    }
-                    let released_elsewhere = self.dragging && !ui.input(|i| i.pointer.any_down());
-                    if inter.drag_released || released_elsewhere {
-                        self.finish_drag(gallery_item);
-                    }
-                    if let Some(world) = inter.clicked_world {
-                        self.place_at_world(world, gallery_item, backend, canvas);
+                        if kc {
+                            self.request_sheet3d_only(gallery_item);
+                        }
                     }
                     self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
+                    if self.view3d_dirty && self.view_mode.uses_3d() {
+                        self.sync_view3d(gallery_item, view3d);
+                    }
+                    ui.add_space(2.0);
+
+                    match self.view_mode {
+                        DefectViewMode::Planar2D => {
+                            self.show_2d_pin_editor(ui, gallery_item, backend, canvas);
+                        }
+                        DefectViewMode::Sheet3D => {
+                            ui.strong("3D Live Elastic Sheet (orbit, scroll/pinch zoom; Clear All = flat z=0 plane)");
+                            ui.add_space(2.0);
+                            view3d.show(ui);
+                        }
+                        DefectViewMode::Split2D3D => {
+                            StripBuilder::new(ui)
+                                .clip(true)
+                                .sizes(Size::remainder().at_least(180.0), 2)
+                                .horizontal(|mut hstrip| {
+                                    hstrip.cell(|ui| {
+                                        self.show_2d_pin_editor(ui, gallery_item, backend, canvas);
+                                    });
+                                    hstrip.cell(|ui| {
+                                        if self.view3d_dirty {
+                                            self.sync_view3d(gallery_item, view3d);
+                                        }
+                                        ui.strong("Live 3D Elastic Sheet (buckling & screening)");
+                                        ui.add_space(2.0);
+                                        view3d.show(ui);
+                                    });
+                                });
+                        }
+                    }
                 });
                 strip.cell(|ui| {
                     ui.separator();
@@ -306,5 +351,42 @@ impl CombineTabState {
                     show_core_panel(&mut self.core_panel, ui, self.compare_result.as_ref());
                 });
             });
+    }
+
+    fn show_2d_pin_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        gallery_item: &CatalogueItemUi,
+        backend: &AppBackend,
+        canvas: &mut Canvas2D,
+    ) {
+        ui.strong("2D Pin Editor [drag pin: move/snap | drag empty: pan | scroll/pinch: zoom]");
+        ui.add_space(2.0);
+        let click_to_place = self.tool_mode != ToolMode::PanAndDrag && !self.is_initializing() && self.init_error.is_none();
+        let preview_world = match (self.tool_mode, self.last_hover_world) {
+            (ToolMode::PlaceDisclination, Some(hw)) if !self.info.centres.is_empty() => {
+                let (cid, ang) = self.active_centre_and_angle();
+                Some(backend.snap_disclination(self.effective_item(gallery_item), &self.info, ang, cid, hw).0)
+            }
+            (ToolMode::PlaceDislocation, Some(hw)) => Some(hw),
+            _ => None,
+        };
+        let markers = self.build_markers();
+        let inter = canvas.show_interactive(ui, &markers, click_to_place, preview_world);
+        self.last_hover_world = inter.hovered_world;
+        if let Some((pin_idx, world)) = inter.dragged_marker {
+            self.move_pin_to(pin_idx, world, gallery_item, backend, canvas);
+        }
+        let released_elsewhere = self.dragging && !ui.input(|i| i.pointer.any_down());
+        if inter.drag_released || released_elsewhere {
+            self.finish_drag(gallery_item);
+        }
+        if let Some(world) = inter.clicked_world {
+            self.place_at_world(world, gallery_item, backend, canvas);
+        }
+        self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
+        if self.view3d_dirty && self.view_mode.uses_3d() {
+            // Will be synced on next frame or immediately if caller has view3d.
+        }
     }
 }

@@ -2,21 +2,23 @@ use std::sync::Arc;
 #[cfg(test)]
 use std::time::Duration;
 
-use papertilling_core::defect::combine_types::{
-    ConfigOptionsJson, ConfigSummaryJson, EquivalentSingleReport, NotebookConfigJson,
-};
+use papertilling_core::defect::combine_types::EquivalentSingleReport;
 use papertilling_core::defect::surgery::DefectSpec;
 
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::{Canvas2D, CanvasMarker, MarkerKind, Scene2D};
 use crate::combine_worker::{
-    BuildJob, CompareJob, CompareOutput, LatestWorker, spawn_build_worker, spawn_compare_worker, spawn_lattice_worker,
+    BuildJob, BuildWorkerOutput, CombineSheet3dBundle, CompareJob, CompareOutput, LatestWorker,
+    build_sheet_bundle_sync, empty_crystal, spawn_build_worker, spawn_compare_worker,
+    spawn_lattice_worker,
 };
 use crate::core_panel::CorePanelState;
 use crate::live_combine::{
     CombineBuildOptions, CombineBuildOutput, CombineDrawMode, CombineLatticeInfo, build_combined_crystal,
     burgers_from_mn, preset_neighbour_pair, preset_shortest_dislocation, spec_short_label, spec_world_pos,
 };
+use crate::mesh3d::{DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d, sheet3d_caption};
+use crate::view3d::View3dState;
 
 /// Manual patch radius range (slider and `.json` import): covers Python's default radii.
 pub(crate) const MANUAL_R_MIN: f64 = 2.4;
@@ -43,7 +45,11 @@ pub struct CombineTabState {
     pub opts: CombineBuildOptions,
     pub auto_compare: bool,
     pub grid: usize,
+    pub view_mode: DefectViewMode,
+    pub sheet_opts: Sheet3dViewOpts,
     pub(crate) last_build: CombineBuildOutput,
+    pub(crate) last_sheet3d: CombineSheet3dBundle,
+    pub(crate) view3d_dirty: bool,
     pub compare_result: Option<Result<EquivalentSingleReport, String>>,
     /// `compare_result` belongs to an earlier configuration (a newer comparison is pending or due).
     pub(crate) compare_stale: bool,
@@ -57,8 +63,9 @@ pub struct CombineTabState {
     pub(crate) dragging: bool,
     pub(crate) last_hover_world: Option<[f64; 2]>,
     pub json_status: String,
+    pub(crate) init_error: Option<String>,
     pub core_panel: CorePanelState,
-    builder: LatestWorker<BuildJob, CombineBuildOutput>,
+    builder: LatestWorker<BuildJob, BuildWorkerOutput>,
     comparer: LatestWorker<CompareJob, CompareOutput>,
     initializer: LatestWorker<CatalogueItemUi, Arc<CombineLatticeInfo>>,
 }
@@ -74,7 +81,9 @@ impl CombineTabState {
             manual_radius: info.r_auto_base,
             core_radius: 2,
         };
+        let sheet_opts = Sheet3dViewOpts::default();
         let last_build = build_combined_crystal(gallery_item, &info, &[], &opts, false);
+        let last_sheet3d = build_sheet_bundle_sync(&info, &last_build.crystal, last_build.applied_radius, sheet_opts.kappa_b);
         let mut st = Self {
             tool_mode: ToolMode::PanAndDrag,
             override_item: None,
@@ -87,7 +96,11 @@ impl CombineTabState {
             opts,
             auto_compare: true,
             grid: 1,
+            view_mode: DefectViewMode::Split2D3D,
+            sheet_opts,
             last_build,
+            last_sheet3d,
+            view3d_dirty: true,
             compare_result: None,
             compare_stale: false,
             compare_ms: 0.0,
@@ -100,6 +113,7 @@ impl CombineTabState {
             dragging: false,
             last_hover_world: None,
             json_status: String::new(),
+            init_error: None,
             core_panel: CorePanelState::default(),
             builder: spawn_build_worker(),
             comparer: spawn_compare_worker(),
@@ -122,6 +136,10 @@ impl CombineTabState {
         self.initializer.is_busy() || self.builder.is_busy()
     }
 
+    fn lattice_unavailable(&self) -> bool {
+        self.initializer.is_busy() || self.init_error.is_some()
+    }
+
     pub(crate) fn is_initializing(&self) -> bool { self.initializer.is_busy() }
 
     pub(crate) fn is_comparing(&self) -> bool {
@@ -129,6 +147,7 @@ impl CombineTabState {
     }
 
     fn reset_lattice_defaults(&mut self, gallery_item: &CatalogueItemUi, info: CombineLatticeInfo) {
+        self.init_error = None;
         self.selected_angle_deg = info.allowed_angles.first().copied().unwrap_or(90);
         self.centre_filter_idx = 0;
         self.selected_disloc_idx = 0;
@@ -137,31 +156,33 @@ impl CombineTabState {
         self.info = Arc::new(info);
         // Never show the previous lattice while the new build runs: a defect-free disk is instant.
         self.last_build = build_combined_crystal(gallery_item, &self.info, &[], &self.opts, false);
+        self.last_sheet3d = build_sheet_bundle_sync(&self.info, &self.last_build.crystal, self.last_build.applied_radius, self.sheet_opts.kappa_b);
         self.canvas_dirty = true;
+        self.view3d_dirty = true;
         self.compare_result = None;
         self.comparer.cancel();
     }
 
     pub fn reload_for_item(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, canvas: &mut Canvas2D, sync_canvas: bool) {
         self.override_item = None;
+        self.init_error = None;
         self.builder.cancel();
         self.comparer.cancel();
         self.compare_after_build = false;
+        self.compare_stale = false;
         self.compare_result = None;
+        self.preview_queued = false;
+        self.preview_dirty = false;
         self.specs.clear();
         self.dragging = false;
         self.initializer.submit(gallery_item.clone());
-        let c = &mut self.last_build.crystal;
-        c.pos.clear();
-        c.ref_pos.clear();
-        c.adj.clear();
-        c.edges.clear();
-        c.basis_idx.clear();
-        c.cone_sites.clear();
-        c.side.clear();
+        self.last_build.crystal = empty_crystal();
+        self.last_build.refused = None;
+        self.last_sheet3d = CombineSheet3dBundle::empty();
         self.last_build.charge_label = String::from("Preparing lattice…");
         self.last_build.note = String::from("Building the defect catalogue in the background");
         self.canvas_dirty = true;
+        self.view3d_dirty = true;
         self.reset_view_on_build = true;
         if sync_canvas {
             self.sync_to_canvas(gallery_item, canvas, true);
@@ -170,7 +191,7 @@ impl CombineTabState {
 
     /// Submit a build of the current defects; `then_compare`: compare once it lands (final builds only).
     pub(crate) fn request_build(&mut self, gallery_item: &CatalogueItemUi, preview: bool, then_compare: bool, reset_view: bool) {
-        if self.initializer.is_busy() {
+        if self.lattice_unavailable() {
             return;
         }
         // Let an in-flight preview finish before submitting the next one. Invalidating it on every
@@ -180,8 +201,17 @@ impl CombineTabState {
             return;
         }
         let item = self.effective_item(gallery_item).clone();
-        let job = BuildJob { item, info: Arc::clone(&self.info), specs: self.specs.clone(), opts: self.opts.clone(), preview };
+        let job = BuildJob {
+            item,
+            info: Arc::clone(&self.info),
+            specs: self.specs.clone(),
+            opts: self.opts.clone(),
+            preview,
+            kappa_b: self.sheet_opts.kappa_b,
+            reuse_2d: None,
+        };
         self.builder.submit(job);
+        self.view3d_dirty = true;
         self.reset_view_on_build |= reset_view;
         self.preview_queued = preview;
         self.preview_dirty = false;
@@ -218,7 +248,7 @@ impl CombineTabState {
 
     /// Compare now if the current build is final and up to date, else right after it lands.
     pub fn run_compare(&mut self, gallery_item: &CatalogueItemUi) {
-        if self.initializer.is_busy() { return; }
+        if self.lattice_unavailable() { return; }
         if self.builder.is_busy() || self.last_build.preview {
             self.compare_after_build = true;
             if !self.builder.is_busy() {
@@ -289,50 +319,122 @@ impl CombineTabState {
         }
     }
 
-    fn take_build(&mut self, res: Result<CombineBuildOutput, String>) {
+    pub fn request_sheet3d_only(&mut self, gallery_item: &CatalogueItemUi) {
+        if self.lattice_unavailable() {
+            return;
+        }
+        // A stiffness edit must not supersede a newer geometry job with the last completed crystal.
+        if self.builder.is_busy() || self.last_build.preview {
+            let compare = self.compare_after_build || self.auto_compare;
+            self.request_build(gallery_item, self.dragging, compare, false);
+            return;
+        }
+        let reuse = (!self.last_build.crystal.pos.is_empty()).then(|| self.last_build.clone());
+        let job = BuildJob {
+            item: self.effective_item(gallery_item).clone(),
+            info: Arc::clone(&self.info),
+            specs: self.specs.clone(),
+            opts: self.opts.clone(),
+            preview: false,
+            kappa_b: self.sheet_opts.kappa_b,
+            reuse_2d: reuse,
+        };
+        self.builder.submit(job);
+        self.view3d_dirty = true;
+    }
+
+    pub fn sync_view3d(&mut self, gallery_item: &CatalogueItemUi, view3d: &mut View3dState) {
+        if self.is_initializing() {
+            view3d.set_mesh(GpuMeshData::default(), String::from("Preparing lattice…"));
+            self.view3d_dirty = false;
+            return;
+        }
+        if let Some(err) = &self.init_error {
+            view3d.set_mesh(GpuMeshData::default(), format!("3D unavailable: {err}"));
+            self.view3d_dirty = false;
+            return;
+        }
+        let item = self.effective_item(gallery_item);
+        let title = format!("{} ({}) — {} defect(s) | {}", item.display_with_orig(), item.group, self.specs.len(), self.last_build.charge_label);
+        let (c, s) = if self.sheet_opts.show_flat_baseline {
+            (&self.last_sheet3d.flat_crystal, &self.last_sheet3d.flat_sheet)
+        } else {
+            (&self.last_build.crystal, &self.last_sheet3d.sheet)
+        };
+        let gpu = mesh_from_sheet3d(c, s, &self.sheet_opts);
+        let mut cap = sheet3d_caption(&title, s, &self.sheet_opts);
+        if self.is_building() { cap.push_str(" | previous result — stale"); }
+        view3d.set_mesh(gpu, cap);
+        self.view3d_dirty = false;
+    }
+
+    fn take_build(&mut self, res: Result<BuildWorkerOutput, String>) {
         match res {
-            Ok(out) => self.last_build = out,
+            Ok((out, sheet3d)) => {
+                self.last_build = out;
+                self.last_sheet3d = sheet3d;
+            }
             Err(err) => {
                 self.last_build.note = err.clone();
                 self.last_build.charge_label = String::from("Build failed");
-                self.last_build.charge_detail = err;
+                self.last_build.charge_detail = err.clone();
+                self.last_build.refused = Some(err.clone());
                 self.compare_after_build = false;
+                self.comparer.cancel();
+                self.compare_result = Some(Err(format!("not compared: build failed ({err})")));
+                self.compare_stale = false;
             }
         }
         self.canvas_dirty = true;
+        self.view3d_dirty = true;
     }
 
-    fn take_init(&mut self, result: Result<Arc<CombineLatticeInfo>, String>, gallery_item: &CatalogueItemUi) {
+    #[cfg(test)]
+    pub(crate) fn fail_init_for_test(&mut self, err: &str, gallery_item: &CatalogueItemUi) {
+        self.initializer.cancel();
+        self.take_init(Err(err.to_owned()), gallery_item);
+    }
+
+    pub(crate) fn take_init(&mut self, result: Result<Arc<CombineLatticeInfo>, String>, gallery_item: &CatalogueItemUi) {
         match result {
             Ok(info) => {
                 self.reset_lattice_defaults(gallery_item, (*info).clone());
                 self.specs = preset_neighbour_pair(&self.info);
                 self.request_build(gallery_item, false, self.auto_compare, true);
             }
-            Err(err) => self.last_build.note = err,
+            Err(err) => {
+                self.init_error = Some(err.clone());
+                self.last_build.charge_label = String::from("Lattice load failed");
+                self.last_build.charge_detail = err.clone();
+                self.last_build.refused = Some(err.clone());
+                self.last_build.note = err;
+                self.canvas_dirty = true;
+                self.view3d_dirty = true;
+            }
         }
     }
 
     pub fn sync_to_canvas(&self, gallery_item: &CatalogueItemUi, canvas: &mut Canvas2D, reset_view: bool) {
         let item = self.effective_item(gallery_item);
-        let title = format!("{} ({}) — {} defect(s) | {}", item.label, item.group, self.specs.len(), self.last_build.charge_label);
+        let title = format!("{} ({}) — {} defect(s) | {}", item.display_with_orig(), item.group, self.specs.len(), self.last_build.charge_label);
         canvas.set_scene(Scene2D::CrystalPatch { crystal: self.last_build.crystal.clone(), title, note: self.last_build.note.clone() }, reset_view);
         canvas.set_export_markers(&self.build_markers());
     }
 
     pub fn apply_preset_pair(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
-        if self.initializer.is_busy() { return; }
+        if self.lattice_unavailable() { return; }
         self.specs = preset_neighbour_pair(&self.info);
         self.request_build(gallery_item, false, self.auto_compare, true);
     }
 
     pub fn apply_preset_dislocation(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
-        if self.initializer.is_busy() { return; }
+        if self.lattice_unavailable() { return; }
         self.specs = preset_shortest_dislocation(&self.info);
         self.request_build(gallery_item, false, self.auto_compare, true);
     }
 
     pub fn clear_defects(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
+        if self.lattice_unavailable() { return; }
         self.specs.clear();
         self.request_build(gallery_item, false, false, true);
     }
@@ -352,7 +454,7 @@ impl CombineTabState {
     }
 
     pub fn place_at_world(&mut self, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, _canvas: &mut Canvas2D) {
-        if self.initializer.is_busy() { return; }
+        if self.lattice_unavailable() { return; }
         let item = self.effective_item(gallery_item);
         match self.tool_mode {
             ToolMode::PanAndDrag => return,
@@ -377,7 +479,7 @@ impl CombineTabState {
 
     /// Move pin `idx` during a drag: cheap preview build; `finish_drag` does the full one.
     pub fn move_pin_to(&mut self, idx: usize, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, _canvas: &mut Canvas2D) -> bool {
-        if self.initializer.is_busy() { return false; }
+        if self.lattice_unavailable() { return false; }
         let item = self.effective_item(gallery_item);
         let Some(old_pos) = self.specs.get(idx).map(|s| spec_world_pos(&self.info, idx, s)) else {
             return false;
@@ -416,90 +518,6 @@ impl CombineTabState {
         self.compare_result.as_ref().filter(|_| fresh).and_then(|r| r.as_ref().ok())
     }
 
-    pub fn to_notebook_json(&self, gallery_item: &CatalogueItemUi) -> NotebookConfigJson {
-        let item = self.effective_item(gallery_item);
-        let summary = self.current_report().map(|rep| ConfigSummaryJson {
-            charge: rep.charge.label.clone(),
-            kind: rep.kind.clone(),
-            equivalent: rep.equivalent,
-            matches: rep.matches.clone(),
-            verdict: rep.verdict.clone(),
-        });
-        NotebookConfigJson {
-            format: String::from("papertilling.config.v1"),
-            lattice_label: item.label.clone(),
-            group: item.group.clone(),
-            recipe: item.recipe.clone(),
-            frame: item.frame,
-            defects: self.specs.clone(),
-            options: ConfigOptionsJson {
-                r_patch: (!self.opts.auto_radius).then_some(self.opts.manual_radius),
-                picture: if self.opts.draw_mode == CombineDrawMode::Raw { "raw" } else { "relaxed" }.into(),
-                grid: self.grid,
-                radius: self.opts.core_radius,
-            },
-            summary,
-        }
-    }
-
-    pub fn load_notebook_json(&mut self, cfg: &NotebookConfigJson, backend: &AppBackend, canvas: &mut Canvas2D) -> Result<String, String> {
-        if cfg.format != papertilling_core::defect::combine_types::CONFIG_FORMAT {
-            return Err(format!("unsupported configuration format {:?}", cfg.format));
-        }
-        let imported = backend.item_from_notebook_json(cfg)?;
-        self.initializer.cancel();
-        self.reset_lattice_defaults(&imported, backend.combine_lattice_info(&imported));
-        let o = &cfg.options;
-        self.opts.auto_radius = o.r_patch.is_none();
-        self.opts.manual_radius = o.r_patch.unwrap_or(self.info.r_auto_base).clamp(MANUAL_R_MIN, MANUAL_R_MAX);
-        self.opts.draw_mode = if o.picture == "raw" { CombineDrawMode::Raw } else { CombineDrawMode::FastRelaxed };
-        self.grid = o.grid.clamp(1, 3);
-        self.opts.core_radius = o.radius.clamp(1, 4);
-        self.specs = cfg.defects.clone();
-        let mut clamped = Vec::new();
-        if o.r_patch.is_some_and(|r| (r - self.opts.manual_radius).abs() > 1e-9) {
-            clamped.push(format!("r_patch {:?} -> {}", o.r_patch.unwrap_or_default(), self.opts.manual_radius));
-        }
-        if o.grid != self.grid {
-            clamped.push(format!("grid {} -> {}", o.grid, self.grid));
-        }
-        if o.radius != self.opts.core_radius {
-            clamped.push(format!("radius {} -> {}", o.radius, self.opts.core_radius));
-        }
-        let mut msg = format!("Imported {} ({}) with {} defect(s)", imported.label, imported.group, self.specs.len());
-        if !clamped.is_empty() {
-            msg.push_str(&format!(" (outside the app's range: {})", clamped.join(", ")));
-        }
-        self.override_item = Some(imported.clone());
-        self.request_build(&imported, false, self.auto_compare || cfg.summary.is_some(), true);
-        self.sync_to_canvas(&imported, canvas, true);
-        self.json_status = msg.clone();
-        Ok(msg)
-    }
-
-    pub fn export_json_dialog(&mut self, gallery_item: &CatalogueItemUi) {
-        if self.specs.is_empty() || self.initializer.is_busy() {
-            self.json_status = String::from("Place at least one defect before exporting a Notebook 3 configuration.");
-            return;
-        }
-        let dlg = rfd::FileDialog::new().set_title("Export Notebook 3 defect configuration (.json)").set_file_name("defect_config.json").add_filter("JSON configuration", &["json"]);
-        if let Some(path) = dlg.save_file() {
-            let cfg = self.to_notebook_json(gallery_item);
-            let partial = if cfg.summary.is_none() && !self.specs.is_empty() { " (no summary: comparison not finished)" } else { "" };
-            let res = cfg.to_json_pretty().and_then(|s| std::fs::write(&path, s).map_err(|e| e.to_string()));
-            self.json_status = res.map_or_else(|e| format!("JSON export error: {e}"), |()| format!("Exported {}{partial}", path.file_name().and_then(|s| s.to_str()).unwrap_or("config.json")));
-        }
-    }
-
-    pub fn import_json_dialog(&mut self, backend: &AppBackend, canvas: &mut Canvas2D) {
-        let dlg = rfd::FileDialog::new().set_title("Import Notebook 3 defect configuration (.json)").add_filter("JSON configuration", &["json"]);
-        if let Some(path) = dlg.pick_file()
-            && let Err(err) = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|raw| NotebookConfigJson::from_json_str(&raw)).and_then(|cfg| self.load_notebook_json(&cfg, backend, canvas))
-        {
-            self.json_status = format!("JSON import error: {err}");
-        }
-    }
-
     pub(crate) fn build_markers(&self) -> Vec<CanvasMarker> {
         self.specs.iter().enumerate().map(|(idx, s)| CanvasMarker {
             index: idx,
@@ -513,6 +531,9 @@ impl CombineTabState {
         }).collect()
     }
 }
+
+#[path = "combine_json.rs"]
+mod json;
 
 #[cfg(test)]
 #[path = "combine_tab_tests.rs"]

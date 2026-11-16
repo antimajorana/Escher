@@ -1,15 +1,19 @@
 use core::num::NonZeroU64;
 use std::borrow::Cow;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor};
 use eframe::wgpu::{self, util::DeviceExt as _};
 use egui::PaintCallbackInfo;
 
+use crate::canvas2d::{ZOOM_STEP_FACTOR, ZoomKeyAction, input_zoom_factor, take_keyboard_zoom_action};
 use crate::mesh3d::{GpuMeshData, Vertex3d, back_to_front_indices, build_mvp, orbit_rotation};
 
 pub const DEPTH_BITS: u8 = 24;
+pub const DIST_MIN: f32 = 0.45;
+pub const DIST_MAX: f32 = 24.0;
+pub const DIST_DEFAULT: f32 = 3.1;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -23,6 +27,8 @@ pub struct GpuFrameCounters {
     prepared: AtomicU32,
     painted: AtomicU32,
     uploaded: AtomicU32,
+    painted_generation: AtomicU64,
+    painted_primitives: AtomicU32,
 }
 
 impl GpuFrameCounters {
@@ -36,12 +42,30 @@ impl GpuFrameCounters {
     pub fn uploads(&self) -> u32 {
         self.uploaded.load(Ordering::Relaxed)
     }
+
+    pub fn painted_generation(&self) -> u64 {
+        self.painted_generation.load(Ordering::Relaxed)
+    }
+
+    pub fn painted_primitives(&self) -> u32 {
+        self.painted_primitives.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub fn record_mock_paint(&self, generation: u64, primitives: u32) {
+        self.prepared.fetch_add(1, Ordering::Relaxed);
+        self.painted_generation.store(generation, Ordering::Relaxed);
+        self.painted_primitives.store(primitives, Ordering::Relaxed);
+        self.painted.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 pub struct View3dState {
     pub yaw: f32,
     pub pitch: f32,
     pub distance: f32,
+    /// Translation in camera x/y coordinates; rendering only, never part of the mesh or its identity.
+    camera_offset: egui::Vec2,
     pub counters: Arc<GpuFrameCounters>,
     mesh_generation: u64,
     mesh_data: Arc<GpuMeshData>,
@@ -54,6 +78,7 @@ impl Default for View3dState {
             yaw: 0.55,
             pitch: 0.35,
             distance: 3.1,
+            camera_offset: egui::Vec2::ZERO,
             counters: Arc::new(GpuFrameCounters::default()),
             mesh_generation: 1,
             mesh_data: Arc::new(GpuMeshData::default()),
@@ -64,7 +89,40 @@ impl Default for View3dState {
 
 impl View3dState {
     pub fn reset(&mut self) {
-        (self.yaw, self.pitch, self.distance) = (0.55, 0.35, 3.1);
+        (self.yaw, self.pitch, self.distance) = (0.55, 0.35, DIST_DEFAULT);
+        self.camera_offset = egui::Vec2::ZERO;
+    }
+
+    pub fn zoom_by(&mut self, factor: f32) {
+        if factor.is_finite() && factor > 0.0 {
+            self.distance = (self.distance / factor).clamp(DIST_MIN, DIST_MAX);
+        }
+    }
+
+    /// Dolly along the cursor ray, preserving every visible point on that ray (at any depth).
+    /// No picking, geometry changes, or camera FOV convention changes are needed.
+    pub fn zoom_at(&mut self, rect: egui::Rect, factor: f32, anchor: Option<egui::Pos2>) {
+        let old_distance = self.distance;
+        self.zoom_by(factor);
+        if let Some(anchor) = anchor.filter(|p| rect.contains(*p))
+            && rect.width() > 0.0 && rect.height() > 0.0
+        {
+            let aspect = (rect.width() / rect.height()).max(0.1);
+            let projection = build_mvp(aspect, old_distance, &orbit_rotation(0.0, 0.0));
+            let ndc = egui::vec2(
+                2.0 * (anchor.x - rect.center().x) / rect.width(),
+                2.0 * (rect.center().y - anchor.y) / rect.height(),
+            );
+            let delta = self.distance - old_distance; // Use the actual clamped dolly distance.
+            self.camera_offset += egui::vec2(ndc.x / projection[0][0], ndc.y / projection[1][1]) * delta;
+        }
+    }
+
+    fn view_mvp(&self, aspect: f32, rotation: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+        let mut translated = *rotation;
+        translated[3][0] = self.camera_offset.x;
+        translated[3][1] = self.camera_offset.y;
+        build_mvp(aspect.max(0.1), self.distance, &translated)
     }
 
     pub fn set_mesh(&mut self, mesh: GpuMeshData, caption: impl Into<String>) {
@@ -77,12 +135,20 @@ impl View3dState {
         self.mesh_generation
     }
 
+    pub fn has_geometry(&self) -> bool {
+        !self.mesh_data.faces.is_empty() || !self.mesh_data.wires.is_empty()
+    }
+
+    pub fn is_current_mesh_painted(&self) -> bool {
+        self.counters.painted_generation() == self.mesh_generation
+            && self.counters.painted_primitives() > 0
+    }
+
     #[cfg(test)]
     pub fn mesh_data(&self) -> &GpuMeshData {
         &self.mesh_data
     }
 
-    #[cfg(test)]
     pub fn caption(&self) -> &str {
         &self.overlay_caption
     }
@@ -96,18 +162,36 @@ impl View3dState {
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size().max(egui::vec2(64.0, 64.0));
-        let (rect, response) = ui.allocate_exact_size(available, egui::Sense::drag());
-        if response.dragged() {
+        let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
+        let has_hud = rect.width() >= 190.0 && rect.height() >= 80.0;
+        let hud_rect = egui::Rect::from_min_max(
+            rect.right_bottom() - egui::vec2(164.0, 30.0),
+            rect.right_bottom() - egui::vec2(6.0, 6.0),
+        );
+        let ptr = ui.input(|i| i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()));
+        let press_orig = ui.input(|i| i.pointer.press_origin());
+        let over_hud = has_hud && ptr.is_some_and(|p| hud_rect.contains(p));
+        let drag_from_hud = has_hud && press_orig.is_some_and(|p| hud_rect.contains(p));
+
+        if !drag_from_hud && response.dragged() {
             let delta = response.drag_delta();
             self.orbit_by(delta.x * 0.01, delta.y * 0.01);
         }
-        if response.double_clicked() {
+        if !over_hud && !drag_from_hud && response.double_clicked() {
             self.reset();
         }
-        if response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll.abs() > 0.0 {
-                self.distance = (self.distance * (-scroll * 0.002).exp()).clamp(1.45, 9.0);
+        if ui.rect_contains_pointer(rect) {
+            let anchor = ptr.filter(|p| rect.contains(*p));
+            let factor = ui.input(input_zoom_factor);
+            if (factor - 1.0).abs() > 1e-5 {
+                self.zoom_at(rect, factor, anchor);
+            }
+            if let Some(act) = take_keyboard_zoom_action(ui, &response) {
+                match act {
+                    ZoomKeyAction::In => self.zoom_at(rect, ZOOM_STEP_FACTOR, anchor),
+                    ZoomKeyAction::Out => self.zoom_at(rect, 1.0 / ZOOM_STEP_FACTOR, anchor),
+                    ZoomKeyAction::Fit => self.reset(),
+                }
             }
         }
 
@@ -115,7 +199,7 @@ impl View3dState {
         painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(18, 22, 30));
         let aspect = (rect.width() / rect.height().max(1.0)).max(0.1);
         let rot = orbit_rotation(self.yaw, self.pitch);
-        let mvp = build_mvp(aspect, self.distance, &rot);
+        let mvp = self.view_mvp(aspect, &rot);
         painter.add(egui_wgpu::Callback::new_paint_callback(
             rect,
             View3dCallback {
@@ -138,7 +222,7 @@ impl View3dState {
         painter.text(
             rect.left_bottom() + egui::vec2(8.0, -6.0),
             egui::Align2::LEFT_BOTTOM,
-            "Drag: orbit | Scroll: zoom | Double-click: reset",
+            "Drag: orbit | Scroll/pinch/+/-: zoom | 0/dbl-click: fit",
             egui::FontId::proportional(11.0),
             egui::Color32::from_rgb(148, 160, 178),
         );
@@ -148,6 +232,31 @@ impl View3dState {
             egui::Stroke::new(1.0, egui::Color32::from_gray(64)),
             egui::StrokeKind::Inside,
         );
+        if has_hud {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(hud_rect), |ui| {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_rgba_unmultiplied(28, 34, 46, 224))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(86)))
+                    .corner_radius(4.0)
+                    .inner_margin(egui::Margin::symmetric(5, 3))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            if ui.small_button("−").on_hover_text("Zoom out (-)").clicked() {
+                                self.zoom_by(1.0 / ZOOM_STEP_FACTOR);
+                            }
+                            let pct = ((DIST_DEFAULT / self.distance.max(1e-3)) * 100.0).round() as i32;
+                            ui.colored_label(egui::Color32::from_rgb(214, 224, 238), egui::RichText::new(format!("{pct}%")).size(11.0));
+                            if ui.small_button("+").on_hover_text("Zoom in (+)").clicked() {
+                                self.zoom_by(ZOOM_STEP_FACTOR);
+                            }
+                            if ui.small_button("Fit").on_hover_text("Reset 3D view (0 / double-click)").clicked() {
+                                self.reset();
+                            }
+                        });
+                    });
+            });
+        }
     }
 }
 
@@ -400,6 +509,14 @@ impl CallbackTrait for View3dCallback {
             render_pass.set_vertex_buffer(0, res.wire_vb.slice(..));
             render_pass.draw(0..res.wire_count, 0..1);
         }
+        if res.uploaded_generation == self.mesh_generation {
+            self.counters
+                .painted_generation
+                .store(self.mesh_generation, Ordering::Relaxed);
+            self.counters
+                .painted_primitives
+                .store(res.face_count.saturating_add(res.wire_count), Ordering::Relaxed);
+        }
         self.counters.painted.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -439,3 +556,6 @@ mod tests {
         assert_eq!(v.caption(), "b");
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

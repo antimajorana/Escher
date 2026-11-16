@@ -27,7 +27,19 @@ pub fn export_scene_to_path(scene: &Scene2D, path: &Path) -> Result<String, Stri
 }
 
 /// As [`export_scene_to_path`], with the Combine tab's defect pins drawn as on screen.
+#[cfg(test)]
 pub fn export_scene_with_markers(scene: &Scene2D, markers: &[CanvasMarker], path: &Path) -> Result<String, String> {
+    export_scene_full(scene, markers, None, path)
+}
+
+/// Export `scene` with optional markers and an optional custom title override (used by Gallery and Surfaces
+/// so custom lattice names appear in exported SVG and PNG headers).
+pub fn export_scene_full(
+    scene: &Scene2D,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    path: &Path,
+) -> Result<String, String> {
     let ext = path.extension().map(|s| s.to_string_lossy().to_ascii_lowercase());
     let (target, is_svg): (PathBuf, bool) = match ext.as_deref() {
         Some("svg") => (path.to_path_buf(), true),
@@ -37,11 +49,11 @@ pub fn export_scene_with_markers(scene: &Scene2D, markers: &[CanvasMarker], path
     };
     let name = target.file_name().map_or_else(|| target.display().to_string(), |s| s.to_string_lossy().into_owned());
     if is_svg {
-        let svg = render_scene_svg_with_markers(scene, markers, SVG_SIZE, SVG_SIZE);
+        let svg = render_scene_svg_with_title(scene, markers, title_override, SVG_SIZE, SVG_SIZE);
         std::fs::write(&target, svg).map_err(|e| format!("{}: {e}", target.display()))?;
         Ok(format!("Exported SVG ({name})"))
     } else {
-        let png_bytes = encode_scene_png_with_markers(scene, markers, PNG_SIZE, PNG_SIZE)?;
+        let png_bytes = encode_scene_png_with_title(scene, markers, title_override, PNG_SIZE, PNG_SIZE)?;
         std::fs::write(&target, png_bytes).map_err(|e| format!("{}: {e}", target.display()))?;
         Ok(format!("Exported high-DPI PNG ({name})"))
     }
@@ -109,8 +121,22 @@ pub fn render_scene_svg(scene: &Scene2D, width: u32, height: u32) -> String {
     render_scene_svg_with_markers(scene, &[], width, height)
 }
 
+#[cfg(test)]
 pub fn render_scene_svg_with_markers(scene: &Scene2D, markers: &[CanvasMarker], width: u32, height: u32) -> String {
-    let prims = compile_scene(scene);
+    render_scene_svg_with_title(scene, markers, None, width, height)
+}
+
+pub fn render_scene_svg_with_title(
+    scene: &Scene2D,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    width: u32,
+    height: u32,
+) -> String {
+    let mut prims = compile_scene(scene);
+    if let Some(t) = title_override.filter(|t| !t.is_empty()) {
+        prims.title = t.to_string();
+    }
     let tf = Transform::new(&prims, width, height);
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">\n<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>\n",
@@ -234,9 +260,23 @@ pub fn encode_scene_png(scene: &Scene2D, width: u32, height: u32) -> Result<Vec<
 }
 
 /// PNG of the scene (`width` x `height`, RGBA 8-bit); `Err` for a size out of range (no panic, no huge buffer).
+#[cfg(test)]
 pub fn encode_scene_png_with_markers(scene: &Scene2D, markers: &[CanvasMarker], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    encode_scene_png_with_title(scene, markers, None, width, height)
+}
+
+pub fn encode_scene_png_with_title(
+    scene: &Scene2D,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
     let mut img = Raster::new(width, height, BACKGROUND)?;
-    let prims = compile_scene(scene);
+    let mut prims = compile_scene(scene);
+    if let Some(t) = title_override.filter(|t| !t.is_empty()) {
+        prims.title = t.to_string();
+    }
     let tf = Transform::new(&prims, width, height);
 
     for poly in &prims.polygons {

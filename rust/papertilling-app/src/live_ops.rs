@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use papertilling_core::defect::catalogue::DefectCatalogue;
 use papertilling_core::defect::charge::{frame_faces, total_charge};
 use papertilling_core::defect::core_graph::{LatticeCoreInfo, core_graph};
+use papertilling_core::defect::sheet3d::{Sheet3DOptions, Sheet3DResult, relax_sheet_3d};
 use papertilling_core::defect::surgery::{DefectSpec, build_point_defects};
 use papertilling_core::plane::draw::{ensure_embedded, relax_picture};
 use papertilling_core::plane::family::LatticeFamily;
@@ -491,6 +492,35 @@ fn build_and_finish_point_defect(
         note: notes.join("; "),
     };
     (crystal, readout)
+}
+
+/// Relax `crystal` into 3D together with a defect-free flat baseline disk of the same lattice and radius.
+pub fn build_defect_sheets_3d(
+    item: &CatalogueItemUi,
+    crystal: &BuiltCrystal,
+    radius: f64,
+    kappa_b: f64,
+) -> (Sheet3DResult, BuiltCrystal, Sheet3DResult) {
+    let opts = Sheet3DOptions { kappa_b, max_iters: 240, grad_tol: 1e-6 };
+    let Ok(ctx) = defect_context(item) else {
+        let empty = BuiltCrystal {
+            pos: Vec::new(),
+            ref_pos: Vec::new(),
+            basis_idx: Vec::new(),
+            side: Vec::new(),
+            cone_sites: Vec::new(),
+            edges: Vec::new(),
+            adj: Vec::new(),
+            wall_sigma: None,
+            is_non_orientable: false,
+        };
+        let empty_s = relax_sheet_3d(&empty, &Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: Vec::new(), bonds: Vec::new() }, &opts, None);
+        return (empty_s.clone(), empty, empty_s);
+    };
+    let sheet = relax_sheet_3d(crystal, &ctx.cell, &opts, None);
+    let flat_crystal = build_pristine_disk(&ctx.lat_info, radius);
+    let flat_sheet = relax_sheet_3d(&flat_crystal, &ctx.cell, &opts, None);
+    (sheet, flat_crystal, flat_sheet)
 }
 
 #[cfg(test)]

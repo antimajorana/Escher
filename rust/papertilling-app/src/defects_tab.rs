@@ -1,10 +1,13 @@
-use egui_extras::{Column, TableBuilder};
-
 use crate::backend::{
     AppBackend, CatalogueItemUi, DefectCatalogueUi, DefectReadoutUi, DefectSelectionUi,
 };
 use crate::canvas2d::{Canvas2D, Scene2D};
-use crate::combine_worker::LatestWorker;
+use crate::combine_worker::{LatestWorker, empty_crystal, empty_sheet3d};
+use crate::mesh3d::{
+    DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d, sheet3d_caption,
+};
+use crate::view3d::View3dState;
+use papertilling_core::defect::sheet3d::Sheet3DResult;
 use papertilling_core::types::{BuiltCrystal, Cell2D};
 
 struct BuildJob {
@@ -12,9 +15,18 @@ struct BuildJob {
     selection: DefectSelectionUi,
     radius: f64,
     relaxed: bool,
+    kappa_b: f64,
+    reuse_crystal: Option<(DefectCatalogueUi, BuiltCrystal, DefectReadoutUi)>,
 }
 
-type BuildOutput = (DefectCatalogueUi, BuiltCrystal, DefectReadoutUi);
+type BuildOutput = (
+    DefectCatalogueUi,
+    BuiltCrystal,
+    DefectReadoutUi,
+    Sheet3DResult,
+    BuiltCrystal,
+    Sheet3DResult,
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DefectSubTab {
@@ -37,20 +49,26 @@ impl DefectSubTab {
 
 pub struct DefectsTabState {
     pub sub_tab: DefectSubTab,
-    catalogue: DefectCatalogueUi,
-    selected_disloc: usize,
-    selected_disclin: usize,
-    selected_wall: usize,
+    pub(crate) catalogue: DefectCatalogueUi,
+    pub(crate) selected_disloc: usize,
+    pub(crate) selected_disclin: usize,
+    pub(crate) selected_wall: usize,
     pub radius: f64,
     pub relaxed: bool,
+    pub view_mode: DefectViewMode,
+    pub sheet_opts: Sheet3dViewOpts,
     pub readout: DefectReadoutUi,
-    /// The lattice changed while another tab was shown: catalogue and readout are rebuilt when this tab draws.
-    stale: bool,
-    initializing: bool,
+    pub(crate) stale: bool,
+    pub(crate) initializing: bool,
     worker: LatestWorker<BuildJob, BuildOutput>,
     last_scene: Option<Scene2D>,
+    last_crystal: BuiltCrystal,
+    pub(crate) last_sheet: Sheet3DResult,
+    flat_crystal: BuiltCrystal,
+    pub(crate) flat_sheet: Sheet3DResult,
+    pub(crate) view3d_dirty: bool,
     reset_on_result: bool,
-    error: Option<String>,
+    pub(crate) error: Option<String>,
 }
 
 impl DefectsTabState {
@@ -58,10 +76,15 @@ impl DefectsTabState {
         let catalogue = backend.defect_catalogue(item);
         let radius = 3.8;
         let relaxed = true;
+        let sheet_opts = Sheet3dViewOpts::default();
         let (crystal, readout) =
             backend.build_defect(item, &DefectSelectionUi::Dislocation(0), radius, relaxed);
+        let (last_sheet, flat_crystal, flat_sheet) =
+            crate::live_ops::build_defect_sheets_3d(item, &crystal, radius, sheet_opts.kappa_b);
         let last_scene = Some(Scene2D::CrystalPatch {
-            crystal, title: readout.title.clone(), note: readout.note.clone(),
+            crystal: crystal.clone(),
+            title: readout.title.clone(),
+            note: readout.note.clone(),
         });
         Self {
             sub_tab: DefectSubTab::Dislocations,
@@ -71,23 +94,45 @@ impl DefectsTabState {
             selected_wall: 0,
             radius,
             relaxed,
+            view_mode: DefectViewMode::Split2D3D,
+            sheet_opts,
             readout,
             stale: false,
             initializing: false,
             worker: LatestWorker::spawn("defects-build", (), |_: &mut (), job: BuildJob| {
-                let catalogue = crate::live_ops::catalogue_for_lattice(&job.item);
-                let (crystal, readout) = crate::live_ops::build_defect_patch(
-                    &job.item, &job.selection, job.radius, job.relaxed,
+                let (catalogue, crystal, readout) = match job.reuse_crystal {
+                    Some(prev) => prev,
+                    None => {
+                        let cat = crate::live_ops::catalogue_for_lattice(&job.item);
+                        let (c, r) = crate::live_ops::build_defect_patch(
+                            &job.item,
+                            &job.selection,
+                            job.radius,
+                            job.relaxed,
+                        );
+                        (cat, c, r)
+                    }
+                };
+                let (sheet, flat_c, flat_s) = crate::live_ops::build_defect_sheets_3d(
+                    &job.item,
+                    &crystal,
+                    job.radius,
+                    job.kappa_b,
                 );
-                (catalogue, crystal, readout)
+                (catalogue, crystal, readout, sheet, flat_c, flat_s)
             }),
             last_scene,
+            last_crystal: crystal,
+            last_sheet,
+            flat_crystal,
+            flat_sheet,
+            view3d_dirty: true,
             reset_on_result: false,
             error: None,
         }
     }
 
-    fn current_selection(&self) -> DefectSelectionUi {
+    pub(crate) fn current_selection(&self) -> DefectSelectionUi {
         match self.sub_tab {
             DefectSubTab::Dislocations => DefectSelectionUi::Dislocation(self.selected_disloc),
             DefectSubTab::Disclinations => DefectSelectionUi::Disclination(self.selected_disclin),
@@ -106,9 +151,17 @@ impl DefectsTabState {
         self.selected_disclin = 0;
         self.selected_wall = 0;
         self.worker.cancel();
+        self.catalogue = DefectCatalogueUi::default();
         self.last_scene = None;
+        self.last_crystal = empty_crystal();
+        self.last_sheet = empty_sheet3d();
+        self.flat_crystal = empty_crystal();
+        self.flat_sheet = empty_sheet3d();
+        self.readout = DefectReadoutUi::default();
+        self.error = None;
         self.initializing = true;
         self.stale = true;
+        self.view3d_dirty = true;
         if sync_canvas {
             self.rebuild_crystal(item, backend, canvas, true);
         }
@@ -122,15 +175,21 @@ impl DefectsTabState {
         reset_view: bool,
     ) {
         self.worker.submit(BuildJob {
-            item: item.clone(), selection: self.current_selection(),
-            radius: self.radius, relaxed: self.relaxed,
+            item: item.clone(),
+            selection: self.current_selection(),
+            radius: self.radius,
+            relaxed: self.relaxed,
+            kappa_b: self.sheet_opts.kappa_b,
+            reuse_crystal: None,
         });
         self.stale = false;
         self.error = None;
+        self.view3d_dirty = true;
         self.reset_on_result |= reset_view;
         let mut scene = self.last_scene.clone().unwrap_or_else(|| Scene2D::PeriodicCell {
             cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: Vec::new(), bonds: Vec::new() },
-            repeat: 1, show_unit_cell: false,
+            repeat: 1,
+            show_unit_cell: false,
         });
         if let Scene2D::CrystalPatch { note, .. } = &mut scene {
             *note = String::from("Previous result — stale while the new defect builds in the background.");
@@ -138,21 +197,98 @@ impl DefectsTabState {
         canvas.set_scene(scene, reset_view);
     }
 
-    pub(crate) fn is_busy(&self) -> bool { self.stale || self.worker.is_busy() }
+    pub fn rebuild_sheet3d_only(&mut self, item: &CatalogueItemUi) {
+        let reuse = (!self.is_busy() && !self.initializing && !self.last_crystal.pos.is_empty()).then(|| {
+            (self.catalogue.clone(), self.last_crystal.clone(), self.readout.clone())
+        });
+        self.worker.submit(BuildJob {
+            item: item.clone(),
+            selection: self.current_selection(),
+            radius: self.radius,
+            relaxed: self.relaxed,
+            kappa_b: self.sheet_opts.kappa_b,
+            reuse_crystal: reuse,
+        });
+        self.error = None;
+        self.view3d_dirty = true;
+    }
 
-    fn take_result(&mut self, result: Result<BuildOutput, String>, canvas: &mut Canvas2D) {
+    pub(crate) fn is_busy(&self) -> bool {
+        self.stale || self.worker.is_busy()
+    }
+
+    pub(crate) fn poll_worker(&mut self, ctx: &egui::Context, canvas: &mut Canvas2D) {
+        self.worker.set_repaint_ctx(ctx);
+        if let Some(result) = self.worker.poll() {
+            self.take_result(result, canvas);
+        }
+    }
+
+    pub fn sync_view3d(&mut self, view3d: &mut View3dState) {
+        if self.initializing {
+            view3d.set_mesh(GpuMeshData::default(), String::from("Preparing lattice…"));
+            self.view3d_dirty = false;
+            return;
+        }
+        if let Some(err) = &self.error
+            && self.last_crystal.pos.is_empty()
+        {
+            view3d.set_mesh(GpuMeshData::default(), format!("3D unavailable: {err}"));
+            self.view3d_dirty = false;
+            return;
+        }
+        let (c, s) = if self.sheet_opts.show_flat_baseline {
+            (&self.flat_crystal, &self.flat_sheet)
+        } else {
+            (&self.last_crystal, &self.last_sheet)
+        };
+        let gpu = mesh_from_sheet3d(c, s, &self.sheet_opts);
+        let mut cap = sheet3d_caption(&self.readout.title, s, &self.sheet_opts);
+        if self.is_busy() {
+            cap.push_str(" | previous result — stale");
+        } else if let Some(err) = &self.error {
+            cap.push_str(&format!(" | previous result — failed: {err}"));
+        }
+        view3d.set_mesh(gpu, cap);
+        self.view3d_dirty = false;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_build_for_test(&mut self, err: &str, canvas: &mut Canvas2D) {
+        self.worker.cancel();
+        self.stale = false;
+        self.take_result(Err(err.to_owned()), canvas);
+    }
+
+    pub(crate) fn take_result(&mut self, result: Result<BuildOutput, String>, canvas: &mut Canvas2D) {
         self.initializing = false;
         match result {
-            Ok((catalogue, crystal, readout)) => {
+            Ok((catalogue, crystal, readout, sheet, flat_c, flat_s)) => {
                 self.catalogue = catalogue;
                 let scene = Scene2D::CrystalPatch {
-                    crystal, title: readout.title.clone(), note: readout.note.clone(),
+                    crystal: crystal.clone(),
+                    title: readout.title.clone(),
+                    note: readout.note.clone(),
                 };
                 canvas.set_scene(scene.clone(), self.reset_on_result);
                 self.last_scene = Some(scene);
+                self.last_crystal = crystal;
+                self.last_sheet = sheet;
+                self.flat_crystal = flat_c;
+                self.flat_sheet = flat_s;
                 self.readout = readout;
+                self.view3d_dirty = true;
             }
-            Err(err) => self.error = Some(err),
+            Err(err) => {
+                self.error = Some(err.clone());
+                self.view3d_dirty = true;
+                if let Some(mut scene) = self.last_scene.clone() {
+                    if let Scene2D::CrystalPatch { note, .. } = &mut scene {
+                        *note = format!("Build failed (showing previous result): {err}");
+                    }
+                    canvas.set_scene(scene, false);
+                }
+            }
         }
         self.reset_on_result = false;
     }
@@ -163,294 +299,6 @@ impl DefectsTabState {
             self.take_result(result, canvas);
         }
         assert!(!self.is_busy(), "defect build did not complete");
-    }
-
-    pub fn show_side_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        active_item: &CatalogueItemUi,
-        backend: &AppBackend,
-        canvas: &mut Canvas2D,
-    ) {
-        self.worker.set_repaint_ctx(ui.ctx());
-        if self.stale {
-            self.rebuild_crystal(active_item, backend, canvas, true);
-        }
-        if let Some(result) = self.worker.poll() { self.take_result(result, canvas); }
-        let mut dirty = false;
-        let mut reset_view = false;
-
-        ui.strong(format!("Active lattice: {} ({})", active_item.label, active_item.group));
-        if self.initializing {
-            ui.spinner();
-            ui.label("Preparing the defect catalogue and picture in the background…");
-            return;
-        }
-        if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::DARK_RED, err);
-        }
-        ui.add_space(3.0);
-        ui.horizontal(|ui| {
-            for st in DefectSubTab::ALL {
-                if ui
-                    .selectable_label(self.sub_tab == st, st.label())
-                    .clicked()
-                {
-                    self.sub_tab = st;
-                    dirty = true;
-                    reset_view = true;
-                }
-            }
-        });
-        ui.separator();
-
-        match self.sub_tab {
-            DefectSubTab::Dislocations => {
-                ui.strong(format!(
-                    "Dislocation Classes ({} orbits)",
-                    self.catalogue.dislocations.len()
-                ));
-                let mut picked = None;
-                ui.push_id("disloc_tbl", |ui| {
-                    TableBuilder::new(ui)
-                        .striped(true)
-                        .max_scroll_height(130.0)
-                        .column(Column::exact(38.0))
-                        .column(Column::exact(68.0))
-                        .column(Column::exact(48.0))
-                        .column(Column::exact(42.0))
-                        .column(Column::remainder())
-                        .header(18.0, |mut h| {
-                            for t in ["ID", "b=(m,n)", "|b|/a", "|Orb|", "Mirror"] {
-                                h.col(|ui| {
-                                    ui.strong(t);
-                                });
-                            }
-                        })
-                        .body(|mut body| {
-                            for (idx, d) in self.catalogue.dislocations.iter().enumerate() {
-                                body.row(18.0, |mut row| {
-                                    row.col(|ui| {
-                                        if ui
-                                            .selectable_label(self.selected_disloc == idx, &d.id)
-                                            .clicked()
-                                        {
-                                            picked = Some(idx);
-                                        }
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(format!("({}, {})", d.burgers_mn.0, d.burgers_mn.1));
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(format!("{:.2}", d.norm));
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(d.orbit_size.to_string());
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(d.mirror_partner.as_deref().unwrap_or("self"));
-                                    });
-                                });
-                            }
-                        });
-                });
-                if let Some(idx) = picked {
-                    self.selected_disloc = idx;
-                    dirty = true;
-                }
-            }
-            DefectSubTab::Disclinations => {
-                if self.catalogue.centres.is_empty() {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(176, 82, 24),
-                        "No rotational centres in this group (|P+| = 1): zero disclination classes.",
-                    );
-                } else {
-                    ui.strong("Rotation Centre Classes (C1..)");
-                    ui.push_id("centres_tbl", |ui| {
-                        TableBuilder::new(ui)
-                            .striped(true)
-                            .max_scroll_height(78.0)
-                            .column(Column::exact(38.0))
-                            .column(Column::exact(52.0))
-                            .column(Column::exact(46.0))
-                            .column(Column::remainder())
-                            .header(17.0, |mut h| {
-                                for t in ["ID", "Wyck", "Order", "Location"] {
-                                    h.col(|ui| {
-                                        ui.strong(t);
-                                    });
-                                }
-                            })
-                            .body(|mut body| {
-                                for c in &self.catalogue.centres {
-                                    body.row(17.0, |mut row| {
-                                        row.col(|ui| {
-                                            ui.strong(&c.id);
-                                        });
-                                        row.col(|ui| {
-                                            ui.label(&c.wyckoff);
-                                        });
-                                        row.col(|ui| {
-                                            ui.label(format!("{}-fold", c.order));
-                                        });
-                                        row.col(|ui| {
-                                            ui.label(&c.location);
-                                        });
-                                    });
-                                }
-                            });
-                    });
-
-                    ui.add_space(4.0);
-                    ui.strong(format!(
-                        "Disclinations D(α, C) ({} classes, +180° != -180°)",
-                        self.catalogue.disclinations.len()
-                    ));
-                    let mut picked = None;
-                    ui.push_id("disclin_tbl", |ui| {
-                        TableBuilder::new(ui)
-                            .striped(true)
-                            .max_scroll_height(145.0)
-                            .column(Column::exact(102.0))
-                            .column(Column::exact(48.0))
-                            .column(Column::exact(52.0))
-                            .column(Column::remainder())
-                            .header(18.0, |mut h| {
-                                for t in ["Class", "Centre", "Frank", "Loc"] {
-                                    h.col(|ui| {
-                                        ui.strong(t);
-                                    });
-                                }
-                            })
-                            .body(|mut body| {
-                                for (idx, d) in self.catalogue.disclinations.iter().enumerate() {
-                                    body.row(18.0, |mut row| {
-                                        row.col(|ui| {
-                                            if ui
-                                                .selectable_label(self.selected_disclin == idx, &d.id)
-                                                .clicked()
-                                            {
-                                                picked = Some(idx);
-                                            }
-                                        });
-                                        row.col(|ui| {
-                                            ui.label(&d.centre_id).on_hover_text(&d.wyckoff);
-                                        });
-                                        row.col(|ui| {
-                                            ui.label(format!("{:+}°", d.frank_angle_deg));
-                                        });
-                                        row.col(|ui| {
-                                            ui.label(&d.location);
-                                        });
-                                    });
-                                }
-                            });
-                    });
-                    if let Some(idx) = picked {
-                        self.selected_disclin = idx;
-                        dirty = true;
-                    }
-                }
-            }
-            DefectSubTab::Walls => {
-                ui.strong("Four Mirror / Glide Wall Kinds (Wa - Wd)");
-                let mut picked = None;
-                ui.push_id("walls_tbl", |ui| {
-                    TableBuilder::new(ui)
-                        .striped(true)
-                        .max_scroll_height(130.0)
-                        .column(Column::exact(42.0))
-                        .column(Column::exact(118.0))
-                        .column(Column::remainder())
-                        .header(18.0, |mut h| {
-                            for t in ["ID", "Kind", "Axis / Action"] {
-                                h.col(|ui| {
-                                    ui.strong(t);
-                                });
-                            }
-                        })
-                        .body(|mut body| {
-                            for (idx, w) in self.catalogue.walls.iter().enumerate() {
-                                body.row(18.0, |mut row| {
-                                    row.col(|ui| {
-                                        let dir_tip = format!(
-                                            "dir = ({}, {})",
-                                            w.direction_mn.0, w.direction_mn.1
-                                        );
-                                        if ui
-                                            .selectable_label(self.selected_wall == idx, &w.id)
-                                            .on_hover_text(dir_tip)
-                                            .clicked()
-                                        {
-                                            picked = Some(idx);
-                                        }
-                                    });
-                                    row.col(|ui| {
-                                        ui.label(w.kind.label());
-                                    });
-                                    row.col(|ui| {
-                                        ui.small(&w.description);
-                                    });
-                                });
-                            }
-                        });
-                });
-                if let Some(idx) = picked {
-                    self.selected_wall = idx;
-                    dirty = true;
-                }
-            }
-        }
-
-        ui.separator();
-        ui.strong("Patch & Relaxation Controls");
-        ui.horizontal(|ui| {
-            ui.label("Radius R:");
-            if ui
-                .add(egui::Slider::new(&mut self.radius, 2.4..=6.2).step_by(0.2))
-                .changed()
-            {
-                dirty = true;
-                reset_view = true;
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Drawing:");
-            if ui.selectable_label(!self.relaxed, "Raw surgery").clicked() {
-                self.relaxed = false;
-                dirty = true;
-            }
-            if ui
-                .selectable_label(self.relaxed, "Relaxed / Embedded")
-                .clicked()
-            {
-                self.relaxed = true;
-                dirty = true;
-            }
-        });
-
-        if dirty {
-            self.rebuild_crystal(active_item, backend, canvas, reset_view);
-        }
-
-        ui.separator();
-        ui.strong("Core Charge & Topology Readout");
-        if self.is_busy() || self.error.is_some() {
-            ui.horizontal(|ui| {
-                if self.is_busy() { ui.spinner(); }
-                ui.label("Previous readout — stale");
-            });
-        }
-        ui.label(&self.readout.charge_summary);
-        ui.small(&self.readout.holonomy_detail);
-        ui.small(format!("Core structure: {}", self.readout.core_rings));
-        if !self.readout.note.is_empty() {
-            ui.colored_label(
-                egui::Color32::from_rgb(168, 92, 14),
-                format!("Note: {}", self.readout.note),
-            );
-        }
     }
 }
 

@@ -20,6 +20,18 @@ Pre-built native installers (no Python or Rust needed) are on the [Releases](htt
 
 The desktop app has four live views: **Gallery** (all 664 stored lattices across the 17 wallpaper groups, 21 named lattices, Wyckoff positions, and parameter sliders), **Surfaces** (torus, cylinder, Moebius band, Klein bottle, sphere, projective plane, and higher-genus handlebodies in rotatable 3D), **Defects** (dislocations, disclinations, and domain/twin/Moebius/glide walls), and **Combine** (live multi-defect placement and dragging, topological charge in $\tilde{G}^+$, Volterra vs completion core gallery, and `.json` config exchange with Notebook 3).
 
+Current source builds also provide:
+
+- Persistent custom lattice names, without changing catalogue identity or defect configurations. Names are
+  stored in the operating system's user configuration directory, outside the repository.
+- Cursor-anchored viewport zoom, zoom/fit controls, and click-to-enlarge core cards.
+- **2D / 3D Sheet / Split** views in Defects and Combine, with bending stiffness, height exaggeration,
+  strain/height/ring colouring, and a defect-free flat reference.
+
+The elastic sheet is an approximate visualization, not a new definition of defect charge or core equivalence.
+Check its convergence/topology diagnostics before interpreting numerical energies or heights. SVG and Notebook
+JSON preserve Unicode names; PNG text currently has a limited bitmap character set.
+
 To build and launch from source instead (requires Rust 1.95+):
 
     cargo run --release --manifest-path rust/Cargo.toml -p papertilling-app

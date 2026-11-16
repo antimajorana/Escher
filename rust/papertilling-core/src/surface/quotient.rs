@@ -1,4 +1,4 @@
-﻿//! Shared 2D cell geometry, flat torus quotient, and figure-8 Klein bottle arclength helpers.
+//! Shared 2D cell geometry, flat torus quotient, and figure-8 Klein bottle arclength helpers.
 
 use std::collections::HashMap;
 use std::f64::consts::PI;

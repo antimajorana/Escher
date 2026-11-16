@@ -85,7 +85,7 @@ fn drag_previews_then_compares_the_released_configuration_once() {
     }
     assert!(st.preview_dirty, "mouse moves coalesce while a preview is in flight");
     let first = st.builder.wait(Duration::from_secs(20)).expect("in-flight preview was not discarded").unwrap();
-    assert!(first.preview);
+    assert!(first.0.preview);
     st.take_build(Ok(first));
     st.poll(None, square, Some(&mut canvas));
     st.wait_idle(square, Some(&mut canvas));
@@ -153,4 +153,17 @@ fn recipe_controls_the_imported_group_and_unknown_formats_do_not_mutate_state() 
     cfg.frame.q = [[0.0; 2]; 2];
     assert!(st.load_notebook_json(&cfg, &backend, &mut canvas).is_err());
     assert_eq!(st.specs, before, "a degenerate frame cannot partially replace the current state");
+}
+
+#[test]
+fn failed_build_cannot_compare_the_previous_crystal_as_the_current_configuration() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut state = CombineTabState::new(square, &backend);
+    state.wait_idle(square, None);
+    state.take_build(Err(String::from("test worker failure")));
+    state.run_compare(square);
+    assert!(matches!(state.compare_result, Some(Err(_))));
+    assert!(state.last_build.refused.is_some());
+    assert!(state.to_notebook_json(square).summary.is_none());
 }

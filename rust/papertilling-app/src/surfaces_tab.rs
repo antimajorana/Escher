@@ -100,6 +100,10 @@ impl SurfacesTabState {
         }
     }
 
+    pub(crate) fn has_refusal(&self) -> bool {
+        self.refusal_msg.is_some()
+    }
+
     /// Clamp `(h, k)` into the values the controls offer for the current target and lattice.
     pub fn clamp_params(&mut self, item: &CatalogueItemUi) {
         let sc = size_controls(self.target, symmetry_facts(&item.group).max_rotation_order());
@@ -129,9 +133,10 @@ impl SurfacesTabState {
             Ok((mesh, report)) => {
                 let use_cov = self.show_cover && mesh.cover.is_some();
                 let gpu = mesh_from_surface(&mesh, use_cov);
+                let disp = item.display_with_orig();
                 let caption = format!(
                     "{} on {}{} | V={} E={} F={} χ={} (R={:.2}, c=[{:.1},{:.1},{:.1}])",
-                    item.label,
+                    disp,
                     mesh.name,
                     if use_cov { " [S² double cover]" } else { "" },
                     gpu.vertex_count,
@@ -143,14 +148,16 @@ impl SurfacesTabState {
                     gpu.center[1],
                     gpu.center[2],
                 );
+                let net_title = format!("{} ({}) — {} — 2D net", disp, item.group, mesh.name);
                 view3d.set_mesh(gpu, caption);
-                canvas.set_scene(Scene2D::SurfaceNet { mesh: mesh.clone() }, true);
+                canvas.set_scene_with_title(Scene2D::SurfaceNet { mesh: mesh.clone() }, Some(net_title), true);
                 self.current_mesh = Some(mesh);
                 self.current_report = Some(report);
                 self.refusal_msg = None;
             }
             Err(reason) => {
-                view3d.set_mesh(GpuMeshData::default(), format!("{} on {}: {reason}", item.label, self.target.label()));
+                let disp = item.display_with_orig();
+                view3d.set_mesh(GpuMeshData::default(), format!("{} on {}: {reason}", disp, self.target.label()));
                 canvas.set_scene(Scene2D::SurfaceNet { mesh: empty_net(self.target.label()) }, true);
                 self.current_mesh = None;
                 self.current_report = None;
@@ -265,7 +272,7 @@ impl SurfacesTabState {
         canvas: &mut Canvas2D,
         view3d: &mut View3dState,
     ) -> Option<String> {
-        ui.strong(format!("Active lattice: {} ({})", active_item.label, active_item.group));
+        ui.strong(format!("Active lattice: {} ({})", active_item.display_with_orig(), active_item.group));
         ui.add_space(3.0);
         if self.show_controls(ui, active_item) {
             self.activate_and_sync(active_item, backend, canvas, view3d);

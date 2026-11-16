@@ -12,6 +12,7 @@ use papertilling_core::plane::groups::{
 use papertilling_core::plane::tuning::SliderState;
 use papertilling_core::types::{Cell2D, Frame2D, Recipe};
 
+use crate::aliases::{AliasStore, LatticeAliasKey};
 use crate::backend::{
     CatalogueItemUi, CatalogueRuleUi, DSymbolReadoutUi, GroupInfo, SliderParamUi, WyckoffRowUi,
 };
@@ -127,27 +128,35 @@ pub fn occupied_wyckoff_letters(recipe: &Recipe) -> Vec<char> {
     out
 }
 
-pub fn build_named_lattices(cats: &PlaneCatalogues) -> Vec<CatalogueItemUi> {
+pub fn build_named_lattices(cats: &PlaneCatalogues, aliases: &AliasStore) -> Vec<CatalogueItemUi> {
     cats.named
         .named
         .iter()
         .enumerate()
-        .map(|(idx, nl)| CatalogueItemUi {
-            index: idx + 1,
-            label: nl.name.clone(),
-            named_key: Some(nl.key.clone()),
-            group: nl.group.clone(),
-            sheet_group: nl.sheet_group.clone(),
-            sites_per_cell: nl.cell.basis.len(),
-            site_orbits: nl.rank[0],
-            bond_orbits: nl.rank[1],
-            coordination: coordination_string(&nl.cell),
-            dsymbol_key: format_dsymbol_key(&nl.dsymbol_key),
-            network_key: format_dsymbol_key(&nl.network_key),
-            symmetry_index: nl.symmetry_index,
-            occupied_wyckoff: occupied_wyckoff_letters(&nl.recipe),
-            recipe: nl.recipe.clone(),
-            frame: nl.frame,
+        .map(|(idx, nl)| {
+            let dsymbol_key = format_dsymbol_key(&nl.dsymbol_key);
+            let default_label = nl.name.clone();
+            let alias_key = LatticeAliasKey::new(&nl.group, "named", idx + 1, &dsymbol_key);
+            let label = aliases.get(&alias_key).map_or_else(|| default_label.clone(), str::to_owned);
+            CatalogueItemUi {
+                index: idx + 1,
+                label,
+                default_label,
+                alias_key,
+                named_key: Some(nl.key.clone()),
+                group: nl.group.clone(),
+                sheet_group: nl.sheet_group.clone(),
+                sites_per_cell: nl.cell.basis.len(),
+                site_orbits: nl.rank[0],
+                bond_orbits: nl.rank[1],
+                coordination: coordination_string(&nl.cell),
+                dsymbol_key,
+                network_key: format_dsymbol_key(&nl.network_key),
+                symmetry_index: nl.symmetry_index,
+                occupied_wyckoff: occupied_wyckoff_letters(&nl.recipe),
+                recipe: nl.recipe.clone(),
+                frame: nl.frame,
+            }
         })
         .collect()
 }
@@ -172,6 +181,7 @@ pub fn catalogue_for_group(
     cats: &PlaneCatalogues,
     group: &str,
     rule: CatalogueRuleUi,
+    aliases: &AliasStore,
 ) -> Vec<CatalogueItemUi> {
     let map = match rule {
         CatalogueRuleUi::Points => &cats.points,
@@ -193,7 +203,7 @@ pub fn catalogue_for_group(
                 &entry.canonical_key,
                 &entry.network_key,
             );
-            let (label, named_key, sheet_group) = if let Some(nl) = matched {
+            let (default_label, named_key, sheet_group) = if let Some(nl) = matched {
                 let first_use = seen_named.insert(nl.key.clone());
                 let lbl = if first_use {
                     nl.name.clone()
@@ -208,9 +218,14 @@ pub fn catalogue_for_group(
                     None,
                 )
             };
+            let dsymbol_key = format_dsymbol_key(&entry.canonical_key);
+            let alias_key = LatticeAliasKey::new(&entry.recipe.group, rule.label(), idx + 1, &dsymbol_key);
+            let label = aliases.get(&alias_key).map_or_else(|| default_label.clone(), str::to_owned);
             CatalogueItemUi {
                 index: idx + 1,
                 label,
+                default_label,
+                alias_key,
                 named_key,
                 group: entry.recipe.group.clone(),
                 sheet_group,
@@ -218,7 +233,7 @@ pub fn catalogue_for_group(
                 site_orbits: entry.rank[0],
                 bond_orbits: entry.rank[1],
                 coordination: coordination_string(&cell),
-                dsymbol_key: format_dsymbol_key(&entry.canonical_key),
+                dsymbol_key,
                 network_key: format_dsymbol_key(&entry.network_key),
                 symmetry_index: entry.symmetry_index,
                 occupied_wyckoff: occupied_wyckoff_letters(&entry.recipe),

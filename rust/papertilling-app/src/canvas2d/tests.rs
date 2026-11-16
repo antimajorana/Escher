@@ -211,3 +211,45 @@ fn double_click_fits_the_view() {
     assert!((h.canvas.zoom - h.fit_zoom).abs() < 1e-3);
     assert!(outs.iter().all(|o| o.clicked_world.is_none()));
 }
+
+#[test]
+fn cursor_anchored_pinch_and_zoom_at_invariance_and_keyboard_shortcuts() {
+    let mut h = Harness::new();
+    let cursor = egui::pos2(610.0, 145.0);
+    let world_before = h.canvas.screen_to_world_at(h.rect, cursor);
+
+    // Direct zoom_at invariance across wide zoom factors (up to 4000.0 and down to 2.0).
+    for factor in [1.8_f32, 4.5, 0.35, 12.0, 0.08] {
+        h.canvas.zoom_at(h.rect, factor, Some(cursor));
+        let world_after = h.canvas.screen_to_world_at(h.rect, cursor);
+        assert!(close(world_before, world_after, 1e-3), "factor {factor}: {world_before:?} vs {world_after:?}");
+    }
+
+    // Trackpad pinch / Ctrl+wheel (`egui::Event::Zoom`) zooms around the pointer position.
+    h.canvas.zoom = 60.0;
+    h.canvas.pan = egui::vec2(-18.0, 12.0);
+    let w0 = h.canvas.screen_to_world_at(h.rect, cursor);
+    h.frame(vec![egui::Event::PointerMoved(cursor), egui::Event::Zoom(2.0)], &[], false);
+    assert!((h.canvas.zoom - 120.0).abs() < 1e-3, "pinch zoom doubled: {}", h.canvas.zoom);
+    let w1 = h.canvas.screen_to_world_at(h.rect, cursor);
+    assert!(close(w0, w1, 1e-3), "pinch zoom kept cursor world point fixed: {w0:?} vs {w1:?}");
+
+    // Keyboard `+`, `-`, and `0` shortcuts while pointer is inside canvas.
+    let z_before = h.canvas.zoom;
+    h.frame(vec![egui::Event::PointerMoved(cursor), egui::Event::Text(String::from("+"))], &[], false);
+    assert!(h.canvas.zoom > z_before);
+    let z_plus = h.canvas.zoom;
+    h.frame(vec![egui::Event::PointerMoved(cursor), egui::Event::Text(String::from("-"))], &[], false);
+    assert!(h.canvas.zoom < z_plus);
+    h.frame(vec![egui::Event::PointerMoved(cursor), egui::Event::Text(String::from("0"))], &[], false);
+    h.frame(Vec::new(), &[], false);
+    assert_eq!(h.canvas.pan, egui::Vec2::ZERO);
+    assert!((h.canvas.zoom - h.fit_zoom).abs() < 1e-3);
+
+    // Clicking inside the bottom-right Zoom HUD never places a defect pin even when click_to_place = true.
+    let hud_pt = h.rect.right_bottom() - egui::vec2(24.0, 16.0);
+    let outs = h.click(hud_pt, &[], true);
+    assert!(outs.iter().all(|o| o.clicked_world.is_none()), "HUD click must not place a defect pin");
+}
+
+mod zoom_routing;

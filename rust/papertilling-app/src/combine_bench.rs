@@ -166,11 +166,12 @@ fn combine_bench_ui_submission_and_drag_frames() {
         let mut canvas = Canvas2D::new(Scene2D::CrystalPatch {
             crystal: st.last_build.crystal.clone(), title: String::new(), note: String::new(),
         });
+        let mut view3d = crate::view3d::View3dState::default();
         st.wait_idle(item, Some(&mut canvas));
         for _ in 0..3 {
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
                 st.show_side_panel(ui, item, &backend, &mut canvas);
-                st.show_central(ui, item, &backend, &mut canvas);
+                st.show_central(ui, item, &backend, &mut canvas, &mut view3d);
             });
         }
         st.tool_mode = ToolMode::PlaceDislocation;
@@ -193,7 +194,7 @@ fn combine_bench_ui_submission_and_drag_frames() {
             };
             let _ = ctx.run_ui(input, |ui| {
                 st.show_side_panel(ui, item, &backend, &mut canvas);
-                st.show_central(ui, item, &backend, &mut canvas);
+                st.show_central(ui, item, &backend, &mut canvas, &mut view3d);
             });
             times.push(ms(t));
         }
@@ -216,5 +217,34 @@ fn combine_bench_ui_submission_and_drag_frames() {
         st.reload_for_item(item, &backend, &mut canvas, true);
         println!("# time UI lattice reload {key}: {:.3} ms", ms(t));
         st.wait_idle(item, Some(&mut canvas));
+    }
+}
+
+#[test]
+#[ignore = "3D worker timing harness; run manually after the small sheet pilot"]
+fn combine_bench_sheet_worker() {
+    use std::sync::Arc;
+    use std::time::Duration;
+    use crate::combine_worker::{BuildJob, spawn_build_worker};
+    for key in ["square", "honeycomb"] {
+        let backend = AppBackend::new();
+        let item = backend.find_named(key).unwrap();
+        let info = Arc::new(combine_lattice_info(item));
+        let mut worker = spawn_build_worker();
+        for radius in [4.5, info.r_auto_base] {
+            for preview in [false, true] {
+                let t = Instant::now();
+                worker.submit(BuildJob {
+                    item: item.clone(), info: Arc::clone(&info),
+                    specs: preset_neighbour_pair(&info), opts: opts(Some(radius)),
+                    preview, kappa_b: 0.02, reuse_2d: None,
+                });
+                let (out, sheet) = worker.wait(Duration::from_secs(30)).expect("3D worker completed").unwrap();
+                println!("# time 2D+3D worker {key} R={radius:.2} preview={preview}: {:.3} ms; N={} iterations={} converged={}",
+                    ms(t), out.crystal.pos.len(), sheet.sheet.iterations, sheet.sheet.converged);
+                assert_eq!(sheet.sheet.xyz.len(), out.crystal.pos.len());
+                assert!(sheet.sheet.xyz.iter().flatten().all(|x| x.is_finite()));
+            }
+        }
     }
 }

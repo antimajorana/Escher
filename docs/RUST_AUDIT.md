@@ -2,6 +2,9 @@
 
 Working branch: `app-audit-and-combine-speed`. Commit and feature-branch push authorized; manual review pending.
 
+This report records the baseline audit committed as `3f31d5c`. Later CraftAnything feature integration
+and its final verification are documented separately in [CRAFT_REVIEW.md](CRAFT_REVIEW.md).
+
 ## Scope and invariants
 
 No frozen mathematical decision in `RUST_PLAN.md` §9 was changed. Sphere/RP2 still tries face centres before

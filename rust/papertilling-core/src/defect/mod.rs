@@ -10,6 +10,9 @@ pub mod cone_geometry;
 pub mod core_gallery;
 pub mod core_graph;
 pub mod equivalence;
+pub mod sheet3d;
+mod sheet3d_energy;
+mod sheet3d_opt;
 pub mod single_cache;
 #[cfg(test)]
 mod stage5_gate_tests;

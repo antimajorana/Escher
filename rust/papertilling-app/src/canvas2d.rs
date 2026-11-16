@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::export::export_scene_with_markers;
+use crate::export::export_scene_full;
 pub use crate::scene2d::Scene2D;
 use crate::scene2d::{ScenePrimitives, compile_scene};
 
@@ -8,7 +8,11 @@ mod hit;
 #[cfg(test)]
 mod tests;
 
-pub use hit::{PIN_PICK_RADIUS_PX, ViewTransform, pick_marker};
+pub use hit::{
+    PIN_PICK_RADIUS_PX, ViewTransform, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP_FACTOR, ZoomKeyAction,
+    input_zoom_factor, keyboard_zoom_action, pick_marker, zoom_by_factor_about,
+};
+pub(crate) use hit::take_keyboard_zoom_action;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkerKind {
@@ -40,12 +44,14 @@ pub struct CanvasInteraction {
 pub struct Canvas2D {
     pub pan: egui::Vec2,
     pub zoom: f32,
+    fit_zoom: f32,
     world_center: [f32; 2],
     auto_fit_pending: bool,
     active_drag_pin: Option<usize>,
     scene: Scene2D,
     compiled: ScenePrimitives,
     export_markers: Vec<CanvasMarker>,
+    export_title: Option<String>,
 }
 
 impl Canvas2D {
@@ -56,17 +62,24 @@ impl Canvas2D {
         Self {
             pan: egui::Vec2::ZERO,
             zoom: 56.0,
+            fit_zoom: 56.0,
             world_center,
             auto_fit_pending: true,
             active_drag_pin: None,
             scene,
             compiled,
             export_markers: Vec::new(),
+            export_title: None,
         }
     }
 
     pub fn set_scene(&mut self, scene: Scene2D, reset_view: bool) {
+        self.set_scene_with_title(scene, None, reset_view);
+    }
+
+    pub fn set_scene_with_title(&mut self, scene: Scene2D, export_title: Option<String>, reset_view: bool) {
         self.export_markers.clear();
+        self.export_title = export_title;
         self.compiled = compile_scene(&scene);
         self.scene = scene;
         if reset_view {
@@ -85,6 +98,10 @@ impl Canvas2D {
         self.active_drag_pin = None;
     }
 
+    pub fn zoom_at(&mut self, rect: egui::Rect, factor: f32, anchor: Option<egui::Pos2>) {
+        (self.pan, self.zoom) = zoom_by_factor_about(self.pan, self.zoom, factor, rect.center(), anchor);
+    }
+
     pub fn counts(&self) -> (usize, usize) {
         (self.compiled.site_count, self.compiled.bond_count)
     }
@@ -93,7 +110,8 @@ impl Canvas2D {
     pub(crate) fn scene(&self) -> &Scene2D { &self.scene }
 
     pub fn export_to_path(&self, path: &Path) -> Result<String, String> {
-        export_scene_with_markers(&self.scene, &self.export_markers, path)
+        // SVG preserves arbitrary Unicode titles. PNG currently uses export_font's limited glyph set.
+        export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path)
     }
 
     pub(crate) fn set_export_markers(&mut self, markers: &[CanvasMarker]) {
@@ -140,12 +158,7 @@ impl Canvas2D {
     ) -> CanvasInteraction {
         let mut out = CanvasInteraction::default();
         let available = ui.available_size().max(egui::vec2(64.0, 64.0));
-        let sense = if interactive {
-            egui::Sense::click_and_drag()
-        } else {
-            egui::Sense::drag()
-        };
-        let (rect, response) = ui.allocate_exact_size(available, sense);
+        let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
 
         if self.auto_fit_pending && rect.width() > 32.0 && rect.height() > 32.0 {
             let (bmin, bmax) = self.compiled.bbox;
@@ -155,30 +168,47 @@ impl Canvas2D {
             let pad_h = if self.compiled.note.is_empty() { 40.0 } else { 72.0 };
             let zx = (rect.width() - 40.0).max(24.0) / span_x;
             let zy = (rect.height() - pad_h).max(24.0) / span_y;
-            self.zoom = zx.min(zy).clamp(8.0, 260.0);
+            let fit = zx.min(zy).clamp(ZOOM_MIN, ZOOM_MAX);
+            self.fit_zoom = fit;
+            self.zoom = fit;
             self.pan = egui::Vec2::ZERO;
             self.auto_fit_pending = false;
         }
 
+        let has_hud = rect.width() >= 190.0 && rect.height() >= 80.0;
+        let hud_rect = egui::Rect::from_min_max(
+            rect.right_bottom() - egui::vec2(164.0, 30.0),
+            rect.right_bottom() - egui::vec2(6.0, 6.0),
+        );
+        let ptr = ui.input(|i| i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()));
+        let press_orig = ui.input(|i| i.pointer.press_origin());
+        let over_hud = has_hud && ptr.is_some_and(|p| hud_rect.contains(p));
+        let drag_from_hud = has_hud && press_orig.is_some_and(|p| hud_rect.contains(p));
+
         let hit_pin_at = |this: &Self, pt: egui::Pos2| pick_marker(markers, &this.view_at(rect), pt, PIN_PICK_RADIUS_PX);
 
-        // Scroll first, about the pointer, so the world point under it (and a pin being dragged) stays put.
-        if response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll.abs() > 0.0 {
-                let anchor = response.hover_pos().filter(|p| rect.contains(*p));
-                (self.pan, self.zoom) = hit::zoom_about(self.pan, self.zoom, scroll, rect.center(), anchor);
+        // Smooth wheel + pinch / Ctrl+wheel zoom anchored at the cursor position inside `rect`.
+        let anchor = response.hover_pos().or(ptr).filter(|p| rect.contains(*p));
+        if ui.rect_contains_pointer(rect) {
+            let factor = ui.input(input_zoom_factor);
+            if (factor - 1.0).abs() > 1e-5 {
+                self.zoom_at(rect, factor, anchor);
+            }
+            if let Some(act) = take_keyboard_zoom_action(ui, &response) {
+                match act {
+                    ZoomKeyAction::In => self.zoom_at(rect, ZOOM_STEP_FACTOR, anchor),
+                    ZoomKeyAction::Out => self.zoom_at(rect, 1.0 / ZOOM_STEP_FACTOR, anchor),
+                    ZoomKeyAction::Fit => self.reset(),
+                }
             }
         }
 
-        if interactive && response.drag_started() {
-            let origin = ui
-                .input(|i| i.pointer.press_origin())
-                .or_else(|| response.interact_pointer_pos());
+        if interactive && !drag_from_hud && response.drag_started() {
+            let origin = press_orig.or_else(|| response.interact_pointer_pos());
             self.active_drag_pin = origin.and_then(|pt| hit_pin_at(self, pt));
         }
 
-        if response.dragged() {
+        if !drag_from_hud && response.dragged() {
             if let Some(pin_idx) = self.active_drag_pin {
                 if markers.iter().any(|m| m.index == pin_idx) {
                     if let Some(pos) = response.interact_pointer_pos() {
@@ -196,9 +226,11 @@ impl Canvas2D {
             out.drag_released = true;
         }
 
-        if response.double_clicked() {
+        if !over_hud && !drag_from_hud && response.double_clicked() {
             self.reset();
         } else if interactive
+            && !over_hud
+            && !drag_from_hud
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
@@ -209,7 +241,8 @@ impl Canvas2D {
             }
         }
 
-        if response.hovered()
+        if !over_hud
+            && response.hovered()
             && interactive
             && let Some(hpos) = response.hover_pos()
         {
@@ -341,13 +374,43 @@ impl Canvas2D {
             }
         }
 
-        draw_overlays(&painter, rect, &self.compiled.title, &self.compiled.note);
+        let overlay_title = if matches!(self.scene, Scene2D::SurfaceNet { .. }) {
+            self.export_title.as_deref().unwrap_or(&self.compiled.title)
+        } else {
+            &self.compiled.title
+        };
+        draw_overlays(&painter, rect, overlay_title, &self.compiled.note);
         painter.rect_stroke(
             rect,
             4.0,
             egui::Stroke::new(1.0, egui::Color32::from_gray(180)),
             egui::StrokeKind::Inside,
         );
+        if has_hud {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(hud_rect), |ui| {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_rgba_unmultiplied(245, 247, 251, 234))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(182)))
+                    .corner_radius(4.0)
+                    .inner_margin(egui::Margin::symmetric(5, 3))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            if ui.small_button("−").on_hover_text("Zoom out (-)").clicked() {
+                                self.zoom_at(rect, 1.0 / ZOOM_STEP_FACTOR, None);
+                            }
+                            let pct = ((self.zoom / self.fit_zoom.max(1e-3)) * 100.0).round() as i32;
+                            ui.small(format!("{pct}%"));
+                            if ui.small_button("+").on_hover_text("Zoom in (+)").clicked() {
+                                self.zoom_at(rect, ZOOM_STEP_FACTOR, None);
+                            }
+                            if ui.small_button("Fit").on_hover_text("Fit scene (0 / double-click)").clicked() {
+                                self.reset();
+                            }
+                        });
+                    });
+            });
+        }
         out
     }
 }

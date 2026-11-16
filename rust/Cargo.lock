@@ -2717,6 +2717,7 @@ dependencies = [
  "papertilling-core",
  "png",
  "rfd",
+ "serde",
  "serde_json",
 ]
 

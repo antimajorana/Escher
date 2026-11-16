@@ -15,6 +15,7 @@ use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::planarity;
 use papertilling_core::types::{BuiltCrystal, Cell2D, Isometry2};
 
+use crate::aliases::LatticeAliasKey;
 use crate::backend::CatalogueItemUi;
 use crate::live_ops::{build_pristine_disk, summarize_rings_and_core};
 use crate::live_plane::{coordination_string, format_dsymbol_key, occupied_wyckoff_letters};
@@ -489,9 +490,13 @@ pub fn item_from_notebook_json(
             }
             Err(_) => (String::from("-"), String::from("-"), 1),
         };
-    let matched_named = named_list.iter().find(|it| {
-        it.group == group && (it.label == cfg.lattice_label || (dsymbol_key != "-" && it.dsymbol_key == dsymbol_key))
-    });
+    // Display names are user-controlled and need not be unique. They never establish identity.
+    let same_action = |it: &&CatalogueItemUi| it.group == group && dsymbol_key != "-" && it.dsymbol_key == dsymbol_key;
+    let matched_named = named_list.iter()
+        .find(|it| it.group == group && it.recipe == cfg.recipe && it.frame == cfg.frame)
+        .or_else(|| named_list.iter().filter(same_action)
+            .find(|it| it.label == cfg.lattice_label || it.default_label == cfg.lattice_label))
+        .or_else(|| named_list.iter().find(same_action));
     let label = if !cfg.lattice_label.is_empty() {
         cfg.lattice_label.clone()
     } else if let Some(nm) = matched_named {
@@ -500,9 +505,17 @@ pub fn item_from_notebook_json(
         format!("{group} (imported)")
     };
 
+    let default_label = matched_named.map_or_else(|| label.clone(), |nm| nm.default_label.clone());
+    let alias_key = matched_named.map_or_else(
+        || LatticeAliasKey::new(&group, "imported", 1, &dsymbol_key),
+        |nm| nm.alias_key.clone(),
+    );
+
     Ok(CatalogueItemUi {
         index: 1,
         label,
+        default_label,
+        alias_key,
         named_key: matched_named.and_then(|n| n.named_key.clone()),
         group,
         sheet_group: matched_named.and_then(|n| n.sheet_group.clone()),

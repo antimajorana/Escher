@@ -4,6 +4,7 @@ use papertilling_core::types::{SurfaceCover3D, SurfaceMesh};
 
 mod geom;
 mod rp2;
+pub mod sheet;
 mod sort;
 #[cfg(test)]
 mod tests;
@@ -12,6 +13,12 @@ use geom::{
     append_icosahedron, append_octahedron, arc_subdivisions, blend_normal, build_curved_face_ring, compute_smooth_vertex_normals,
     cone_rgba, dist3, mat4_mul, mean_chord_len, polygon_centroid_idx, polygon_centroid_pts, push_wire, sph_arc, tint_towards,
     tri_normal,
+};
+#[cfg(test)]
+pub use sheet::Sheet3dColorMode;
+pub use sheet::{
+    DefectViewMode, Sheet3dViewOpts, mesh_from_sheet3d, sheet3d_caption,
+    show_sheet3d_controls,
 };
 pub use sort::back_to_front_indices;
 
@@ -300,7 +307,8 @@ pub fn orbit_rotation(yaw: f32, pitch: f32) -> [[f32; 4]; 4] {
 
 pub fn build_mvp(aspect: f32, distance: f32, rot: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     let f = 1.0 / (0.5 * 45.0_f32.to_radians()).tan();
-    let (near, far) = (0.15_f32, 30.0_f32);
+    let near = (distance - 1.35).clamp(0.04, 0.15);
+    let far = (distance + 6.0).max(30.0);
     let proj = [
         [f / aspect, 0.0, 0.0, 0.0],
         [0.0, f, 0.0, 0.0],

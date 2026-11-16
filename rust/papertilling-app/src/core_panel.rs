@@ -7,11 +7,13 @@ use crate::canvas2d::to_color32;
 use crate::scene2d::ScenePrimitives;
 
 mod card;
+mod inspector;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use card::compile_core_card;
 use card::paint_card_primitives;
+use inspector::CoreInspectorModal;
 
 pub const CHORD_RGBA: [u8; 4] = [0xd8, 0x1b, 0x60, 255]; // #d81b60 magenta
 pub const UNDER_SITE_RGBA: [u8; 4] = [0xc6, 0x28, 0x28, 255]; // #c62828 red
@@ -30,6 +32,7 @@ pub struct CorePanelState {
     pub collapsed: bool,
     pub show_all_completions: bool,
     cards: CardCache,
+    inspector: Option<CoreInspectorModal>,
 }
 
 /// Compiled card primitives of the report on display (compiled lazily, only for cards scrolled into view).
@@ -158,22 +161,31 @@ pub fn show_core_panel(
     });
 
     let cache = &mut state.cards;
+    let mut clicked_card: Option<(&CoreGalleryEntry, &'static str, bool)> = None;
     egui::ScrollArea::horizontal().id_salt("core_gallery_scroll").show(ui, |ui| {
         ui.horizontal(|ui| {
             if let Some(cfg_entry) = &report.config_core {
-                draw_core_card(ui, cache, cfg_entry, "Configuration Core", false);
+                if draw_core_card(ui, cache, cfg_entry, "Configuration Core", false) {
+                    clicked_card = Some((cfg_entry, "Configuration Core", false));
+                }
                 if !sel.volterra.is_empty() || !sel.completions.is_empty() {
                     ui.separator();
                 }
             }
             for entry in &sel.volterra {
-                draw_core_card(ui, cache, entry, "Volterra", match_set.contains(entry.name.as_str()));
+                let m = match_set.contains(entry.name.as_str());
+                if draw_core_card(ui, cache, entry, "Volterra", m) {
+                    clicked_card = Some((entry, "Volterra", m));
+                }
             }
             if !sel.volterra.is_empty() && !sel.completions.is_empty() {
                 ui.separator();
             }
             for entry in &sel.completions {
-                draw_core_card(ui, cache, entry, "Completion", match_set.contains(entry.name.as_str()));
+                let m = match_set.contains(entry.name.as_str());
+                if draw_core_card(ui, cache, entry, "Completion", m) {
+                    clicked_card = Some((entry, "Completion", m));
+                }
             }
             if report.config_core.is_none() && report.gallery.is_empty() {
                 ui.label(format!(
@@ -185,6 +197,15 @@ pub fn show_core_panel(
             }
         });
     });
+
+    if let Some((entry, gtag, is_m)) = clicked_card {
+        state.inspector = Some(CoreInspectorModal::from_entry(entry, gtag, is_m));
+    }
+    if let Some(mut modal) = state.inspector.take()
+        && modal.show(ui.ctx())
+    {
+        state.inspector = Some(modal);
+    }
 }
 
 fn legend_chip(ui: &mut egui::Ui, color: egui::Color32, text: &str) {
@@ -193,15 +214,19 @@ fn legend_chip(ui: &mut egui::Ui, color: egui::Color32, text: &str) {
     ui.small(text);
 }
 
-fn draw_core_card(ui: &mut egui::Ui, cache: &mut CardCache, entry: &CoreGalleryEntry, group_tag: &str, is_match: bool) {
+fn draw_core_card(ui: &mut egui::Ui, cache: &mut CardCache, entry: &CoreGalleryEntry, group_tag: &str, is_match: bool) -> bool {
     let card_w = 184.0_f32;
     let card_h = 204.0_f32;
-    let (card_rect, resp) = ui.allocate_exact_size(egui::vec2(card_w, card_h), egui::Sense::hover());
+    let (card_rect, resp) = ui.allocate_exact_size(egui::vec2(card_w, card_h), egui::Sense::click());
     if !ui.is_rect_visible(card_rect) {
-        return; // scrolled out of view: neither compiled nor painted
+        return false; // scrolled out of view: neither compiled nor painted
+    }
+    let clicked = resp.clicked();
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 
-    let mut tip = format!("{} ({})\n{}", entry.name, group_tag, entry.description);
+    let mut tip = format!("{} ({})\n{}\n[Click to enlarge & zoom]", entry.name, group_tag, entry.description);
     if !entry.also.is_empty() {
         tip.push_str(&format!("\nAlso reached by: {}", entry.also.join(", ")));
     }
@@ -247,6 +272,7 @@ fn draw_core_card(ui: &mut egui::Ui, cache: &mut CardCache, entry: &CoreGalleryE
         egui::Stroke::new(1.0, egui::Color32::from_gray(192))
     };
     painter.rect_stroke(card_rect, 5.0, border, egui::StrokeKind::Inside);
+    clicked
 }
 
 /// `rings [..] · description`, cut to 30 characters (an ellipsis marks the cut).

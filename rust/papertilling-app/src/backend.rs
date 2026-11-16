@@ -5,6 +5,7 @@ use papertilling_core::types::{
     BuiltCrystal, Cell2D, Frame2D, Recipe, SurfaceCheckReport, SurfaceMesh,
 };
 
+use crate::aliases::{AliasStore, LatticeAliasKey};
 use crate::live_combine::{self, CombineLatticeInfo};
 use crate::live_ops;
 use crate::live_plane::{self, PlaneCatalogues};
@@ -59,6 +60,8 @@ pub struct WyckoffRowUi {
 pub struct CatalogueItemUi {
     pub index: usize,
     pub label: String,
+    pub default_label: String,
+    pub alias_key: LatticeAliasKey,
     pub named_key: Option<String>,
     pub group: String,
     pub sheet_group: Option<String>,
@@ -72,6 +75,20 @@ pub struct CatalogueItemUi {
     pub occupied_wyckoff: Vec<char>,
     pub recipe: Recipe,
     pub frame: Frame2D,
+}
+
+impl CatalogueItemUi {
+    pub fn has_custom_name(&self) -> bool {
+        self.label != self.default_label
+    }
+
+    pub fn display_with_orig(&self) -> String {
+        if self.has_custom_name() {
+            format!("{} [{}]", self.label, self.default_label)
+        } else {
+            self.label.clone()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -295,7 +312,7 @@ pub struct WallEntryUi {
     pub default_note: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DefectCatalogueUi {
     pub dislocations: Vec<DislocationEntryUi>,
     pub centres: Vec<CentreClassUi>,
@@ -310,7 +327,7 @@ pub enum DefectSelectionUi {
     Wall(usize),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DefectReadoutUi {
     pub title: String,
     pub charge_summary: String,
@@ -323,6 +340,7 @@ pub struct AppBackend {
     cats: &'static PlaneCatalogues,
     groups: Vec<GroupInfo>,
     named: Vec<CatalogueItemUi>,
+    aliases: AliasStore,
 }
 
 /// The 17 x 8 surface verdict matrix depends only on the stored catalogues: one per process.
@@ -339,10 +357,42 @@ impl Default for AppBackend {
 
 impl AppBackend {
     pub fn new() -> Self {
+        Self::new_with_alias_store(AliasStore::in_memory())
+    }
+
+    pub fn new_with_os_config(smoke_test: bool) -> Self {
+        let aliases = if smoke_test || cfg!(test) {
+            AliasStore::in_memory()
+        } else {
+            AliasStore::load_default()
+        };
+        Self::new_with_alias_store(aliases)
+    }
+
+    pub fn new_with_alias_store(aliases: AliasStore) -> Self {
         let cats = live_plane::shared_catalogues();
         let groups = live_plane::build_groups_info(cats);
-        let named = live_plane::build_named_lattices(cats);
-        Self { cats, groups, named }
+        let named = live_plane::build_named_lattices(cats, &aliases);
+        Self { cats, groups, named, aliases }
+    }
+
+    pub fn resolve_alias(&self, item: &CatalogueItemUi) -> String {
+        self.aliases
+            .get(&item.alias_key)
+            .map(str::to_owned)
+            .unwrap_or_else(|| item.default_label.clone())
+    }
+
+    pub fn set_lattice_alias(&mut self, item: &CatalogueItemUi, new_name: &str) -> Result<(), String> {
+        let res = self.aliases.set(item.alias_key.clone(), new_name, &item.default_label);
+        self.named = live_plane::build_named_lattices(self.cats, &self.aliases);
+        res
+    }
+
+    pub fn reset_lattice_alias(&mut self, item: &CatalogueItemUi) -> Result<(), String> {
+        let res = self.aliases.reset(&item.alias_key);
+        self.named = live_plane::build_named_lattices(self.cats, &self.aliases);
+        res
     }
 
     /// Start computing the surface verdict matrix (about 1.3 s) off the UI thread.
@@ -375,7 +425,7 @@ impl AppBackend {
         group: &str,
         rule: CatalogueRuleUi,
     ) -> Vec<CatalogueItemUi> {
-        live_plane::catalogue_for_group(self.cats, group, rule)
+        live_plane::catalogue_for_group(self.cats, group, rule, &self.aliases)
     }
 
     pub fn wyckoff_table(&self, group: &str, occupied: &[char]) -> Vec<WyckoffRowUi> {
