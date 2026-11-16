@@ -25,7 +25,6 @@ import dataclasses
 import itertools
 import math
 import warnings
-from collections import deque
 
 import networkx as nx
 import numpy as np
@@ -33,6 +32,7 @@ import numpy as np
 from ..legacy import fusion_framework as ff
 from . import fast as _fast
 from ._graph import _multi_bfs, layer_signature
+from ._surgery import _Builder, candidate_cuts_360, coalesce_coincident_specs
 from ..legacy.lab_defects import Perfect, frame_faces, rotation_about, iso_compose, iso_inverse
 from ..legacy.wallpaper_lattices import UnitCell, primitive_cell, _symmetry_ops, has_crossings, make_cell
 
@@ -291,79 +291,8 @@ def same_charge(lat: LatticeData, q1: dict, q2: dict, mirror: bool = False) -> b
 
 
 # ==============================================================================================
-# The builder (legacy cone-safe builder + one fix) and its driver
+# The builder (cone-safe builder in _surgery.py) and its driver
 # ==============================================================================================
-class _Builder(ff._ConeSafeBuilder):
-    _pad = None
-
-    def add_disclination(self, angle, p, cut=None):
-        """FIX 1: the legacy developed region round a disclination is the wedge plus a band of width
-        1.05 lmax round the two seam rays. When the centre is farther than that from every site's
-        neighbours (chiral_square 4b: the nearest sites are 0.455 away, lmax = 0.482), the walk
-        stops at the first site and nothing is inserted (frank 0; found by the gate). The legacy
-        driver build_configuration then refuses this valid request (ConfigError, frank 0 vs -90). Here, when the legacy step removed and inserted nothing (always
-        wrong for a non-zero angle), it is redone with the region enlarged by the disk of radius
-        (distance to the nearest site + 1.05 lmax) round the centre, which makes it connected.
-        (The disk is not added by default: it can swallow a neighbouring earlier core.)"""
-        p = np.asarray(p, float)
-        snap = self.snapshot()
-        super().add_disclination(angle, p, cut)
-        if self.records[-1]["removed"] or self.records[-1]["inserted"]:
-            return
-        self.restore(snap)
-        near = min(_norm(self.ref[i] - p) for i in range(len(self.ref)) if self.alive[i])
-        self._pad = (p, near + 1.05 * self.lmax)
-        try:
-            super().add_disclination(angle, p, cut)
-        finally:
-            self._pad = None
-        if not (self.records[-1]["removed"] or self.records[-1]["inserted"]):
-            raise ValueError("the disclination step changed nothing; try another cut direction")
-
-    def develop(self, base, inside):
-        if self._pad is not None:
-            q, rho = self._pad
-            inner = inside
-            inside = lambda y: inner(y) or _norm(y - q) <= rho
-        return super().develop(base, inside)
-
-    def prune_rim_spurs(self):
-        """FIX 2: the legacy method peeled EVERY site with <= 1 bond, anywhere, so a dislocation core
-        with a 1-bond site (honeycomb core K1 of C04) lost that site and the build was then refused
-        for min_deg < 2. Here only 0-bond sites are removed (1-bond sites are kept everywhere, as in
-        lab_defects), then everything outside the largest connected component."""
-        protected = set(self.cone_sites)
-        for i in range(len(self.label)):
-            if self.alive[i] and i not in protected and not self.nb[i]:
-                self.alive[i] = False
-        live = [i for i in range(len(self.label)) if self.alive[i]]
-        if not live:
-            raise ValueError("all crystal sites were removed")
-        comp, seen = [], set()
-        for s in live:
-            if s in seen:
-                continue
-            c, dq = {s}, deque([s])
-            seen.add(s)
-            while dq:
-                u = dq.popleft()
-                for v in self.nb[u]:
-                    if v not in seen:
-                        seen.add(v); c.add(v); dq.append(v)
-            comp.append(c)
-        main = max(comp, key=len)
-        for c in comp:
-            if c is main:
-                continue
-            if c & protected:
-                raise ValueError("a cut disconnected a disclination core from the crystal")
-            for i in c:
-                for v in list(self.nb[i]):
-                    self.nb[v].pop(i, None)
-                self.nb[i] = {}
-                self.alive[i] = False
-
-
 def validate_specs(lat: LatticeData, specs, snap: bool = False) -> list[dict]:
     """Normalise and check every spec; refuse impossible requests with ValueError."""
     out = []
@@ -414,15 +343,16 @@ def validate_specs(lat: LatticeData, specs, snap: bool = False) -> list[dict]:
 def _run(lat: LatticeData, specs, R=None, centre=None, check=True, fast=None):
     """Build with the cone-safe builder. Returns (Defect, check dict). check=False skips refusal on
     failed invariants (used by the stress tests, which check them independently)."""
+    eff = coalesce_coincident_specs(specs)
     pts = np.array([s["at"] for s in specs]).reshape(-1, 2)
     ctr = pts.mean(axis=0) if centre is None else np.asarray(centre, float)
     if R is None:
         max_b = max((_norm(s["b"]) for s in specs if s["kind"] == "dislocation"), default=0.0)
         R = float(np.max(np.linalg.norm(pts - ctr, axis=1))) + max(12.5 * lat.lmax + max_b, 5.0 * lat.scale)
     B = (_fast.builder_class() if _fast.enabled(fast) else _Builder)(lat.cell, lat.L, ctr, float(R))
-    for idx, d in enumerate(specs, 1):
+    for idx, d in enumerate(eff, 1):
         disloc = d["kind"] == "dislocation"
-        cuts = [d["cut"]] if d.get("cut") is not None else ff._candidate_cuts(d, [o for o in specs if o is not d], disloc)
+        cuts = [d["cut"]] if d.get("cut") is not None else candidate_cuts_360(d, [o for o in eff if o is not d], disloc)
         err = None
         for cut in cuts:
             snap = B.snapshot()
@@ -440,7 +370,7 @@ def _run(lat: LatticeData, specs, R=None, centre=None, check=True, fast=None):
         if err is not None:
             raise ValueError(f"defect {idx} ({d['kind']}): {err}") from None
     d = B.finish()
-    expected = sum(s["angle"] for s in specs if s["kind"] == "disclination")
+    expected = sum(s["angle"] for s in eff if s["kind"] == "disclination")
     rep = dict(R=float(R), centre=ctr, expected_frank=expected)
     if lat.planar:
         rep.update(frames_bad=_fast.check_frames(d, fast), euler=len(d.sites) - len(d.edges) + len(_fast.frame_faces(d, fast)),
@@ -457,7 +387,8 @@ def build(lattice, *specs, R=None, picture="relaxed", centre=None, snap=False, c
     spec: dict(kind="dislocation", b=(bx, by), at=(x, y), cut=None)
           dict(kind="disclination", angle=deg, at=(cx, cy), cut=None)
     Disclination centres must be rotation centres allowing the angle (snap=True moves them to the
-    nearest such centre instead of refusing). A dislocation cut c must satisfy cross2(c, b) < 0.
+    nearest such centre instead of refusing). A dislocation cut c can be any non-parallel vector
+    (cross2(c, b) < 0 removes a strip, cross2(c, b) > 0 inserts one).
     fast: None = fast path (fast.py, fast_relax.py) unless PAPERTILLING_LEGACY=1; False = legacy engines.
     picture: "raw" = the builder's composed maps (bonds stretched > 1.8x drawn as dotted stubs; can cross);
     "relaxed" = the spring relaxation (fast_relax); if that picture has crossing bonds or folded faces it is

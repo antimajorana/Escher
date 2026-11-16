@@ -4,10 +4,12 @@ use crate::export::export_scene_full;
 pub use crate::scene2d::Scene2D;
 use crate::scene2d::{ScenePrimitives, compile_scene};
 
+mod cuts;
 mod hit;
 #[cfg(test)]
 mod tests;
 
+pub use cuts::CanvasCutRay;
 pub use hit::{
     PIN_PICK_RADIUS_PX, ViewTransform, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP_FACTOR, ZoomKeyAction,
     input_zoom_factor, keyboard_zoom_action, pick_marker, zoom_by_factor_about,
@@ -51,6 +53,7 @@ pub struct Canvas2D {
     scene: Scene2D,
     compiled: ScenePrimitives,
     export_markers: Vec<CanvasMarker>,
+    cut_rays: Vec<CanvasCutRay>,
     export_title: Option<String>,
 }
 
@@ -69,6 +72,7 @@ impl Canvas2D {
             scene,
             compiled,
             export_markers: Vec::new(),
+            cut_rays: Vec::new(),
             export_title: None,
         }
     }
@@ -79,6 +83,7 @@ impl Canvas2D {
 
     pub fn set_scene_with_title(&mut self, scene: Scene2D, export_title: Option<String>, reset_view: bool) {
         self.export_markers.clear();
+        self.cut_rays.clear();
         self.export_title = export_title;
         self.compiled = compile_scene(&scene);
         self.scene = scene;
@@ -117,6 +122,16 @@ impl Canvas2D {
     pub(crate) fn set_export_markers(&mut self, markers: &[CanvasMarker]) {
         self.export_markers.clear();
         self.export_markers.extend_from_slice(markers);
+    }
+
+    pub(crate) fn set_cut_rays(&mut self, rays: &[CanvasCutRay]) {
+        self.cut_rays.clear();
+        self.cut_rays.extend_from_slice(rays);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cut_rays(&self) -> &[CanvasCutRay] {
+        &self.cut_rays
     }
 
     /// The world <-> screen map of the current view inside `rect`.
@@ -347,6 +362,10 @@ impl Canvas2D {
                 9.5,
                 egui::Stroke::new(1.8, egui::Color32::from_rgb(46, 125, 50)),
             );
+        }
+
+        if !self.cut_rays.is_empty() {
+            cuts::draw_cut_rays(&painter, self, rect, &self.cut_rays);
         }
 
         for m in markers {

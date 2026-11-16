@@ -6,7 +6,7 @@ use papertilling_core::defect::combine_types::EquivalentSingleReport;
 use papertilling_core::defect::surgery::DefectSpec;
 
 use crate::backend::{AppBackend, CatalogueItemUi};
-use crate::canvas2d::{Canvas2D, CanvasMarker, MarkerKind, Scene2D};
+use crate::canvas2d::{Canvas2D, CanvasCutRay, CanvasMarker, MarkerKind, Scene2D};
 use crate::combine_worker::{
     BuildJob, BuildWorkerOutput, CombineSheet3dBundle, CompareJob, CompareOutput, LatestWorker,
     build_sheet_bundle_sync, empty_crystal, spawn_build_worker, spawn_compare_worker,
@@ -15,7 +15,8 @@ use crate::combine_worker::{
 use crate::core_panel::CorePanelState;
 use crate::live_combine::{
     CombineBuildOptions, CombineBuildOutput, CombineDrawMode, CombineLatticeInfo, build_combined_crystal,
-    burgers_from_mn, preset_neighbour_pair, preset_shortest_dislocation, spec_short_label, spec_world_pos,
+    burgers_from_mn, cuts::build_cut_rays, preset_neighbour_pair, preset_shortest_dislocation,
+    spec_short_label, spec_world_pos,
 };
 use crate::mesh3d::{DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d, sheet3d_caption};
 use crate::view3d::View3dState;
@@ -45,6 +46,7 @@ pub struct CombineTabState {
     pub opts: CombineBuildOptions,
     pub auto_compare: bool,
     pub grid: usize,
+    pub show_branch_cuts: bool,
     pub view_mode: DefectViewMode,
     pub sheet_opts: Sheet3dViewOpts,
     pub(crate) last_build: CombineBuildOutput,
@@ -96,6 +98,7 @@ impl CombineTabState {
             opts,
             auto_compare: true,
             grid: 1,
+            show_branch_cuts: false,
             view_mode: DefectViewMode::Split2D3D,
             sheet_opts,
             last_build,
@@ -414,11 +417,23 @@ impl CombineTabState {
         }
     }
 
+    pub fn current_cut_rays(&self) -> Vec<CanvasCutRay> {
+        if !self.show_branch_cuts || self.last_build.refused.is_some() {
+            return Vec::new();
+        }
+        build_cut_rays(
+            &self.last_build.applied_cuts,
+            self.last_build.patch_centre,
+            self.last_build.applied_radius,
+        )
+    }
+
     pub fn sync_to_canvas(&self, gallery_item: &CatalogueItemUi, canvas: &mut Canvas2D, reset_view: bool) {
         let item = self.effective_item(gallery_item);
         let title = format!("{} ({}) — {} defect(s) | {}", item.display_with_orig(), item.group, self.specs.len(), self.last_build.charge_label);
         canvas.set_scene(Scene2D::CrystalPatch { crystal: self.last_build.crystal.clone(), title, note: self.last_build.note.clone() }, reset_view);
         canvas.set_export_markers(&self.build_markers());
+        canvas.set_cut_rays(&self.current_cut_rays());
     }
 
     pub fn apply_preset_pair(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {

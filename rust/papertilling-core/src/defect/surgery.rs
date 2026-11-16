@@ -10,7 +10,17 @@ use crate::defect::core_graph::{
     LatticeCoreInfo, TWO_PI, check_frames, frame_faces, mat2_vec, norm2, rot_mat, rotation_about,
     sub2, total_frank,
 };
+use crate::defect::cone_geometry::{add2, cross2, dot2};
 use crate::types::{BuiltCrystal, Cell2D};
+
+/// Cut ray used for one effective defect during `build_point_defects_with_cuts`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AppliedCut {
+    pub origin: [f64; 2],
+    pub dir: [f64; 2],
+    pub strip_end: Option<[f64; 2]>,
+    pub is_insertion: bool,
+}
 
 /// Specification of an elementary dislocation or disclination on an open patch.
 /// JSON: `kind` is `"dislocation"` / `"disclination"` (also read: Python's aliases `"translation"` / `"rotation"`).
@@ -148,30 +158,142 @@ pub fn patch_centre_and_radius(
     Ok((ctr, r))
 }
 
+fn coalesce_coincident_specs(specs: &[NormSpec]) -> Result<Vec<NormSpec>, String> {
+    let mut groups: Vec<Vec<&NormSpec>> = Vec::new();
+    for s in specs {
+        if let Some(grp) = groups
+            .iter_mut()
+            .find(|g| g[0].is_disloc == s.is_disloc && norm2(sub2(g[0].at, s.at)) <= 1e-6)
+        {
+            grp.push(s);
+        } else {
+            groups.push(vec![s]);
+        }
+    }
+    let mut out = Vec::with_capacity(groups.len());
+    for grp in groups {
+        if grp.len() == 1 {
+            out.push(grp[0].clone());
+            continue;
+        }
+        let cuts: Vec<[f64; 2]> = grp.iter().filter_map(|g| g.cut).collect();
+        let resolved_cut = if let Some(&c0) = cuts.first() {
+            let l0 = norm2(c0).max(1e-30);
+            let u0 = [c0[0] / l0, c0[1] / l0];
+            for &ck in &cuts[1..] {
+                let lk = norm2(ck).max(1e-30);
+                let uk = [ck[0] / lk, ck[1] / lk];
+                if dot2(u0, uk) < 1.0 - 1e-5 {
+                    return Err("coincident defects specify conflicting cut directions".to_string());
+                }
+            }
+            Some(c0)
+        } else {
+            None
+        };
+        if !grp[0].is_disloc {
+            let ang_sum: f64 = grp.iter().map(|g| g.angle_deg).sum();
+            if ang_sum.abs() <= 1e-9 {
+                continue;
+            }
+            if ang_sum >= 360.0 - 1e-6 {
+                return Err(format!(
+                    "total Frank angle {ang_sum:+} deg >= 360 deg: an open patch cannot close into a cone"
+                ));
+            }
+            if ang_sum <= -360.0 + 1e-6 {
+                return Err(format!(
+                    "coincident disclinations sum to {ang_sum:+} deg <= -360 deg at a single apex; separate them to build a multi-turn sheet"
+                ));
+            }
+            out.push(NormSpec {
+                is_disloc: false,
+                b: [0.0, 0.0],
+                angle_deg: ang_sum,
+                at: grp[0].at,
+                cut: resolved_cut,
+            });
+        } else {
+            let mut b_sum = [0.0, 0.0];
+            for g in &grp {
+                b_sum = add2(b_sum, g.b);
+            }
+            if norm2(b_sum) <= 1e-9 {
+                continue;
+            }
+            out.push(NormSpec {
+                is_disloc: true,
+                b: b_sum,
+                angle_deg: 0.0,
+                at: grp[0].at,
+                cut: resolved_cut,
+            });
+        }
+    }
+    let total_frank: f64 = out.iter().filter(|s| !s.is_disloc).map(|s| s.angle_deg).sum();
+    if total_frank >= 360.0 - 1e-6 {
+        return Err(format!(
+            "total Frank angle {total_frank:+} deg >= 360 deg: an open patch cannot close into a cone"
+        ));
+    }
+    Ok(out)
+}
+
 fn candidate_cuts(idx: usize, specs: &[NormSpec]) -> Vec<[f64; 2]> {
     let d = &specs[idx];
+    if d.is_disloc {
+        let lb = norm2(d.b).max(1e-30);
+        let c0 = [-d.b[1] / lb, d.b[0] / lb];
+        const DEGS: [f64; 14] = [
+            0.0, 25.0, -25.0, 50.0, -50.0, 72.0, -72.0, 180.0, 155.0, -155.0, 130.0, -130.0, 108.0, -108.0,
+        ];
+        let mut cand: Vec<[f64; 2]> =
+            DEGS.into_iter().map(|deg| mat2_vec(rot_mat(deg.to_radians()), c0)).collect();
+        let anchor = [d.at[0] + 0.5 * d.b[0], d.at[1] + 0.5 * d.b[1]];
+        let mut other_pts: Vec<[f64; 2]> = Vec::new();
+        for (j, o) in specs.iter().enumerate() {
+            if j == idx {
+                continue;
+            }
+            if o.is_disloc {
+                let oc = [o.at[0] + 0.5 * o.b[0], o.at[1] + 0.5 * o.b[1]];
+                if norm2(sub2(oc, anchor)) > 1e-6 {
+                    for t in [0.0, 0.5, 1.0] {
+                        other_pts.push([o.at[0] + t * o.b[0], o.at[1] + t * o.b[1]]);
+                    }
+                }
+            } else if norm2(sub2(o.at, anchor)) > 1e-6 {
+                other_pts.push(o.at);
+            }
+        }
+        if !other_pts.is_empty() {
+            let strip = [0.0, 0.25, 0.5, 0.75, 1.0]
+                .map(|t| [d.at[0] + t * d.b[0], d.at[1] + t * d.b[1]]);
+            let score = |u: [f64; 2]| -> f64 {
+                let clr = other_pts
+                    .iter()
+                    .flat_map(|&pt| strip.iter().map(move |&sp| ray_distance(pt, sp, u)))
+                    .fold(f64::INFINITY, f64::min);
+                let obliq = 1.0 - dot2(u, c0).abs();
+                let away = other_pts
+                    .iter()
+                    .map(|&pt| {
+                        let dv = sub2(pt, anchor);
+                        -dot2(dv, u) / norm2(dv).max(1e-9)
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                clr - 0.05 * obliq + 1e-4 * away
+            };
+            cand.sort_by(|a, b| (-score(*a)).total_cmp(&(-score(*b))));
+        }
+        return cand;
+    }
     let other_pts: Vec<[f64; 2]> = specs
         .iter()
         .enumerate()
         .filter(|&(j, o)| j != idx && norm2(sub2(o.at, d.at)) > 1e-6)
         .map(|(_, o)| o.at)
         .collect();
-    if d.is_disloc {
-        let lb = norm2(d.b).max(1e-30);
-        let c0 = [-d.b[1] / lb, d.b[0] / lb];
-        let mut cand: Vec<[f64; 2]> = [0.0_f64, 25.0, -25.0, 50.0, -50.0, 72.0, -72.0]
-            .into_iter()
-            .map(|deg| mat2_vec(rot_mat(deg.to_radians()), c0))
-            .collect();
-        if !other_pts.is_empty() {
-            cand.sort_by(|a, b| {
-                let ca = other_pts.iter().map(|&pt| ray_distance(pt, d.at, *a)).fold(f64::INFINITY, f64::min);
-                let cb = other_pts.iter().map(|&pt| ray_distance(pt, d.at, *b)).fold(f64::INFINITY, f64::min);
-                (-ca).total_cmp(&(-cb))
-            });
-        }
-        return cand;
-    }
     let alpha = d.angle_deg.to_radians();
     let mut cand: Vec<[f64; 2]> = (0..12)
         .map(|k| {
@@ -204,13 +326,13 @@ fn candidate_cuts(idx: usize, specs: &[NormSpec]) -> Vec<[f64; 2]> {
     cand
 }
 
-/// Build single or multi-defect configurations on an open disk patch using cone-safe Volterra surgery.
-pub fn build_point_defects(
+/// Build single or multi-defect configurations, returning `(crystal, applied_cuts, coalesced_count)`.
+pub fn build_point_defects_with_cuts(
     cell: &Cell2D,
     specs: &[DefectSpec],
     r_opt: Option<f64>,
     centre_opt: Option<[f64; 2]>,
-) -> Result<BuiltCrystal, String> {
+) -> Result<(BuiltCrystal, Vec<AppliedCut>, usize), String> {
     let det = cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0];
     if cell.basis.is_empty() || cell.bonds.is_empty() || !det.is_finite() || det == 0.0
         || cell.a1.iter().chain(&cell.a2).chain(cell.basis.iter().flatten()).any(|x| !x.is_finite())
@@ -220,13 +342,17 @@ pub fn build_point_defects(
     let lat_info = LatticeCoreInfo::new(cell);
     let norm = validate_specs(&lat_info, specs)?;
     let (ctr, r_patch) = patch_centre_and_radius(&lat_info, specs, r_opt, centre_opt)?;
+    let eff = coalesce_coincident_specs(&norm)?;
+    let coalesced = norm.len().saturating_sub(eff.len());
     let mut builder = ConeBuilder::new(&lat_info, ctr, r_patch);
-    for (idx, d) in norm.iter().enumerate() {
+    let mut applied_cuts = Vec::with_capacity(eff.len());
+    for (idx, d) in eff.iter().enumerate() {
         let cuts = match d.cut {
             Some(c) => vec![c],
-            None => candidate_cuts(idx, &norm),
+            None => candidate_cuts(idx, &eff),
         };
         let mut last_err = None;
+        let mut chosen_cut = None;
         for cut in cuts {
             let snap = builder.snapshot();
             let res = if d.is_disloc {
@@ -237,6 +363,7 @@ pub fn build_point_defects(
             match res {
                 Ok(()) => {
                     last_err = None;
+                    chosen_cut = Some(cut);
                     break;
                 }
                 Err(e) => {
@@ -246,14 +373,28 @@ pub fn build_point_defects(
             }
         }
         if let Some(e) = last_err {
-            // Python build._run wording: "defect N (kind): reason", with the legacy builder's advice
             let kind = if d.is_disloc { "dislocation" } else { "disclination" };
             let advice = if e.contains("two walks disagree") { "; use another cut direction or defect order" } else { "" };
             return Err(format!("defect {} ({kind}): {e}{advice}", idx + 1));
         }
+        if let Some(cut) = chosen_cut {
+            let lc = norm2(cut).max(1e-30);
+            let dir = [cut[0] / lc, cut[1] / lc];
+            let origin = if d.is_disloc {
+                [d.at[0] + 0.5 * d.b[0], d.at[1] + 0.5 * d.b[1]]
+            } else {
+                d.at
+            };
+            applied_cuts.push(AppliedCut {
+                origin,
+                dir,
+                strip_end: d.is_disloc.then(|| [d.at[0] + d.b[0], d.at[1] + d.b[1]]),
+                is_insertion: d.is_disloc && cross2(dir, d.b) > 0.0,
+            });
+        }
     }
     let crystal = builder.finish()?;
-    let expected_frank: f64 = norm.iter().filter(|s| !s.is_disloc).map(|s| s.angle_deg).sum();
+    let expected_frank: f64 = eff.iter().filter(|s| !s.is_disloc).map(|s| s.angle_deg).sum();
     if lat_info.planar {
         let frames_bad = check_frames(&crystal);
         let faces = frame_faces(&crystal);
@@ -266,5 +407,15 @@ pub fn build_point_defects(
             ));
         }
     }
-    Ok(crystal)
+    Ok((crystal, applied_cuts, coalesced))
+}
+
+/// Build single or multi-defect configurations on an open disk patch using cone-safe Volterra surgery.
+pub fn build_point_defects(
+    cell: &Cell2D,
+    specs: &[DefectSpec],
+    r_opt: Option<f64>,
+    centre_opt: Option<[f64; 2]>,
+) -> Result<BuiltCrystal, String> {
+    build_point_defects_with_cuts(cell, specs, r_opt, centre_opt).map(|(c, _, _)| c)
 }

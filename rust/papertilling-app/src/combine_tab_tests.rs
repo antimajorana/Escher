@@ -167,3 +167,73 @@ fn failed_build_cannot_compare_the_previous_crystal_as_the_current_configuration
     assert!(state.last_build.refused.is_some());
     assert!(state.to_notebook_json(square).summary.is_none());
 }
+
+#[test]
+fn dislocation_star_members_include_full_orbit() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let sq_info = backend.combine_lattice_info(square);
+    let members = &sq_info.dislocations[0].members;
+    assert_eq!(members.len(), 4);
+    for d in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        assert!(members.contains(&d), "missing {d:?} from {members:?}");
+    }
+    let hc = backend.find_named("honeycomb").unwrap();
+    let hc_info = backend.combine_lattice_info(hc);
+    assert_eq!(hc_info.dislocations[0].members.len(), 6);
+}
+
+#[test]
+fn branch_cut_overlay_populates_and_clears_on_new_scene() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut canvas = canvas();
+    let mut st = CombineTabState::new(square, &backend);
+    st.wait_idle(square, Some(&mut canvas));
+    assert!(!st.show_branch_cuts);
+    assert!(canvas.cut_rays().is_empty());
+
+    st.show_branch_cuts = true;
+    st.sync_to_canvas(square, &mut canvas, false);
+    assert_eq!(canvas.cut_rays().len(), 2);
+
+    canvas.set_scene(
+        Scene2D::PeriodicCell {
+            cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: vec![[0.0, 0.0]], bonds: Vec::new() },
+            repeat: 2,
+            show_unit_cell: false,
+        },
+        true,
+    );
+    assert!(canvas.cut_rays().is_empty());
+}
+
+#[test]
+fn pin_cut_angle_override_and_coincident_superposition() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut canvas = canvas();
+    let mut st = CombineTabState::new(square, &backend);
+    st.wait_idle(square, Some(&mut canvas));
+
+    crate::live_combine::cuts::set_pin_cut_angle(&mut st.specs[0], Some(90.0));
+    match st.specs[0] {
+        DefectSpec::Disclination { cut: Some(c), .. } => {
+            assert!(c[0].abs() < 1e-12 && (c[1] - 1.0).abs() < 1e-12, "{c:?}");
+        }
+        ref other => panic!("unexpected spec: {other:?}"),
+    }
+    crate::live_combine::cuts::set_pin_cut_angle(&mut st.specs[0], None);
+    assert!(matches!(st.specs[0], DefectSpec::Disclination { cut: None, .. }));
+
+    st.specs = vec![DefectSpec::disclination(90.0, [0.0, 0.0]), DefectSpec::disclination(-90.0, [0.0, 0.0])];
+    st.request_build(square, false, true, false);
+    st.wait_idle(square, Some(&mut canvas));
+    assert!(st.last_build.refused.is_none());
+    assert_eq!(st.last_build.coalesced_count, 2);
+    assert_eq!(st.last_build.charge_label, "I (no defect)");
+    assert!(st.last_sheet3d.sheet.xyz.iter().all(|p| p[2].abs() < 1e-6));
+
+    crate::live_combine::cuts::merge_coincident_pins(&st.info, &mut st.specs);
+    assert!(st.specs.is_empty());
+}

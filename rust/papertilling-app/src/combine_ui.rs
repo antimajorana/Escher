@@ -7,7 +7,14 @@ use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
 use crate::combine_tab::{CombineTabState, MANUAL_R_MAX, MANUAL_R_MIN, ToolMode};
 use crate::core_panel::show_core_panel;
-use crate::live_combine::{CombineDrawMode, spec_short_label, spec_world_pos};
+use crate::live_combine::{
+    CombineDrawMode,
+    cuts::{
+        default_cut_angle_deg, has_coincident_same_kind_pins, merge_coincident_pins,
+        set_pin_cut_angle,
+    },
+    spec_short_label, spec_world_pos,
+};
 use crate::mesh3d::{DefectViewMode, show_sheet3d_controls};
 use crate::view3d::View3dState;
 
@@ -53,13 +60,25 @@ impl CombineTabState {
             ui.horizontal_wrapped(|ui| {
                 ui.small("Class:");
                 for (i, d) in self.info.dislocations.iter().enumerate() {
-                    let on = self.selected_disloc_idx == i && self.custom_mn == d.burgers_mn;
+                    let on = self.selected_disloc_idx == i && d.members.contains(&self.custom_mn);
                     if ui.selectable_label(on, format!("{}({},{})", d.id, d.burgers_mn.0, d.burgers_mn.1)).clicked() {
                         self.selected_disloc_idx = i;
-                        self.custom_mn = d.burgers_mn;
+                        if !d.members.contains(&self.custom_mn) {
+                            self.custom_mn = d.burgers_mn;
+                        }
                     }
                 }
             });
+            if let Some(d_cls) = self.info.dislocations.get(self.selected_disloc_idx) && !d_cls.members.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.small("Star directions:");
+                    for &(m, n) in &d_cls.members {
+                        if ui.selectable_label(self.custom_mn == (m, n), format!("({m},{n})")).clicked() {
+                            self.custom_mn = (m, n);
+                        }
+                    }
+                });
+            }
             ui.horizontal(|ui| {
                 ui.small("b = m·a1 + n·a2 (primitive):")
                     .on_hover_text(format!("Catalogue basis: a1={:?}, a2={:?}", self.info.burgers_basis[0], self.info.burgers_basis[1]));
@@ -84,8 +103,16 @@ impl CombineTabState {
         ui.strong(format!("Placed Defects ({})", self.specs.len()));
         if self.specs.is_empty() {
             ui.small("Empty — use a preset or Click-to-Place.");
-        } else if self.placed_table_ui(ui) {
-            dirty = true;
+        } else {
+            if self.placed_table_ui(ui) {
+                dirty = true;
+            }
+            if has_coincident_same_kind_pins(&self.info, &self.specs)
+                && ui.small_button("Merge coincident pins").on_hover_text("Collapse superposed same-point pins permanently").clicked()
+            {
+                merge_coincident_pins(&self.info, &mut self.specs);
+                dirty = true;
+            }
         }
 
         ui.separator();
@@ -103,6 +130,9 @@ impl CombineTabState {
         if self.opts.draw_mode == CombineDrawMode::FastRelaxed && ui.checkbox(&mut self.opts.full_planar_repair, "Full Planar Repair").changed() {
             dirty = true;
         }
+        if ui.checkbox(&mut self.show_branch_cuts, "Show Volterra branch cuts").changed() {
+            self.sync_to_canvas(gallery_item, canvas, false);
+        }
         ui.horizontal(|ui| {
             if ui.checkbox(&mut self.opts.auto_radius, "Auto (~500 sites)").changed() {
                 (dirty, reset_view) = (true, true);
@@ -117,8 +147,13 @@ impl CombineTabState {
                 ui.small("Building…");
             }
             let kind = if self.last_build.preview { "preview" } else { "updated" };
+            let coal = if self.last_build.coalesced_count > 0 {
+                format!(", {} superposed", self.last_build.coalesced_count)
+            } else {
+                String::new()
+            };
             ui.small(format!(
-                "{kind} in {:.1} ms ({} sites, R={:.1})",
+                "{kind} in {:.1} ms ({} sites{coal}, R={:.1})",
                 self.last_build.elapsed_ms, self.last_build.crystal.pos.len(), self.last_build.applied_radius
             ));
         });
@@ -187,20 +222,21 @@ impl CombineTabState {
         });
     }
 
-    /// The placed-defects table; returns true when a defect was flipped or removed.
+    /// The placed-defects table; returns true when a defect was flipped, removed, or its cut angle changed.
     fn placed_table_ui(&mut self, ui: &mut egui::Ui) -> bool {
-        let (mut flip_idx, mut remove_idx) = (None, None);
+        let (mut flip_idx, mut remove_idx, mut cut_edit) = (None, None, None::<(usize, Option<f64>)>);
         ui.push_id("placed_specs_tbl", |ui| {
             TableBuilder::new(ui)
                 .striped(true)
                 .max_scroll_height(108.0)
-                .column(Column::exact(24.0))
-                .column(Column::exact(72.0))
+                .column(Column::exact(22.0))
+                .column(Column::exact(62.0))
                 .column(Column::remainder())
-                .column(Column::exact(32.0))
+                .column(Column::exact(58.0))
                 .column(Column::exact(24.0))
+                .column(Column::exact(22.0))
                 .header(17.0, |mut h| {
-                    for t in ["#", "Kind", "(x, y)", "±", ""] {
+                    for t in ["#", "Kind", "(x, y)", "Cut", "±", ""] {
                         h.col(|ui| { ui.strong(t); });
                     }
                 })
@@ -208,16 +244,39 @@ impl CombineTabState {
                     for (idx, sp) in self.specs.iter().enumerate() {
                         let pos = spec_world_pos(&self.info, idx, sp);
                         let kstr = spec_short_label(&self.info, sp);
+                        let cut_opt = match *sp {
+                            DefectSpec::Disclination { cut, .. } | DefectSpec::Dislocation { cut, .. } => cut,
+                        };
                         body.row(18.0, |mut row| {
                             row.col(|ui| { ui.strong(format!("#{}", idx + 1)); });
                             row.col(|ui| { ui.label(kstr); });
                             row.col(|ui| { ui.small(format!("({:+.2}, {:+.2})", pos[0], pos[1])); });
+                            row.col(|ui| {
+                                if let Some(c) = cut_opt {
+                                    let mut deg = c[1].atan2(c[0]).to_degrees();
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                        if ui.add(egui::DragValue::new(&mut deg).range(-180.0..=180.0).speed(2.0).fixed_decimals(0).suffix("°")).changed() {
+                                            cut_edit = Some((idx, Some(deg)));
+                                        }
+                                        if ui.small_button("a").on_hover_text("Reset cut to auto").clicked() {
+                                            cut_edit = Some((idx, None));
+                                        }
+                                    });
+                                } else if ui.small_button("auto").on_hover_text("Lock to explicit cut angle").clicked() {
+                                    let deg = default_cut_angle_deg(&self.info, &self.specs, idx, &self.last_build.applied_cuts);
+                                    cut_edit = Some((idx, Some(deg)));
+                                }
+                            });
                             row.col(|ui| { if ui.small_button("±").clicked() { flip_idx = Some(idx); } });
                             row.col(|ui| { if ui.small_button("×").clicked() { remove_idx = Some(idx); } });
                         });
                     }
                 });
         });
+        if let Some((i, ang_opt)) = cut_edit {
+            set_pin_cut_angle(&mut self.specs[i], ang_opt);
+        }
         if let Some(i) = flip_idx {
             match &mut self.specs[i] {
                 DefectSpec::Disclination { angle_deg, .. } => *angle_deg = -*angle_deg,
@@ -227,7 +286,7 @@ impl CombineTabState {
         if let Some(i) = remove_idx {
             self.specs.remove(i);
         }
-        flip_idx.is_some() || remove_idx.is_some()
+        flip_idx.is_some() || remove_idx.is_some() || cut_edit.is_some()
     }
 
     fn equivalence_ui(&self, ui: &mut egui::Ui) {

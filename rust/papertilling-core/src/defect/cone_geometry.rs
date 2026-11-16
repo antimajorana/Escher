@@ -65,8 +65,12 @@ impl<'a> ConeBuilder<'a> {
         if lc < 1e-9 {
             return Err("cut direction must be non-zero".to_string());
         }
-        if cross2(c, b) > -1e-7 * lc * lb {
-            return Err("for Volterra removal, b must point right of the cut (cross2(cut, b) < 0)".to_string());
+        let cr = cross2(c, b);
+        if cr.abs() <= 1e-6 * lc * lb {
+            return Err("cut direction cannot be parallel to Burgers vector b".to_string());
+        }
+        if cr > 0.0 {
+            return self.add_dislocation_insertion(b, p, c, lb, lc);
         }
         if self.clear(p) < lb + 2.5 * self.lmax {
             return Err("dislocation point is too close to patch rim; increase R".to_string());
@@ -112,16 +116,7 @@ impl<'a> ConeBuilder<'a> {
                     }
                 }
             }
-            for (&img, &(u, su)) in &here {
-                let p_img = self.lat.pos(img);
-                for (k2, kind) in self.lat.nbrs(img) {
-                    if let Some(&(v, sv)) = here.get(&k2)
-                        && v != u
-                    {
-                        rule.insert((u, v), (sub2(self.lat.pos(k2), p_img), su - sv, kind));
-                    }
-                }
-            }
+            self.collect_chart_bonds(&here, &mut rule);
         }
         let (q_rot, xb, yb) = (self.local_rotation(base), self.x_pos[base], y_map[&base]);
         for &i in &gone {
@@ -136,15 +131,141 @@ impl<'a> ConeBuilder<'a> {
         )?;
         let core = add2(xb, mat2_vec(q_rot, sub2([p[0] + 0.5 * b[0], p[1] + 0.5 * b[1]], yb)));
         let (bq, dq) = (mat2_vec(q_rot, b), mat2_vec(q_rot, ch));
-        let sgn = if cross2(c, b) > 0.0 { 1.0 } else { -1.0 };
         for i in 0..self.x_pos.len() {
             if self.alive[i] {
                 let r = sub2(self.x_pos[i], core);
-                let frac = 1.0 - (sgn * cross2(dq, r)).atan2(dot2(r, dq)).rem_euclid(TWO_PI) / TWO_PI;
+                let frac = 1.0 - (-cross2(dq, r)).atan2(dot2(r, dq)).rem_euclid(TWO_PI) / TWO_PI;
                 self.x_pos[i] = [self.x_pos[i][0] - frac * bq[0], self.x_pos[i][1] - frac * bq[1]];
             }
         }
         self.records.push((gone.len(), 0));
+        Ok(())
+    }
+
+    fn collect_chart_bonds(
+        &self,
+        here: &BTreeMap<SiteKey, (usize, i32)>,
+        rule: &mut BTreeMap<(usize, usize), ([f64; 2], i32, usize)>,
+    ) {
+        for (&img, &(u, su)) in here {
+            let p_img = self.lat.pos(img);
+            for (k2, kind) in self.lat.nbrs(img) {
+                if let Some(&(v, sv)) = here.get(&k2)
+                    && v != u
+                {
+                    rule.insert((u, v), (sub2(self.lat.pos(k2), p_img), su - sv, kind));
+                }
+            }
+        }
+    }
+
+    fn add_dislocation_insertion(
+        &mut self,
+        b: [f64; 2],
+        p: [f64; 2],
+        c: [f64; 2],
+        lb: f64,
+        lc: f64,
+    ) -> Result<(), String> {
+        if self.clear(p) < lb + 2.5 * self.lmax {
+            return Err("dislocation point is too close to patch rim; increase R".to_string());
+        }
+        let ch = [c[0] / lc, c[1] / lc];
+        let nh = [-ch[1], ch[0]];
+        let (bn, ba, m) = (dot2(b, nh), dot2(b, ch), 1.05 * self.lmax);
+        let inside = |y: [f64; 2]| {
+            let r = sub2(y, p);
+            let (a, n) = (dot2(r, ch), dot2(r, nh));
+            (-m <= n && n <= bn + m) && a >= ba.min(0.0) - m
+        };
+        let base = self.base_site(p, &inside)?;
+        let (mut d_map, y_map, _) = self.develop(base, inside)?;
+        let mut n_verts: Vec<usize> = d_map.keys().copied().collect();
+        n_verts.sort_unstable();
+        let b_inv = mat2_inv([[b[0], c[0]], [b[1], c[1]]]);
+        let ts: HashMap<usize, [f64; 2]> =
+            n_verts.iter().map(|&i| (i, mat2_vec(b_inv, sub2(y_map[&i], p)))).collect();
+        let mut dup: HashMap<usize, usize> = HashMap::new();
+        let mut fresh: HashSet<usize> = HashSet::new();
+        let mut kept: Vec<usize> = Vec::with_capacity(n_verts.len() + 16);
+        for &i in &n_verts {
+            kept.push(i);
+            let [t, s] = ts[&i];
+            if s > 1e-9 && (-1e-9..1.0 - 1e-9).contains(&t) {
+                let nv = self.new_copy(i)?;
+                dup.insert(i, nv);
+                fresh.insert(nv);
+                d_map.insert(nv, d_map[&i]);
+            }
+        }
+        let dup_left: HashSet<usize> = dup.keys().copied().collect();
+        for &i in &n_verts {
+            if let Some(&nv) = dup.get(&i) {
+                kept.push(nv);
+            }
+        }
+        let mut rule: BTreeMap<(usize, usize), ([f64; 2], i32, usize)> = BTreeMap::new();
+        for chart in 0..4 {
+            let mut here: BTreeMap<SiteKey, (usize, i32)> = BTreeMap::new();
+            for &i in &n_verts {
+                let [t, s] = ts[&i];
+                let y = y_map[&i];
+                let mut put = |pos: [f64; 2], u: usize, sh: i32| {
+                    if let Some(kloc) = self.lat.locate(pos) {
+                        here.insert(kloc, (u, sh));
+                    }
+                };
+                match chart {
+                    0 if s <= 1e-9 => put(y, i, 0),
+                    1 if t < -1e-9 || (s > 1e-9 && t < 1.0 - 1e-9) => put(y, i, 0),
+                    2 => {
+                        if s <= 1e-9 && t >= -1e-9 {
+                            put(y, i, 0);
+                        } else if let Some(&nv) = dup.get(&i) {
+                            put(y, nv, 0);
+                        } else if s > 1e-9 && t >= 1.0 - 1e-9 {
+                            put(y, i, 0);
+                        }
+                    }
+                    3 if s > 1e-9 => {
+                        if t < 1.0 - 1e-9 {
+                            put(y, i, 0);
+                        }
+                        if let Some(&nv) = dup.get(&i) {
+                            put(add2(y, b), nv, 1);
+                        } else if t >= 1.0 - 1e-9 {
+                            put(add2(y, b), i, 1);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            self.collect_chart_bonds(&here, &mut rule);
+        }
+        let (q_rot, xb, yb) = (self.local_rotation(base), self.x_pos[base], y_map[&base]);
+        self.apply_rule(
+            &rule,
+            &kept,
+            &d_map,
+            |j| Isometry2 { m: [[1.0, 0.0], [0.0, 1.0]], t: [(j as f64) * b[0], (j as f64) * b[1]] },
+            &fresh,
+        )?;
+        let core = add2(xb, mat2_vec(q_rot, sub2([p[0] + 0.5 * b[0], p[1] + 0.5 * b[1]], yb)));
+        let (bq, dq) = (mat2_vec(q_rot, b), mat2_vec(q_rot, ch));
+        for i in 0..self.x_pos.len() {
+            if self.alive[i] {
+                let frac = if fresh.contains(&i) {
+                    0.0
+                } else if dup_left.contains(&i) {
+                    1.0
+                } else {
+                    let r = sub2(self.x_pos[i], core);
+                    cross2(dq, r).atan2(dot2(r, dq)).rem_euclid(TWO_PI) / TWO_PI
+                };
+                self.x_pos[i] = [self.x_pos[i][0] + (0.5 - frac) * bq[0], self.x_pos[i][1] + (0.5 - frac) * bq[1]];
+            }
+        }
+        self.records.push((0, dup.len()));
         Ok(())
     }
 

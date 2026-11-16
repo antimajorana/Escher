@@ -275,8 +275,12 @@ def test_negative_controls():
         build(sq, dict(kind="dislocation", b=(0.5, 0.0), at=(0.37, 0.41)))
     with pytest.raises(ValueError, match="360"):           # +180 + +180 closes the cone
         build(sq, dict(kind="disclination", angle=180, at=(0, 0)), dict(kind="disclination", angle=180, at=(3.5, 0.5)))
-    with pytest.raises(ValueError):                        # cut on the wrong side of b (would insert a row)
-        build(sq, dict(kind="dislocation", b=(1, 0), at=(0.37, 0.41), cut=(0, -1)))
+    with pytest.raises(ValueError, match="parallel"):      # cut parallel to b cannot open or close a half-strip
+        build(sq, dict(kind="dislocation", b=(1, 0), at=(0.37, 0.41), cut=(2, 0)))
+    # Both sides of b are valid Volterra surgeries (removal vs insertion) with isomorphic cores
+    c_rem = build(sq, dict(kind="dislocation", b=(1, 0), at=(0.37, 0.41), cut=(0, 1)), picture="raw")
+    c_ins = build(sq, dict(kind="dislocation", b=(1, 0), at=(0.37, 0.41), cut=(0, -1)), picture="raw")
+    assert np.allclose(c_ins.total_charge()["b"], [1, 0]) and isomorphic_cores(c_ins.core_graph(2), c_rem.core_graph(2))
     # snap=True moves a near miss to the nearest allowed centre
     c = build(sq, dict(kind="disclination", angle=90, at=(0.45, 0.6)), snap=True, picture="raw")
     assert np.allclose(c.specs[0]["at"], (0.5, 0.5))

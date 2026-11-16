@@ -8,8 +8,12 @@ use papertilling_core::defect::combine_api::{
 use papertilling_core::defect::combine_types::{CoreFaceSummary, NotebookConfigJson};
 use papertilling_core::defect::core_graph::{LatticeCoreInfo, core_graph};
 use papertilling_core::defect::equivalence::CentreSnapper;
-use papertilling_core::defect::surgery::{DefectSpec, build_point_defects, patch_centre_and_radius};
+use papertilling_core::defect::surgery::{
+    AppliedCut, DefectSpec, build_point_defects_with_cuts, patch_centre_and_radius,
+};
 use papertilling_core::dsymbol;
+
+pub mod cuts;
 use papertilling_core::plane::draw::{ensure_embedded, relax_picture, relax_preview};
 use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::planarity;
@@ -43,6 +47,7 @@ pub struct CombineDislocOption {
     pub burgers_mn: (i32, i32),
     pub b: [f64; 2],
     pub at: [f64; 2],
+    pub members: Vec<(i32, i32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +83,9 @@ pub struct CombineBuildOutput {
     pub core_edges: usize,
     pub core_summary: String,
     pub local_cores: Vec<CoreFaceSummary>,
+    pub patch_centre: [f64; 2],
+    pub applied_cuts: Vec<AppliedCut>,
+    pub coalesced_count: usize,
     pub note: String,
     /// Cheap in-drag picture: no planarity check and no core readouts (they stay at zero / empty).
     pub preview: bool,
@@ -169,7 +177,13 @@ pub fn combine_lattice_info(item: &CatalogueItemUi) -> CombineLatticeInfo {
     let dislocations = cat
         .dislocations
         .iter()
-        .map(|d| CombineDislocOption { id: d.id.clone(), burgers_mn: (d.b_frac[0], d.b_frac[1]), b: d.b, at: d.at })
+        .map(|d| CombineDislocOption {
+            id: d.id.clone(),
+            burgers_mn: (d.b_frac[0], d.b_frac[1]),
+            b: d.b,
+            at: d.at,
+            members: d.members.iter().map(|&[m, n]| (m, n)).collect(),
+        })
         .collect();
 
     let cell_area = (cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0]).abs().max(1e-6);
@@ -307,18 +321,12 @@ pub fn build_combined_crystal(
     if specs.is_empty() {
         let crystal = build_pristine_disk(&info.lat_info, base_r);
         return CombineBuildOutput {
-            crystal,
-            elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
-            applied_radius: base_r,
+            crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: base_r,
             charge_label: String::from("vacuum (0 defects)"),
             charge_detail: String::from("Frank = +0.0°, b = (0.000, 0.000)"),
-            core_nodes: 0,
-            core_edges: 0,
-            core_summary: String::from("defect-free reference disk"),
-            local_cores: Vec::new(),
-            note: String::new(),
-            preview,
-            refused: None,
+            core_nodes: 0, core_edges: 0, core_summary: String::from("defect-free reference disk"),
+            local_cores: Vec::new(), patch_centre: [0.0, 0.0], applied_cuts: Vec::new(), coalesced_count: 0,
+            note: String::new(), preview, refused: None,
         };
     }
 
@@ -356,21 +364,22 @@ pub fn build_combined_crystal(
             charge_label: String::from("Live view too large"),
             charge_detail: reason.clone(),
             core_nodes: 0, core_edges: 0, core_summary: String::from("not computed"),
-            local_cores: Vec::new(), note: reason.clone(), preview, refused: Some(reason),
+            local_cores: Vec::new(), patch_centre: ctr, applied_cuts: Vec::new(), coalesced_count: 0,
+            note: reason.clone(), preview, refused: Some(reason),
         };
     }
 
     let mut notes = Vec::new();
     let mut applied_r = r_target;
-    let mut crystal = match build_point_defects(&info.cell, specs, Some(r_target), None) {
-        Ok(c) => c,
-        Err(_) => match build_point_defects(&info.cell, specs, None, None) {
-            Ok(c) => {
+    let (mut crystal, applied_cuts, coalesced_count) = match build_point_defects_with_cuts(&info.cell, specs, Some(r_target), None) {
+        Ok(res) => res,
+        Err(_) => match build_point_defects_with_cuts(&info.cell, specs, None, None) {
+            Ok(res) => {
                 if let Ok((_, r_safe)) = patch_centre_and_radius(&info.lat_info, specs, None, None) {
                     applied_r = r_safe;
                 }
                 notes.push(String::from("expanded to safe surgical radius"));
-                c
+                res
             }
             Err(err) => {
                 return CombineBuildOutput {
@@ -379,17 +388,22 @@ pub fn build_combined_crystal(
                     applied_radius: base_r,
                     charge_label: String::from("Surgery refused"),
                     charge_detail: err.clone(),
-                    core_nodes: 0,
-                    core_edges: 0,
-                    core_summary: String::from("refused"),
-                    local_cores: Vec::new(),
-                    note: format!("surgery refused (defect-free disk shown): {err}"),
+                    core_nodes: 0, core_edges: 0, core_summary: String::from("refused"),
+                    local_cores: Vec::new(), patch_centre: ctr, applied_cuts: Vec::new(), coalesced_count: 0,
+                    note: cuts::format_refusal_note(&err),
                     preview,
                     refused: Some(err),
                 };
             }
         },
     };
+    if coalesced_count > 0 {
+        notes.push(if applied_cuts.is_empty() {
+            format!("{coalesced_count} coincident pin(s) cancelled to vacuum")
+        } else {
+            format!("superposed {coalesced_count} coincident same-apex pin(s)")
+        });
+    }
 
     if opts.draw_mode == CombineDrawMode::FastRelaxed && preview {
         relax_preview_picture(&mut crystal);
@@ -428,18 +442,11 @@ pub fn build_combined_crystal(
 
     if preview {
         return CombineBuildOutput {
-            crystal,
-            elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
-            applied_radius: applied_r,
-            charge_label,
-            charge_detail,
-            core_nodes: 0,
-            core_edges: 0,
-            core_summary: String::from("(core readout on release)"),
-            local_cores: Vec::new(),
-            note: notes.join("; "),
-            preview,
-            refused: None,
+            crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: applied_r,
+            charge_label, charge_detail, core_nodes: 0, core_edges: 0,
+            core_summary: String::from("(core readout on release)"), local_cores: Vec::new(),
+            patch_centre: ctr, applied_cuts, coalesced_count, note: notes.join("; "),
+            preview, refused: None,
         };
     }
     let (core_nodes, core_edges) = core_graph(&crystal, &info.lat_info, opts.core_radius)
@@ -449,16 +456,10 @@ pub fn build_combined_crystal(
     CombineBuildOutput {
         core_summary: summarize_rings_and_core(&crystal, &info.lat_info),
         local_cores: inspect_crystal_cores(&crystal),
-        crystal,
-        elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
-        applied_radius: applied_r,
-        charge_label,
-        charge_detail,
-        core_nodes,
-        core_edges,
-        note: notes.join("; "),
-        preview,
-        refused: None,
+        crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: applied_r,
+        charge_label, charge_detail, core_nodes, core_edges,
+        patch_centre: ctr, applied_cuts, coalesced_count, note: notes.join("; "),
+        preview, refused: None,
     }
 }
 
