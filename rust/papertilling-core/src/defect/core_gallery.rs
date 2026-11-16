@@ -4,20 +4,15 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::f64::consts::PI;
 
-use petgraph::graph::UnGraph;
-
 use crate::defect::charge::{frame_faces, infer_patch_disk};
-use crate::defect::combine_types::{
-    CoreCandidateInfo, CoreGalleryEntry, DislocationScanInfo, EquivalentSingleReport,
-};
+use crate::defect::combine_types::{CoreGalleryEntry, DislocationScanInfo, EquivalentSingleReport};
 use crate::defect::cone_geometry::{add2, norm2, sub2};
 use crate::defect::core_graph::{
     LatticeCoreInfo, TWO_PI, core_graph_with_rim, isomorphic_cores, layer_signature, patch_rim,
 };
-use crate::defect::equivalence::{
-    classify_crystal_charge, fmt_signed_g, fmt_vec2_round4, inspect_crystal_cores,
-};
-use crate::defect::surgery::{DefectSpec, build_point_defects, patch_centre_and_radius};
+use crate::defect::equivalence::inspect_crystal_cores;
+use crate::defect::single_cache::{SingleDefectCache, equivalent_single_cached};
+use crate::defect::surgery::{DefectSpec, patch_centre_and_radius};
 use crate::defect::volterra_patch::{
     enumerate_completions, first_pos, split_ring, wl_hash_labelled,
 };
@@ -426,7 +421,7 @@ pub fn config_core_entry(
     })
 }
 
-fn resolve_patch_rim(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> HashSet<usize> {
+pub(crate) fn resolve_patch_rim(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> HashSet<usize> {
     if !specs.is_empty() && let Ok((ctr, r_def)) = patch_centre_and_radius(lat_info, specs, None, None) {
         let max_r = crystal.ref_pos.iter().map(|&p| norm2(sub2(p, ctr))).fold(0.0_f64, f64::max);
         if (max_r - r_def).abs() <= 1.2 * lat_info.lmax + 1e-5 { return patch_rim(crystal, lat_info, ctr, r_def); }
@@ -443,7 +438,8 @@ pub fn core_gallery(
     Ok((gallery_from_bundle(&bundle, radius, true, 8, draw), bundle.info))
 }
 
-/// Compare a built configuration against the single defect(s) carrying the same total charge.
+/// Compare a built configuration against the single defect(s) carrying the same total charge
+/// (one-shot: `single_cache::equivalent_single_cached` with an empty cache).
 #[allow(clippy::too_many_arguments)]
 pub fn equivalent_single(
     group: &str,
@@ -455,62 +451,6 @@ pub fn equivalent_single(
     grid: usize,
     draw_gallery: bool,
 ) -> Result<EquivalentSingleReport, String> {
-    let lat_info = LatticeCoreInfo::new(cell);
-    let charge = classify_crystal_charge(group, cell, frame, crystal)?;
-    let rim = resolve_patch_rim(crystal, &lat_info, specs);
-    let h_cfg: UnGraph<u16, ()> = core_graph_with_rim(crystal, &rim, &lat_info, radius)?;
-    let config_core = config_core_entry(crystal, &rim, &lat_info, radius, draw_gallery);
-
-    let (mut candidates, mut matches, mut scan, mut gallery) = (Vec::new(), Vec::new(), None, Vec::new());
-    if charge.kind == "dislocation" {
-        let b = charge.b.unwrap_or([0.0, 0.0]);
-        let bundle = scan_dislocation_cores(cell, b, radius, grid, 8, None)?;
-        gallery = gallery_from_bundle(&bundle, radius, true, 8, draw_gallery);
-        let h_wl = wl_hash_labelled(&h_cfg);
-        for c in &bundle.cores {
-            if c.wl_hash == h_wl && isomorphic_cores(&h_cfg, &c.graph) {
-                matches.push(c.info.name.clone());
-            }
-            candidates.push(c.info.clone());
-        }
-        if matches.is_empty() && specs.len() == 1 && matches!(specs[0], DefectSpec::Dislocation { .. }) {
-            matches.push("its own core (the configuration is one dislocation; its cut end is not among the scanned ones)".to_string());
-        }
-        scan = Some(bundle.info);
-    } else if charge.kind == "disclination"
-        && let Some(DefectSpec::Disclination { angle_deg, at, .. }) = charge.single
-    {
-        let single_spec = [DefectSpec::Disclination { angle_deg, at, cut: None }];
-        let single_crys = build_point_defects(&lat_info.lat.cell, &single_spec, None, None)?;
-        let (s_ctr, s_r) = patch_centre_and_radius(&lat_info, &single_spec, None, None)?;
-        let h_single = core_graph_with_rim(&single_crys, &patch_rim(&single_crys, &lat_info, s_ctr, s_r), &lat_info, radius)?;
-        let cand_name = format!("single {} deg at {}", fmt_signed_g(angle_deg), fmt_vec2_round4(at));
-        if isomorphic_cores(&h_cfg, &h_single) {
-            matches.push(cand_name.clone());
-        }
-        candidates.push(CoreCandidateInfo {
-            name: cand_name, volterra: None, rings: Vec::new(), under: Vec::new(), added: 0,
-            lattice_bonds: 0, reconstruction_bonds: 0, bipartite: None, core_point: None, cut: None,
-        });
-    } else if charge.kind == "vacuum" && h_cfg.node_count() == 0 {
-        matches.push("perfect lattice".to_string());
-    }
-
-    let equivalent = !matches.is_empty();
-    let verdict = if equivalent {
-        format!("equivalent to the single defect (core: {})", matches.join(", "))
-    } else if let Some(ref sc) = scan {
-        format!(
-            "no match among {} distinct cores scanned (grid={}, {} Volterra builds, completions capped {} times, {} skipped at the rim); a larger grid may find more cores",
-            sc.distinct, sc.grid, sc.builds, sc.capped, sc.skipped_rim
-        )
-    } else {
-        "not equivalent to the single defect".to_string()
-    };
-
-    Ok(EquivalentSingleReport {
-        kind: charge.kind.clone(), single: charge.single.clone(), charge, candidates, matches,
-        equivalent, verdict, scan, core_nodes: h_cfg.node_count(), core_edges: h_cfg.edge_count(),
-        config_core, gallery,
-    })
+    let mut cache = SingleDefectCache::new(1);
+    equivalent_single_cached(group, cell, frame, specs, crystal, radius, grid, draw_gallery, &mut cache)
 }

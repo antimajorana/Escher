@@ -5,6 +5,7 @@ use crate::defect::combine_types::{
     ClassifiedCharge, ConfigComparison, CoreFaceSummary, CoreGalleryEntry, DislocationScanInfo,
     EquivalentSingleReport,
 };
+pub use crate::defect::single_cache::{SingleDefectCache, equivalent_single_cached};
 use crate::defect::surgery::DefectSpec;
 use crate::types::{BuiltCrystal, Cell2D, Frame2D};
 

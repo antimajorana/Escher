@@ -115,8 +115,60 @@ fn catalogue_for_centres(group: &str, cell: &Cell2D, frame: Frame2D) -> DefectCa
     cat
 }
 
+/// The rotation-centre classes of one lattice (order, label, members mod the lattice), built once, for repeated
+/// snapping (`nearest_allowed_centre` without rebuilding the catalogue on every call; the Combine tab snaps on
+/// every hover and drag frame).
+#[derive(Clone, Debug)]
+pub struct CentreSnapper {
+    a: [[f64; 2]; 2],
+    ainv: [[f64; 2]; 2],
+    classes: Vec<(usize, String, Vec<[f64; 2]>)>,
+}
+
+impl CentreSnapper {
+    pub fn new(group: &str, cell: &Cell2D, frame: Frame2D) -> Self {
+        let cat = catalogue_for_centres(group, cell, frame);
+        let classes = cat.centre_classes.iter().map(|r| (r.order, r.label.clone(), r.members.clone())).collect();
+        Self { a: cat.grp.a, ainv: cat.grp.ainv, classes }
+    }
+
+    /// Nearest point of a class whose order allows `angle_deg` (`angle * order / 360` an integer), with its label;
+    /// the rule of Python `LatticeData.nearest_centre`.
+    pub fn nearest(&self, angle_deg: f64, near: [f64; 2]) -> Result<([f64; 2], String), String> {
+        if !angle_deg.is_finite() || near.iter().any(|x| !x.is_finite()) {
+            return Err("angle and position must be finite".to_string());
+        }
+        if angle_deg.abs() < 1e-9 {
+            return Err("disclination angle must be non-zero".to_string());
+        }
+        let f_near = mat2_vec(self.ainv, near);
+        let n0 = [f_near[0].floor(), f_near[1].floor()];
+        let mut best: Option<(f64, [f64; 2], &str)> = None;
+        for (order, label, members) in &self.classes {
+            let k = angle_deg * (*order as f64) / 360.0;
+            if (k - round_even(k)).abs() > 1e-6 {
+                continue;
+            }
+            for &q in members {
+                for i in -1..=2 {
+                    for j in -1..=2 {
+                        let sh = mat2_vec(self.a, [n0[0] + i as f64, n0[1] + j as f64]);
+                        let p = add2(q, sh);
+                        let dist = norm2(sub2(p, near));
+                        if best.as_ref().is_none_or(|(bd, _, _)| dist < *bd - 1e-9) {
+                            best = Some((dist, p, label.as_str()));
+                        }
+                    }
+                }
+            }
+        }
+        best.map(|(_, p, lbl)| (p, lbl.to_string()))
+            .ok_or_else(|| format!("no rotation centre of this lattice allows {angle_deg} degrees"))
+    }
+}
+
 /// Snap `near` to the nearest allowed Wyckoff rotation centre of `G` permitting `angle_deg`,
-/// returning `(snapped_cartesian_point, centre_label)`.
+/// returning `(snapped_cartesian_point, centre_label)`. For repeated calls build a `CentreSnapper` once.
 pub fn nearest_allowed_centre(
     group: &str,
     cell: &Cell2D,
@@ -127,30 +179,7 @@ pub fn nearest_allowed_centre(
     if angle_deg.abs() < 1e-9 {
         return Err("disclination angle must be non-zero".to_string());
     }
-    let cat = catalogue_for_centres(group, cell, frame);
-    let f_near = mat2_vec(cat.grp.ainv, near);
-    let n0 = [f_near[0].floor(), f_near[1].floor()];
-    let mut best: Option<(f64, [f64; 2], String)> = None;
-    for r in &cat.centre_classes {
-        let k = angle_deg * (r.order as f64) / 360.0;
-        if (k - round_even(k)).abs() > 1e-6 {
-            continue;
-        }
-        for &q in &r.members {
-            for i in -1..=2 {
-                for j in -1..=2 {
-                    let sh = mat2_vec(cat.grp.a, [n0[0] + i as f64, n0[1] + j as f64]);
-                    let p = add2(q, sh);
-                    let dist = norm2(sub2(p, near));
-                    if best.as_ref().is_none_or(|(bd, _, _)| dist < *bd - 1e-9) {
-                        best = Some((dist, p, r.label.clone()));
-                    }
-                }
-            }
-        }
-    }
-    best.map(|(_, p, lbl)| (p, lbl))
-        .ok_or_else(|| format!("no rotation centre of this lattice allows {angle_deg} degrees"))
+    CentreSnapper::new(group, cell, frame).nearest(angle_deg, near)
 }
 
 fn orbit_rep(grp: &LatticeGroup, b: [f64; 2]) -> [f64; 2] {

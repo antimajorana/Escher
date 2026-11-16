@@ -1,22 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-use papertilling_core::dsymbol::{self, DSymbolKey};
+use papertilling_core::dsymbol::DSymbolKey;
 use papertilling_core::plane::catalogue::{
     GroupCatalogue, NamedCatalogue, NamedLattice, parse_catalogue_str, parse_named_str,
 };
-use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::groups::{
     CrystalSystem, WALLPAPER_GROUPS, crystal_system, group_ops, is_chiral, label_point,
     wyckoff_table,
 };
-use papertilling_core::plane::tuning::{allowed_interval, inward_limits, special_points};
+use papertilling_core::plane::tuning::SliderState;
 use papertilling_core::types::{Cell2D, Frame2D, Recipe};
 
 use crate::backend::{
-    CatalogueItemUi, CatalogueRuleUi, DSymbolReadoutUi, ForbiddenSpanUi, GroupInfo, SliderParamUi,
-    SpecialTickUi, WyckoffRowUi,
+    CatalogueItemUi, CatalogueRuleUi, DSymbolReadoutUi, GroupInfo, SliderParamUi, WyckoffRowUi,
 };
+
+mod tuned;
+pub use tuned::{slider_params_ui, tune_item};
 
 const POINTS_JSON: &str = include_str!("../../../papertilling/data/points.json");
 const SHEET_JSON: &str = include_str!("../../../papertilling/data/sheet.json");
@@ -243,149 +244,31 @@ pub fn wyckoff_rows_for_group(group: &str, occupied: &[char]) -> Vec<WyckoffRowU
         .collect()
 }
 
+fn values_map(params: &[(String, f64)]) -> BTreeMap<String, f64> {
+    params.iter().map(|(k, v)| (k.clone(), *v)).collect()
+}
+
+/// Sliders of `item` at `current_vals` (names not free in `item` are ignored): Python's ranges, limits, forbidden
+/// spans and special values (`SliderState`, the port of `widgets.explore`).
 pub fn sliders_for_item(
     item: &CatalogueItemUi,
     current_vals: &[(String, f64)],
 ) -> Vec<SliderParamUi> {
-    let Ok(fam) = LatticeFamily::from_recipe(&item.recipe, Some(item.frame)) else {
-        return Vec::new();
-    };
-    let defaults = fam.parameter_list();
-    if defaults.is_empty() {
-        return Vec::new();
-    }
-    let mut override_map: BTreeMap<String, f64> = defaults.iter().cloned().collect();
-    for (k, v) in current_vals {
-        if override_map.contains_key(k) {
-            override_map.insert(k.clone(), *v);
-        }
-    }
-    defaults
-        .into_iter()
-        .map(|(name, def_val)| {
-            let val = override_map[&name];
-            let (nom_lo, nom_hi, step) = match name.as_str() {
-                "b" => (0.4, 2.6, 0.01),
-                "gamma" => (40.0, 140.0, 0.5),
-                _ => (def_val - 0.5, def_val + 0.5, 0.002),
-            };
-            let (allowed_min, allowed_max, forbidden) =
-                match allowed_interval(&item.recipe, &name, nom_lo, nom_hi, Some(&override_map), None)
-                {
-                    Ok(r) => {
-                        let (a, b) = if r.current_ok {
-                            r.interval
-                        } else {
-                            (nom_lo, nom_hi)
-                        };
-                        let (lo_in, hi_in) = if r.edges != (None, None) {
-                            inward_limits(a, b, val, step)
-                        } else {
-                            (a, b)
-                        };
-                        let segs = r
-                            .segments
-                            .into_iter()
-                            .map(|s| ForbiddenSpanUi {
-                                lo: s.lo,
-                                hi: s.hi,
-                                reason: s.reason,
-                            })
-                            .collect();
-                        (lo_in, hi_in, segs)
-                    }
-                    Err(_) => (nom_lo, nom_hi, Vec::new()),
-                };
-            let special_ticks =
-                special_points(&item.recipe, &name, nom_lo, nom_hi, Some(&override_map))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|sp| SpecialTickUi {
-                        value: sp.value,
-                        supergroup: sp.group,
-                        equation: sp.equations.join(", "),
-                    })
-                    .collect();
-            SliderParamUi {
-                name,
-                value: val,
-                default_value: def_val,
-                nominal_min: nom_lo,
-                nominal_max: nom_hi,
-                allowed_min,
-                allowed_max,
-                step,
-                special_ticks,
-                forbidden,
-            }
-        })
-        .collect()
+    SliderState::with_values(item.recipe.clone(), Some(&values_map(current_vals)))
+        .map(|st| slider_params_ui(&st))
+        .unwrap_or_default()
 }
 
+/// Cell and status line of `item` at `params` (`widgets.redraw`); see `tuned::readout`.
 pub fn build_cell_for_item(
     item: &CatalogueItemUi,
     params: &[(String, f64)],
 ) -> (Cell2D, DSymbolReadoutUi) {
-    let base_fam = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))
-        .expect("valid recipe in CatalogueItemUi");
-    let fam = if params.is_empty() {
-        base_fam.clone()
-    } else {
-        base_fam
-            .with_values(params.iter().map(|(k, v)| (k.as_str(), *v)))
-            .unwrap_or(base_fam)
-    };
-    let cell = fam.cell();
-    let active_group = cell.identify_wallpaper_group(false);
-    let crossings = cell.has_crossings();
-    let readout = match fam.dsymbol() {
-        Ok(ds) => match ds.canonical_key() {
-            Ok(ck) => {
-                let nk = dsymbol::network_key(&ck).unwrap_or_else(|_| ck.clone());
-                let si = dsymbol::symmetry_index(&ck).unwrap_or(item.symmetry_index);
-                let dk_str = format_dsymbol_key(&ck);
-                let nk_str = format_dsymbol_key(&nk);
-                let status_ok = !crossings;
-                let status_message = if crossings {
-                    String::from("Bonds cross or pass through a site (non-planar drawing)")
-                } else if active_group != item.group {
-                    format!(
-                        "Planar tiling OK — enhanced symmetry {} (base {})",
-                        active_group, item.group
-                    )
-                } else if dk_str != item.dsymbol_key {
-                    String::from("Planar tiling OK — combinatorially distinct D-symbol chamber")
-                } else {
-                    String::from("Planar tiling OK — canonical D-symbol preserved")
-                };
-                DSymbolReadoutUi {
-                    dsymbol_key: dk_str,
-                    network_key: nk_str,
-                    symmetry_index: si,
-                    active_group,
-                    status_ok,
-                    status_message,
-                }
-            }
-            Err(err) => DSymbolReadoutUi {
-                dsymbol_key: item.dsymbol_key.clone(),
-                network_key: item.network_key.clone(),
-                symmetry_index: item.symmetry_index,
-                active_group,
-                status_ok: false,
-                status_message: format!("D-symbol key error: {err}"),
-            },
-        },
-        Err(err) => DSymbolReadoutUi {
-            dsymbol_key: item.dsymbol_key.clone(),
-            network_key: item.network_key.clone(),
-            symmetry_index: item.symmetry_index,
-            active_group,
-            status_ok: false,
-            status_message: format!("Non-planar / degenerate drawing: {err}"),
-        },
-    };
-    (cell, readout)
+    let st = (!params.is_empty())
+        .then(|| SliderState::with_values(item.recipe.clone(), Some(&values_map(params))).ok())
+        .flatten();
+    let t = tune_item(item, st.as_ref());
+    (t.cell, t.readout)
 }
 
 #[cfg(test)]
@@ -422,6 +305,11 @@ mod tests {
         assert!(sliders.iter().any(|s| !s.special_ticks.is_empty()));
         let (cell, ro) = backend.build_cell(oblique, &[("b".into(), 1.0), ("gamma".into(), 90.0)]);
         assert_eq!(cell.basis.len(), 1);
-        assert!(ro.status_ok && ro.active_group == "p4m");
+        // a = b, gamma = 90: the square lattice. As widgets.explore (tests/test_widgets.py::test_slider_callback:
+        // "p4m" in the status, in red) the status is not OK on a special locus.
+        assert!(!ro.status_ok && ro.active_group == "p4m", "{}", ro.status_message);
+        assert!(ro.status_message.starts_with("group is now p4m at the special value"), "{}", ro.status_message);
+        let (_, ro0) = backend.build_cell(oblique, &[]);
+        assert!(ro0.status_ok && ro0.active_group == "p2", "{}", ro0.status_message);
     }
 }

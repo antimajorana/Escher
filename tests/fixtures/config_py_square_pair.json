@@ -1,0 +1,76 @@
+{
+  "format": "papertilling.config.v1",
+  "lattice_label": "Square",
+  "group": "p4m",
+  "recipe": {
+    "group": "p4m",
+    "sites": [
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "bonds": [
+      [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          -1.0,
+          0.0
+        ]
+      ]
+    ],
+    "a": 1.0
+  },
+  "frame": {
+    "q": [
+      [
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "origin": [
+      0.0,
+      0.0
+    ]
+  },
+  "defects": [
+    {
+      "kind": "disclination",
+      "angle": 90.0,
+      "at": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "kind": "disclination",
+      "angle": -90.0,
+      "at": [
+        0.5,
+        0.5
+      ]
+    }
+  ],
+  "options": {
+    "r_patch": 12.853553390593273,
+    "picture": "raw",
+    "grid": 1,
+    "radius": 2
+  },
+  "summary": {
+    "charge": "dislocation [b] = P+ orbit of [1.0, 0.0] (|b| = 1.0000)",
+    "kind": "dislocation",
+    "equivalent": true,
+    "matches": [
+      "Volterra core 1"
+    ],
+    "verdict": "equivalent to the single defect (core: Volterra core 1)"
+  }
+}

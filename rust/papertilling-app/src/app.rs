@@ -1,7 +1,7 @@
 use egui_extras::{Size, StripBuilder};
-use papertilling_core::types::Cell2D;
+use papertilling_core::types::{Cell2D, Frame2D, Recipe};
 
-use crate::backend::{AppBackend, SurfaceTargetUi};
+use crate::backend::{AppBackend, CatalogueItemUi, SurfaceTargetUi};
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::combine_tab::CombineTabState;
 use crate::defects_tab::DefectsTabState;
@@ -30,7 +30,16 @@ impl NavTab {
     }
 }
 
+/// What the Defects and Combine tabs were built for: the lattice and its (slider-tuned) recipe.
+type ItemKey = (String, String, Recipe, Frame2D);
+
+fn item_key(item: &CatalogueItemUi) -> ItemKey {
+    (item.label.clone(), item.group.clone(), item.recipe.clone(), item.frame)
+}
+
 pub struct PapertillingApp {
+    defects_seen: ItemKey,
+    combine_seen: ItemKey,
     smoke_test: bool,
     smoke_reported: bool,
     last_smoke_stage: u32,
@@ -50,6 +59,7 @@ pub struct PapertillingApp {
 impl PapertillingApp {
     pub fn new(smoke_test: bool, adapter_name: String, backend_name: String) -> Self {
         let backend = AppBackend::new();
+        backend.prefetch_surface_verdicts();
         let placeholder = Scene2D::PeriodicCell {
             cell: Cell2D {
                 a1: [1.0, 0.0],
@@ -80,6 +90,8 @@ impl PapertillingApp {
         };
 
         Self {
+            defects_seen: item_key(gallery.active_item()),
+            combine_seen: item_key(gallery.active_item()),
             smoke_test,
             smoke_reported: false,
             last_smoke_stage: 0,
@@ -116,22 +128,36 @@ impl PapertillingApp {
                 );
             }
             NavTab::Defects => {
-                self.defects.rebuild_crystal(
-                    self.gallery.active_item(),
-                    &self.backend,
-                    &mut self.canvas2d,
-                    true,
-                );
+                let item = self.gallery.active_item().clone();
+                if item_key(&item) == self.defects_seen {
+                    self.defects.rebuild_crystal(&item, &self.backend, &mut self.canvas2d, true);
+                } else {
+                    self.defects_seen = item_key(&item);
+                    self.defects.reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
+                }
             }
             NavTab::Combine => {
-                let item = self.gallery.active_item();
-                self.combine.ensure_compared(item, &self.backend);
-                self.combine.sync_to_canvas(item, &mut self.canvas2d, true);
+                let item = self.gallery.active_item().clone();
+                if item_key(&item) == self.combine_seen {
+                    self.combine.ensure_compared(&item, &self.backend);
+                    self.combine.sync_to_canvas(&item, &mut self.canvas2d, true);
+                } else {
+                    self.combine_seen = item_key(&item);
+                    self.combine.reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
+                }
             }
         }
     }
 
     fn export_dialog(&mut self) {
+        if self.active_tab == NavTab::Defects && self.defects.is_busy() {
+            self.export_status = String::from("Wait for the defect build before exporting.");
+            return;
+        }
+        if self.active_tab == NavTab::Combine && (self.combine.is_building() || self.combine.dragging) {
+            self.export_status = String::from("Finish moving the pins and wait for the crystal build before exporting.");
+            return;
+        }
         let default_name = match self.active_tab {
             NavTab::Gallery => "lattice_gallery.svg",
             NavTab::Surfaces => "surface_net.svg",
@@ -178,7 +204,7 @@ impl PapertillingApp {
                     .clicked()
                     && !self.smoke_test
                 {
-                    self.active_tab = NavTab::Combine;
+                    self.switch_tab(NavTab::Combine);
                     self.combine
                         .import_json_dialog(&self.backend, &mut self.canvas2d);
                 }
@@ -194,26 +220,13 @@ impl PapertillingApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     match self.active_tab {
                         NavTab::Gallery => {
-                            let changed = self.gallery.show_side_panel(
+                            // Defects and Combine reload lazily on their next activation
+                            // (`switch_tab` compares the active item's key, sliders included).
+                            let _ = self.gallery.show_side_panel(
                                 ui,
                                 &self.backend,
                                 &mut self.canvas2d,
                             );
-                            if changed {
-                                let active = self.gallery.active_item().clone();
-                                self.defects.reload_for_item(
-                                    &active,
-                                    &self.backend,
-                                    &mut self.canvas2d,
-                                    false,
-                                );
-                                self.combine.reload_for_item(
-                                    &active,
-                                    &self.backend,
-                                    &mut self.canvas2d,
-                                    false,
-                                );
-                            }
                         }
                         NavTab::Surfaces => {
                             let item = self.gallery.active_item().clone();
@@ -224,24 +237,13 @@ impl PapertillingApp {
                                 &mut self.canvas2d,
                                 &mut self.view3d,
                             ) {
+                                self.gallery.rule = crate::backend::CatalogueRuleUi::Points;
                                 self.gallery.select_group_by_symbol(
                                     &new_grp,
                                     &self.backend,
                                     &mut self.canvas2d,
                                 );
                                 let active = self.gallery.active_item().clone();
-                                self.defects.reload_for_item(
-                                    &active,
-                                    &self.backend,
-                                    &mut self.canvas2d,
-                                    false,
-                                );
-                                self.combine.reload_for_item(
-                                    &active,
-                                    &self.backend,
-                                    &mut self.canvas2d,
-                                    false,
-                                );
                                 self.surfaces.activate_and_sync(
                                     &active,
                                     &self.backend,
@@ -423,6 +425,9 @@ mod tests {
         st.custom_mn = (1, 0);
         st.place_at_world([0.25, -0.35], square, &backend, &mut canvas);
         assert!(st.move_pin_to(2, [0.65, -0.15], square, &backend, &mut canvas));
+        st.finish_drag(square);
+        st.wait_idle(square, Some(&mut canvas));
+        assert!(!st.is_busy() && !st.last_build.preview);
 
         // NotebookConfigJson round-trip handling both Err and Ok compare_result gracefully
         st.compare_result = Some(Err(String::from("pending")));
@@ -454,5 +459,53 @@ mod tests {
         bad_cfg.recipe.group = String::from("invalid_group");
         assert!(st2.load_notebook_json(&bad_cfg, &backend, &mut canvas).is_err());
         assert!(NotebookConfigJson::from_json_str("{not valid json").is_err());
+    }
+
+    /// Regression: a Gallery change used to rebuild Defects and Combine synchronously on every
+    /// click; now each reloads once, when it is shown, for the lattice the Gallery shows then.
+    #[test]
+    fn tabs_reload_lazily_for_the_current_gallery_lattice() {
+        let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
+        app.gallery.select_group_by_symbol("p4m", &app.backend, &mut app.canvas2d);
+        let p4m = app.gallery.active_item().clone();
+        assert_ne!(item_key(&p4m), app.combine_seen, "the start lattice is p6m kagome");
+        app.switch_tab(NavTab::Combine);
+        assert_eq!(app.combine_seen, item_key(&p4m));
+        app.combine.wait_idle(&p4m, Some(&mut app.canvas2d));
+        assert_eq!(app.combine.info.cell.basis.len(), p4m.sites_per_cell);
+        assert!(app.combine.specs.iter().all(|s| matches!(s, papertilling_core::defect::surgery::DefectSpec::Disclination { angle_deg, .. } if (angle_deg.abs() - 90.0).abs() < 1e-9)),
+            "p4m pair preset uses its 4-fold centres (±90°)");
+        app.switch_tab(NavTab::Defects);
+        assert_eq!(app.defects_seen, item_key(&p4m));
+    }
+
+    #[test]
+    fn tuned_gallery_geometry_reaches_surfaces_defects_and_combine() {
+        let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
+        let idx = app.backend.named_lattices().iter().position(|it| it.named_key.as_deref() == Some("oblique")).unwrap();
+        app.gallery.select_named(idx, &app.backend, &mut app.canvas2d);
+        app.gallery.set_param("b", 0.8, &mut app.canvas2d).unwrap();
+        app.gallery.set_param("gamma", 60.0, &mut app.canvas2d).unwrap();
+        let item = app.gallery.active_item().clone();
+        assert_eq!((item.recipe.b, item.recipe.gamma), (Some(0.8), Some(60.0)));
+
+        // By hand: a2 = 0.8 (cos 60°, sin 60°) = (0.4, 0.4 √3).
+        app.switch_tab(NavTab::Combine);
+        app.combine.wait_idle(&item, Some(&mut app.canvas2d));
+        let a2 = app.combine.info.cell.a2;
+        assert!((a2[0] - 0.4).abs() < 1e-10 && (a2[1] - 0.4 * 3.0_f64.sqrt()).abs() < 1e-10);
+
+        app.switch_tab(NavTab::Defects);
+        app.defects.wait_idle(&mut app.canvas2d);
+        let Scene2D::CrystalPatch { crystal, .. } = app.canvas2d.scene() else { panic!("crystal"); };
+        assert!(crystal.adj.iter().flatten().any(|e| (e.vec[0].hypot(e.vec[1]) - 0.8).abs() < 1e-9));
+
+        app.surfaces.target = SurfaceTargetUi::Torus;
+        app.surfaces.auto_size = false;
+        (app.surfaces.params.h, app.surfaces.params.k) = (3, 4);
+        app.switch_tab(NavTab::Surfaces);
+        let Scene2D::SurfaceNet { mesh } = app.canvas2d.scene() else { panic!("surface net"); };
+        assert_eq!(mesh.sites.len(), 12, "one square-network site per cell on a 3×4 torus");
+        assert!(mesh.bonds.iter().any(|(_, _, v)| (v[0].hypot(v[1]) - 0.8).abs() < 1e-9));
     }
 }

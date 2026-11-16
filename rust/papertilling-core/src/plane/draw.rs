@@ -12,6 +12,7 @@ use crate::plane::planarity::{
     signed_area, split_frame_faces,
 };
 pub use crate::plane::relax::relax_picture;
+pub use crate::plane::relax_preview::{PreviewReport, relax_preview};
 use crate::plane::relax::{
     RelaxSetup, gauss_newton, pos_to_z, relax_guarded, relax_pinned, work_copy_crystal, z_to_pos,
 };

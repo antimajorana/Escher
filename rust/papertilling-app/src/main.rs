@@ -3,7 +3,11 @@
 mod app;
 mod backend;
 mod canvas2d;
+#[cfg(test)]
+mod combine_bench;
 mod combine_tab;
+mod combine_ui;
+mod combine_worker;
 mod core_panel;
 mod defects_tab;
 mod export;

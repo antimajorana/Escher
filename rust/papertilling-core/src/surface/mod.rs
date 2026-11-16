@@ -1,6 +1,8 @@
 //! Geometry-agnostic "pieces + pairings" surface types, flat quotients, genus-`g` covers,
 //! polyhedral spheres/RP2, and `surface_table`.
 
+#[cfg(test)]
+mod audit_tests;
 pub mod checks;
 pub mod flat;
 pub mod genus;
@@ -28,10 +30,10 @@ pub use pieces::{
     ConeSurface, LatticeData, Net2D, PairingSpec, PairingTestRow, Piece2D, check_surface_mesh,
     glue, pairing_test,
 };
-pub use polyhedra::{CentreClass, candidate_centres, projective_plane, sphere};
+pub use polyhedra::{CentreClass, candidate_centres, polyhedron, projective_plane, sphere};
 pub use report::{
     FlatAttempt, SURFACES, SurfaceTableRow, SymmetryFacts, surface_table_with, symmetry_facts,
-    try_rp2_for_table, try_sphere_for_table,
+    try_poly_for_table_with_centre, try_rp2_for_table, try_sphere_for_table,
 };
 
 /// Evaluate all 8 canonical `SURFACES` rows (`torus`, `cylinder`, `Moebius band`, `Klein bottle`,

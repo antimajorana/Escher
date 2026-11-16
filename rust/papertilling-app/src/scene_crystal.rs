@@ -7,13 +7,39 @@ use crate::scene2d::{
     ring_tint_rgba, site_palette,
 };
 
+/// Bonds drawn as two dotted stubs instead of in full (as `Defect.plot` and `drawing_check.drawn`): a bond is a
+/// ghost bond when either of its directions carries a `ghost_stub` (stretched bonds, Möbius seam bonds).
+pub(crate) fn ghost_bonds(crystal: &BuiltCrystal) -> HashSet<(usize, usize)> {
+    let mut out = HashSet::new();
+    for (u, nbrs) in crystal.adj.iter().enumerate() {
+        for d in nbrs.iter().filter(|d| d.ghost_stub.is_some()) {
+            out.insert((u.min(d.to), u.max(d.to)));
+        }
+    }
+    out
+}
+
+fn push_stub(lines: &mut Vec<LinePrim>, circles: &mut Vec<CirclePrim>, a: [f64; 2], b: [f64; 2]) {
+    let (a, b) = ([a[0] as f32, a[1] as f32], [b[0] as f32, b[1] as f32]);
+    lines.push(LinePrim { a, b, color: [184, 38, 134, 235], width: 2.0, dashed: true, arrow_mid: false });
+    circles.push(CirclePrim {
+        center: b,
+        radius_world: 0.045,
+        min_px: 2.0,
+        max_px: 4.2,
+        fill: [255, 255, 255, 220],
+        stroke: ([184, 38, 134, 235], 1.2),
+    });
+}
+
 pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &str) -> ScenePrimitives {
     let mut polygons = Vec::new();
     let mut lines = Vec::new();
     let mut circles = Vec::new();
     let mut labels = Vec::new();
+    let ghosts = ghost_bonds(crystal);
 
-    for (ring_pts, is_core) in extract_crystal_faces(crystal) {
+    for (ring_pts, is_core) in extract_crystal_faces(crystal, &ghosts) {
         if is_core && !ring_pts.is_empty() {
             let k = ring_pts.len() as f32;
             let cx = ring_pts.iter().map(|p| p[0]).sum::<f32>() / k;
@@ -41,40 +67,26 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
     let mut edge_meta: HashMap<(usize, usize), (usize, bool)> = HashMap::new();
     for (u, nbrs) in crystal.adj.iter().enumerate() {
         for d in nbrs {
-            if let Some(stub) = d.ghost_stub
-                && let Some(&pu) = crystal.pos.get(u)
-            {
-                let a = [pu[0] as f32, pu[1] as f32];
-                let b = [(pu[0] + stub[0]) as f32, (pu[1] + stub[1]) as f32];
-                lines.push(LinePrim {
-                    a,
-                    b,
-                    color: [184, 38, 134, 235],
-                    width: 2.0,
-                    dashed: true,
-                    arrow_mid: false,
-                });
-                circles.push(CirclePrim {
-                    center: b,
-                    radius_world: 0.045,
-                    min_px: 2.0,
-                    max_px: 4.2,
-                    fill: [255, 255, 255, 220],
-                    stroke: ([184, 38, 134, 235], 1.2),
-                });
-                continue;
-            }
             let key = if u < d.to { (u, d.to) } else { (d.to, u) };
             let entry = edge_meta.entry(key).or_insert((d.kind, false));
             entry.1 |= d.across;
         }
     }
 
+    let n_pos = crystal.pos.len();
     for &(u, v) in &crystal.edges {
-        if u >= crystal.pos.len() || v >= crystal.pos.len() {
+        if u >= n_pos || v >= n_pos {
             continue;
         }
         let key = if u < v { (u, v) } else { (v, u) };
+        if ghosts.contains(&key) {
+            let (pu, pv) = (crystal.pos[u], crystal.pos[v]);
+            let mid = [0.5 * (pu[0] + pv[0]), 0.5 * (pu[1] + pv[1])];
+            let stub = |a: usize, b: usize| crystal.adj[a].iter().find(|d| d.to == b).and_then(|d| d.ghost_stub).unwrap_or(mid);
+            push_stub(&mut lines, &mut circles, pu, stub(u, v));
+            push_stub(&mut lines, &mut circles, pv, stub(v, u));
+            continue;
+        }
         let (kind, across) = edge_meta.get(&key).copied().unwrap_or((0, false));
         let (color, width) = if across {
             ([222, 86, 24, 255], 2.35)
@@ -205,15 +217,21 @@ fn interior_anomalous_degrees(crystal: &BuiltCrystal) -> HashMap<usize, bool> {
     out
 }
 
-fn extract_crystal_faces(crystal: &BuiltCrystal) -> Vec<(Vec<[f32; 2]>, bool)> {
+/// Faces of the drawn picture (ghost bonds are not drawn, so they bound no face), each flagged core or bulk
+/// by its distance from the centroid of the sites.
+fn extract_crystal_faces(crystal: &BuiltCrystal, ghosts: &HashSet<(usize, usize)>) -> Vec<(Vec<[f32; 2]>, bool)> {
     let n = crystal.pos.len();
     if n < 3 || crystal.edges.is_empty() {
         return Vec::new();
     }
+    let centroid = [
+        (crystal.pos.iter().map(|p| p[0]).sum::<f64>() / n as f64) as f32,
+        (crystal.pos.iter().map(|p| p[1]).sum::<f64>() / n as f64) as f32,
+    ];
     let mut lengths = Vec::with_capacity(crystal.edges.len());
     let mut nbrs: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
     for &(u, v) in &crystal.edges {
-        if u < n && v < n && u != v {
+        if u < n && v < n && u != v && !ghosts.contains(&(u.min(v), u.max(v))) {
             let dx = crystal.pos[v][0] - crystal.pos[u][0];
             let dy = crystal.pos[v][1] - crystal.pos[u][1];
             let len = dx.hypot(dy);
@@ -288,7 +306,7 @@ fn extract_crystal_faces(crystal: &BuiltCrystal) -> Vec<(Vec<[f32; 2]>, bool)> {
                 cy += p[1] as f32 / (cycle.len() as f32);
             }
             if area2 > 1e-5 && !long_edge {
-                let r = cx.hypot(cy);
+                let r = (cx - centroid[0]).hypot(cy - centroid[1]);
                 max_face_r = max_face_r.max(r);
                 raw_faces.push((pts, r));
             }

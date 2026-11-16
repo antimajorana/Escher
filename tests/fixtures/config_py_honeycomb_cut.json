@@ -1,0 +1,75 @@
+{
+  "format": "papertilling.config.v1",
+  "lattice_label": "Honeycomb",
+  "group": "p6m",
+  "recipe": {
+    "group": "p6m",
+    "sites": [
+      [
+        0.333333333333,
+        0.666666666667
+      ]
+    ],
+    "bonds": [
+      [
+        [
+          0.333333333333,
+          0.666666666667
+        ],
+        [
+          -0.333333333333,
+          0.333333333333
+        ]
+      ]
+    ],
+    "a": 1.7320508075688772
+  },
+  "frame": {
+    "q": [
+      [
+        1.0,
+        1.2093841455807397e-16
+      ],
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "origin": [
+      0.8660254037844386,
+      0.4999999999999999
+    ]
+  },
+  "defects": [
+    {
+      "kind": "dislocation",
+      "b": [
+        1.7320508075688772,
+        0.0
+      ],
+      "at": [
+        0.4,
+        0.3
+      ],
+      "cut": [
+        0.35,
+        1.0
+      ]
+    }
+  ],
+  "options": {
+    "r_patch": 14.23205080756888,
+    "picture": "relaxed",
+    "grid": 1,
+    "radius": 2
+  },
+  "summary": {
+    "charge": "dislocation [b] = P+ orbit of [1.7321, 0.0] (|b| = 1.7321)",
+    "kind": "dislocation",
+    "equivalent": true,
+    "matches": [
+      "Volterra core 1"
+    ],
+    "verdict": "equivalent to the single defect (core: Volterra core 1)"
+  }
+}

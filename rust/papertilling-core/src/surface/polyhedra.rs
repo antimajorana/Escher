@@ -429,6 +429,18 @@ pub(crate) fn build_polyhedron(
     Err(err)
 }
 
+/// `sphere` (`projective == false`) or `projective_plane`, keeping the refusal's kind (IMPOSSIBLE / NOT FOUND /
+/// invalid argument) instead of flattening it to a string.
+pub fn polyhedron(
+    group: &str,
+    cell: &Cell2D,
+    size: Option<(i32, i32)>,
+    centre_filter: Option<&str>,
+    projective: bool,
+) -> Result<SurfaceMesh, SurfaceError> {
+    build_polyhedron(group, cell, size, centre_filter, projective).map(|s| s.mesh)
+}
+
 pub fn sphere(group: &str, cell: &Cell2D, size: Option<(i32, i32)>, centre_filter: Option<&str>) -> Result<SurfaceMesh, String> {
     build_polyhedron(group, cell, size, centre_filter, false).map(|s| s.mesh).map_err(|e| e.to_string())
 }

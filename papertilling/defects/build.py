@@ -32,6 +32,7 @@ import numpy as np
 
 from ..legacy import fusion_framework as ff
 from . import fast as _fast
+from ._graph import _multi_bfs, layer_signature
 from ..legacy.lab_defects import Perfect, frame_faces, rotation_about, iso_compose, iso_inverse
 from ..legacy.wallpaper_lattices import UnitCell, primitive_cell, _symmetry_ops, has_crossings, make_cell
 
@@ -195,35 +196,6 @@ def lattice_data(lattice, fast: bool | None = None) -> LatticeData:
 # ==============================================================================================
 # Graph-only core
 # ==============================================================================================
-def layer_signature(adj, deg, v, r) -> tuple:
-    """Multiset of (depth, degree, #nbrs one layer in, #same layer, #one layer out) over the ball."""
-    dist = {v: 0}
-    frontier = [v]
-    for k in range(1, r + 1):
-        nxt = []
-        for u in frontier:
-            for w in adj[u]:
-                if w not in dist:
-                    dist[w] = k
-                    nxt.append(w)
-        frontier = nxt
-    sig = []
-    for u, du in dist.items():
-        a = b = c = 0
-        for w in adj[u]:
-            dw = dist.get(w)
-            if dw is None:
-                continue
-            if dw == du - 1:
-                a += 1
-            elif dw == du:
-                b += 1
-            else:
-                c += 1
-        sig.append((du, deg[u], a, b, c))
-    return tuple(sorted(sig))
-
-
 def graph_core(G: nx.Graph, rim: set, lat: LatticeData, radius: int = 2) -> tuple[set, nx.Graph]:
     """(irregular sites, degree-labelled core graph of `radius`) of any crystal graph G.
     rim: sites on or next to the patch boundary. Raises ValueError if the core ball meets the rim."""
@@ -254,20 +226,6 @@ def patch_rim(lat: LatticeData, refs, sublattice, degrees, centre, R) -> set:
         if r > R - 1.5 * lat.lmax or (k < lat.perfect_degree[s] and r > R - 3.0 * lat.lmax):
             out.add(i)
     return out
-
-
-def _multi_bfs(adj, sources, cutoff=None) -> dict:
-    dist = {s: 0 for s in sources}
-    dq = deque(sources)
-    while dq:
-        u = dq.popleft()
-        if cutoff is not None and dist[u] >= cutoff:
-            continue
-        for w in adj[u]:
-            if w not in dist:
-                dist[w] = dist[u] + 1
-                dq.append(w)
-    return dist
 
 
 def isomorphic_cores(G1: nx.Graph, G2: nx.Graph) -> bool:

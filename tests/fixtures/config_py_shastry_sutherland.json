@@ -1,0 +1,78 @@
+{
+  "format": "papertilling.config.v1",
+  "lattice_label": "Shastry-Sutherland",
+  "group": "p4g",
+  "recipe": {
+    "group": "p4g",
+    "sites": [
+      [
+        0.75,
+        0.25
+      ]
+    ],
+    "bonds": [
+      [
+        [
+          0.75,
+          0.25
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      [
+        [
+          0.75,
+          0.25
+        ],
+        [
+          0.75,
+          -0.25
+        ]
+      ]
+    ],
+    "a": 2.0
+  },
+  "frame": {
+    "q": [
+      [
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "origin": [
+      0.5,
+      -0.5
+    ]
+  },
+  "defects": [
+    {
+      "kind": "disclination",
+      "angle": 90.0,
+      "at": [
+        0.5,
+        1.5
+      ]
+    }
+  ],
+  "options": {
+    "r_patch": 17.67766952966369,
+    "picture": "raw",
+    "grid": 1,
+    "radius": 2
+  },
+  "summary": {
+    "charge": "disclination D(2a(i), +90 deg) about [0.5, 1.5]",
+    "kind": "disclination",
+    "equivalent": true,
+    "matches": [
+      "single +90 deg at [0.5, 1.5]"
+    ],
+    "verdict": "equivalent to the single defect (core: single +90 deg at [0.5, 1.5])"
+  }
+}

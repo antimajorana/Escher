@@ -10,6 +10,14 @@ pub mod groups_data;
 pub mod loci;
 pub mod planarity;
 pub mod relax;
+mod relax_normal;
+#[cfg(test)]
+mod relax_parity_tests;
+pub mod relax_preview;
+#[cfg(test)]
+mod relax_reference;
+#[cfg(test)]
+mod test_fixtures;
 pub mod tuning;
 mod tuning_eval;
 pub mod tutte;

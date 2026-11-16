@@ -10,6 +10,7 @@ pub mod cone_geometry;
 pub mod core_gallery;
 pub mod core_graph;
 pub mod equivalence;
+pub mod single_cache;
 #[cfg(test)]
 mod stage5_gate_tests;
 pub mod surgery;

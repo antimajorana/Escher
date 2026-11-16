@@ -173,6 +173,12 @@ fn cone_summary(mesh: &SurfaceMesh) -> String {
 }
 
 fn run_poly_table(group: &str, cell: &Cell2D, projective: bool) -> SurfaceTableRow {
+    try_poly_for_table_with_centre(group, cell, projective, None)
+}
+
+/// The `sphere` (`projective == false`) or `projective plane` row of `surface_table` with its retry schedule, with
+/// the corners restricted to the centre classes matching `centre` (`None`: every usable class, as in the table).
+pub fn try_poly_for_table_with_centre(group: &str, cell: &Cell2D, projective: bool, centre: Option<&str>) -> SurfaceTableRow {
     let name = if projective { "projective plane" } else { "sphere" };
     let facts = symmetry_facts(group);
     if let Some(reason) = facts.impossible_reason(name) {
@@ -181,7 +187,7 @@ fn run_poly_table(group: &str, cell: &Cell2D, projective: bool) -> SurfaceTableR
     let (mut tried, mut whys, mut last_err): (Vec<String>, Vec<String>, Option<SurfaceError>) = (Vec::new(), Vec::new(), None);
     for sz in polyhedron_attempts(name, facts.max_rotation_order()) {
         let kw = format!("size={sz:?}");
-        match build_polyhedron(group, cell, Some(sz), None, projective) {
+        match build_polyhedron(group, cell, Some(sz), centre, projective) {
             Ok(surf) => {
                 tried.push(kw.clone());
                 if surf.checks().ok {

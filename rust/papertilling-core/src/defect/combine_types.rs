@@ -1,13 +1,21 @@
 //! Shared Stage 5 data structures for defect configuration equivalence,
 //! Volterra/completion core galleries, and Notebook 3 `.json` import/export.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::defect::surgery::DefectSpec;
 use crate::types::{BuiltCrystal, Frame2D, Isometry2, Recipe};
 
+/// The only `.json` configuration format (Python `papertilling.defects.config.load_config` refuses others).
+pub const CONFIG_FORMAT: &str = "papertilling.config.v1";
+
 fn default_format() -> String {
-    "papertilling.config.v1".to_string()
+    CONFIG_FORMAT.to_string()
+}
+
+/// A JSON `null` reads as the field's default, as Python's `load_config` treats a null or missing entry.
+fn null_as_default<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(d: D) -> Result<T, D::Error> {
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 fn default_picture() -> String {
@@ -167,18 +175,21 @@ pub struct ConfigSummaryJson {
 }
 
 /// Portable Notebook 3 `.json` defect configuration (`recipe` + `frame` + `defects` + `options` + `summary`).
+/// Only `recipe` and `defects` are required (as in Python's `load_config`); `group` empty means "the recipe's
+/// group"; unknown keys are ignored.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NotebookConfigJson {
     #[serde(default = "default_format")]
     pub format: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub lattice_label: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub group: String,
     pub recipe: Recipe,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub frame: Frame2D,
     pub defects: Vec<DefectSpec>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub options: ConfigOptionsJson,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<ConfigSummaryJson>,
@@ -190,6 +201,14 @@ impl NotebookConfigJson {
     }
 
     pub fn from_json_str(s: &str) -> Result<Self, String> {
-        serde_json::from_str(s).map_err(|e| e.to_string())
+        let cfg: Self = serde_json::from_str(s).map_err(|e| e.to_string())?;
+        if cfg.format != CONFIG_FORMAT {
+            return Err(format!("unsupported configuration format {:?} (expected {CONFIG_FORMAT:?})", cfg.format));
+        }
+        Ok(cfg)
     }
 }
+
+#[cfg(test)]
+#[path = "combine_types_tests.rs"]
+mod tests;

@@ -13,13 +13,14 @@ use super::sym_helper::{
 };
 use super::wall_build::{build_wall, count_network_irregular, perfect_wl_sigs};
 
+/// `[N_E(G) : G]` for a generic metric, as `ITA_GENERIC_INDEX` in `walls.py` (e.g. p3: N = p6m, 12/3 x 3 = 12).
 pub(crate) fn ita_generic_index(group: &str) -> Option<usize> {
     match group {
-        "p6m" | "p4m" | "cmm" | "p31m" => Some(1),
-        "p6" | "p4g" | "p3m1" => Some(2),
-        "p4" | "pgg" | "pmg" | "pmm" => Some(4),
-        "p3" => Some(6),
-        "p2" => Some(16),
+        "p6m" => Some(1),
+        "cmm" | "p4m" | "p4g" | "p31m" | "p6" => Some(2),
+        "p2" | "pmm" | "pmg" | "pgg" | "p4" => Some(4),
+        "p3m1" => Some(6),
+        "p3" => Some(12),
         _ => None, // p1, pm, pg, cm: infinite Euclidean normaliser
     }
 }

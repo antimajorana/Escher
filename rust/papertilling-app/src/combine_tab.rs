@@ -1,4 +1,7 @@
-use egui_extras::{Column, Size, StripBuilder, TableBuilder};
+use std::sync::Arc;
+#[cfg(test)]
+use std::time::Duration;
+
 use papertilling_core::defect::combine_types::{
     ConfigOptionsJson, ConfigSummaryJson, EquivalentSingleReport, NotebookConfigJson,
 };
@@ -6,11 +9,18 @@ use papertilling_core::defect::surgery::DefectSpec;
 
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::{Canvas2D, CanvasMarker, MarkerKind, Scene2D};
-use crate::core_panel::{CorePanelState, show_core_panel};
-use crate::live_combine::{
-    CombineBuildOptions, CombineBuildOutput, CombineDrawMode, CombineLatticeInfo, burgers_from_mn,
-    preset_neighbour_pair, preset_shortest_dislocation, spec_short_label, spec_world_pos,
+use crate::combine_worker::{
+    BuildJob, CompareJob, CompareOutput, LatestWorker, spawn_build_worker, spawn_compare_worker, spawn_lattice_worker,
 };
+use crate::core_panel::CorePanelState;
+use crate::live_combine::{
+    CombineBuildOptions, CombineBuildOutput, CombineDrawMode, CombineLatticeInfo, build_combined_crystal,
+    burgers_from_mn, preset_neighbour_pair, preset_shortest_dislocation, spec_short_label, spec_world_pos,
+};
+
+/// Manual patch radius range (slider and `.json` import): covers Python's default radii.
+pub(crate) const MANUAL_R_MIN: f64 = 2.4;
+pub(crate) const MANUAL_R_MAX: f64 = 30.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolMode {
@@ -19,32 +29,44 @@ pub enum ToolMode {
     PlaceDislocation,
 }
 
+/// Combine tab. Building the crystal and comparing it with the single defect run on two background
+/// workers (`combine_worker`): the UI submits jobs, polls results every frame and never blocks.
 pub struct CombineTabState {
     pub tool_mode: ToolMode,
-    override_item: Option<CatalogueItemUi>,
-    pub(crate) info: CombineLatticeInfo,
+    pub(crate) override_item: Option<CatalogueItemUi>,
+    pub(crate) info: Arc<CombineLatticeInfo>,
     pub specs: Vec<DefectSpec>,
     pub(crate) selected_angle_deg: i32,
     pub(crate) centre_filter_idx: usize,
-    selected_disloc_idx: usize,
+    pub(crate) selected_disloc_idx: usize,
     pub custom_mn: (i32, i32),
     pub opts: CombineBuildOptions,
     pub auto_compare: bool,
     pub grid: usize,
     pub(crate) last_build: CombineBuildOutput,
     pub compare_result: Option<Result<EquivalentSingleReport, String>>,
-    compare_pending_after_drag: bool,
-    last_hover_world: Option<[f64; 2]>,
+    /// `compare_result` belongs to an earlier configuration (a newer comparison is pending or due).
+    pub(crate) compare_stale: bool,
+    pub(crate) compare_ms: f64,
+    pub(crate) cache_stats: (usize, usize),
+    compare_after_build: bool,
+    reset_view_on_build: bool,
+    canvas_dirty: bool,
+    preview_queued: bool,
+    preview_dirty: bool,
+    pub(crate) dragging: bool,
+    pub(crate) last_hover_world: Option<[f64; 2]>,
     pub json_status: String,
     pub core_panel: CorePanelState,
+    builder: LatestWorker<BuildJob, CombineBuildOutput>,
+    comparer: LatestWorker<CompareJob, CompareOutput>,
+    initializer: LatestWorker<CatalogueItemUi, Arc<CombineLatticeInfo>>,
 }
 
 impl CombineTabState {
     pub fn new(gallery_item: &CatalogueItemUi, backend: &AppBackend) -> Self {
-        let info = backend.combine_lattice_info(gallery_item);
+        let info = Arc::new(backend.combine_lattice_info(gallery_item));
         let specs = preset_neighbour_pair(&info);
-        let selected_angle_deg = info.allowed_angles.first().copied().unwrap_or(90);
-        let custom_mn = info.dislocations.first().map_or((1, 0), |d| d.burgers_mn);
         let opts = CombineBuildOptions {
             draw_mode: CombineDrawMode::FastRelaxed,
             full_planar_repair: false,
@@ -52,54 +74,242 @@ impl CombineTabState {
             manual_radius: info.r_auto_base,
             core_radius: 2,
         };
-        let last_build = backend.build_combined(gallery_item, &info, &specs, &opts);
-        Self {
+        let last_build = build_combined_crystal(gallery_item, &info, &[], &opts, false);
+        let mut st = Self {
             tool_mode: ToolMode::PanAndDrag,
             override_item: None,
-            info,
-            specs,
-            selected_angle_deg,
+            selected_angle_deg: info.allowed_angles.first().copied().unwrap_or(90),
             centre_filter_idx: 0,
             selected_disloc_idx: 0,
-            custom_mn,
+            custom_mn: info.dislocations.first().map_or((1, 0), |d| d.burgers_mn),
+            info,
+            specs,
             opts,
             auto_compare: true,
             grid: 1,
             last_build,
             compare_result: None,
-            compare_pending_after_drag: false,
+            compare_stale: false,
+            compare_ms: 0.0,
+            cache_stats: (0, 0),
+            compare_after_build: false,
+            reset_view_on_build: true,
+            canvas_dirty: false,
+            preview_queued: false,
+            preview_dirty: false,
+            dragging: false,
             last_hover_world: None,
             json_status: String::new(),
             core_panel: CorePanelState::default(),
-        }
+            builder: spawn_build_worker(),
+            comparer: spawn_compare_worker(),
+            initializer: spawn_lattice_worker(),
+        };
+        st.request_build(gallery_item, false, false, true);
+        st
     }
 
     pub fn effective_item<'a>(&'a self, gallery_item: &'a CatalogueItemUi) -> &'a CatalogueItemUi {
         self.override_item.as_ref().unwrap_or(gallery_item)
     }
 
-    fn reset_lattice_defaults(&mut self, info: CombineLatticeInfo) {
+    /// A build or a comparison is running or queued.
+    pub fn is_busy(&self) -> bool {
+        self.initializer.is_busy() || self.builder.is_busy() || self.comparer.is_busy() || self.compare_after_build
+    }
+
+    pub(crate) fn is_building(&self) -> bool {
+        self.initializer.is_busy() || self.builder.is_busy()
+    }
+
+    pub(crate) fn is_initializing(&self) -> bool { self.initializer.is_busy() }
+
+    pub(crate) fn is_comparing(&self) -> bool {
+        self.comparer.is_busy() || self.compare_after_build
+    }
+
+    fn reset_lattice_defaults(&mut self, gallery_item: &CatalogueItemUi, info: CombineLatticeInfo) {
         self.selected_angle_deg = info.allowed_angles.first().copied().unwrap_or(90);
         self.centre_filter_idx = 0;
         self.selected_disloc_idx = 0;
         self.custom_mn = info.dislocations.first().map_or((1, 0), |d| d.burgers_mn);
         self.opts.manual_radius = info.r_auto_base;
-        self.info = info;
+        self.info = Arc::new(info);
+        // Never show the previous lattice while the new build runs: a defect-free disk is instant.
+        self.last_build = build_combined_crystal(gallery_item, &self.info, &[], &self.opts, false);
+        self.canvas_dirty = true;
+        self.compare_result = None;
+        self.comparer.cancel();
     }
 
-    pub fn reload_for_item(&mut self, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D, sync_canvas: bool) {
+    pub fn reload_for_item(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, canvas: &mut Canvas2D, sync_canvas: bool) {
         self.override_item = None;
-        self.reset_lattice_defaults(backend.combine_lattice_info(gallery_item));
-        self.specs = preset_neighbour_pair(&self.info);
-        self.rebuild_internal(gallery_item, backend, sync_canvas && self.auto_compare);
+        self.builder.cancel();
+        self.comparer.cancel();
+        self.compare_after_build = false;
+        self.compare_result = None;
+        self.specs.clear();
+        self.dragging = false;
+        self.initializer.submit(gallery_item.clone());
+        let c = &mut self.last_build.crystal;
+        c.pos.clear();
+        c.ref_pos.clear();
+        c.adj.clear();
+        c.edges.clear();
+        c.basis_idx.clear();
+        c.cone_sites.clear();
+        c.side.clear();
+        self.last_build.charge_label = String::from("Preparing lattice…");
+        self.last_build.note = String::from("Building the defect catalogue in the background");
+        self.canvas_dirty = true;
+        self.reset_view_on_build = true;
         if sync_canvas {
             self.sync_to_canvas(gallery_item, canvas, true);
         }
     }
 
-    pub fn ensure_compared(&mut self, gallery_item: &CatalogueItemUi, backend: &AppBackend) {
-        if self.auto_compare && self.compare_result.is_none() && !self.specs.is_empty() {
-            self.run_compare(gallery_item, backend);
+    /// Submit a build of the current defects; `then_compare`: compare once it lands (final builds only).
+    pub(crate) fn request_build(&mut self, gallery_item: &CatalogueItemUi, preview: bool, then_compare: bool, reset_view: bool) {
+        if self.initializer.is_busy() {
+            return;
+        }
+        // Let an in-flight preview finish before submitting the next one. Invalidating it on every
+        // mouse move starves the canvas when builds take longer than a pointer frame.
+        if preview && self.preview_queued && self.builder.is_busy() {
+            self.preview_dirty = true;
+            return;
+        }
+        let item = self.effective_item(gallery_item).clone();
+        let job = BuildJob { item, info: Arc::clone(&self.info), specs: self.specs.clone(), opts: self.opts.clone(), preview };
+        self.builder.submit(job);
+        self.reset_view_on_build |= reset_view;
+        self.preview_queued = preview;
+        self.preview_dirty = false;
+        self.compare_after_build = !preview && then_compare && !self.specs.is_empty();
+        self.comparer.cancel();
+        if self.specs.is_empty() {
+            self.compare_result = None;
+        }
+        self.compare_stale = self.compare_result.is_some();
+    }
+
+    fn submit_compare(&mut self, gallery_item: &CatalogueItemUi) {
+        if self.specs.is_empty() {
+            self.compare_result = None;
+            return;
+        }
+        if let Some(reason) = &self.last_build.refused {
+            // The crystal is a defect-free stand-in: comparing it would report "perfect lattice".
+            self.compare_result = Some(Err(format!("not compared: build refused ({reason})")));
+            self.compare_stale = false;
+            return;
+        }
+        let job = CompareJob {
+            item: self.effective_item(gallery_item).clone(),
+            info: Arc::clone(&self.info),
+            specs: self.specs.clone(),
+            crystal: self.last_build.crystal.clone(),
+            core_radius: self.opts.core_radius,
+            grid: self.grid,
+        };
+        self.comparer.submit(job);
+        self.compare_stale = self.compare_result.is_some();
+    }
+
+    /// Compare now if the current build is final and up to date, else right after it lands.
+    pub fn run_compare(&mut self, gallery_item: &CatalogueItemUi) {
+        if self.initializer.is_busy() { return; }
+        if self.builder.is_busy() || self.last_build.preview {
+            self.compare_after_build = true;
+            if !self.builder.is_busy() {
+                self.request_build(gallery_item, false, true, false);
+            }
+        } else {
+            self.submit_compare(gallery_item);
+        }
+    }
+
+    pub fn ensure_compared(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend) {
+        let fresh = self.compare_result.is_some() && !self.compare_stale;
+        if self.auto_compare && !self.specs.is_empty() && !fresh && !self.is_comparing() {
+            self.run_compare(gallery_item);
+        }
+    }
+
+    /// Collect finished jobs (call every frame while the tab is shown); `ctx` lets workers wake the UI.
+    pub fn poll(&mut self, ctx: Option<&egui::Context>, gallery_item: &CatalogueItemUi, canvas: Option<&mut Canvas2D>) {
+        if let Some(ctx) = ctx {
+            self.initializer.set_repaint_ctx(ctx);
+            self.builder.set_repaint_ctx(ctx);
+            self.comparer.set_repaint_ctx(ctx);
+        }
+        if let Some(result) = self.initializer.poll() { self.take_init(result, gallery_item); }
+        if let Some(res) = self.builder.poll() {
+            self.take_build(res);
+        }
+        if self.compare_after_build && !self.builder.is_busy() && !self.last_build.preview {
+            self.compare_after_build = false;
+            self.submit_compare(gallery_item);
+        }
+        if let Some(res) = self.comparer.poll() {
+            let (rep, ms, stats) = res.unwrap_or_else(|err| (Err(err), 0.0, self.cache_stats));
+            self.compare_result = Some(rep);
+            (self.compare_ms, self.cache_stats, self.compare_stale) = (ms, stats, false);
+        }
+        if self.canvas_dirty && let Some(canvas) = canvas {
+            let reset = std::mem::take(&mut self.reset_view_on_build) && !self.dragging;
+            self.sync_to_canvas(gallery_item, canvas, reset);
+            self.canvas_dirty = false;
+        }
+        if self.dragging && self.preview_dirty && !self.builder.is_busy() {
+            self.request_build(gallery_item, true, false, false);
+        }
+    }
+
+    /// Block until every queued job has landed (tests).
+    #[cfg(test)]
+    pub fn wait_idle(&mut self, gallery_item: &CatalogueItemUi, mut canvas: Option<&mut Canvas2D>) {
+        for _ in 0..8 {
+            if let Some(result) = self.initializer.wait(Duration::from_secs(120)) {
+                self.take_init(result, gallery_item);
+            }
+            if let Some(res) = self.builder.wait(Duration::from_secs(120)) {
+                self.take_build(res);
+            }
+            self.poll(None, gallery_item, canvas.as_deref_mut());
+            if let Some(res) = self.comparer.wait(Duration::from_secs(300)) {
+                let (rep, ms, stats) = res.unwrap_or_else(|err| (Err(err), 0.0, self.cache_stats));
+                self.compare_result = Some(rep);
+                (self.compare_ms, self.cache_stats, self.compare_stale) = (ms, stats, false);
+            }
+            self.poll(None, gallery_item, canvas.as_deref_mut());
+            if !self.is_busy() {
+                return;
+            }
+        }
+    }
+
+    fn take_build(&mut self, res: Result<CombineBuildOutput, String>) {
+        match res {
+            Ok(out) => self.last_build = out,
+            Err(err) => {
+                self.last_build.note = err.clone();
+                self.last_build.charge_label = String::from("Build failed");
+                self.last_build.charge_detail = err;
+                self.compare_after_build = false;
+            }
+        }
+        self.canvas_dirty = true;
+    }
+
+    fn take_init(&mut self, result: Result<Arc<CombineLatticeInfo>, String>, gallery_item: &CatalogueItemUi) {
+        match result {
+            Ok(info) => {
+                self.reset_lattice_defaults(gallery_item, (*info).clone());
+                self.specs = preset_neighbour_pair(&self.info);
+                self.request_build(gallery_item, false, self.auto_compare, true);
+            }
+            Err(err) => self.last_build.note = err,
         }
     }
 
@@ -107,42 +317,27 @@ impl CombineTabState {
         let item = self.effective_item(gallery_item);
         let title = format!("{} ({}) — {} defect(s) | {}", item.label, item.group, self.specs.len(), self.last_build.charge_label);
         canvas.set_scene(Scene2D::CrystalPatch { crystal: self.last_build.crystal.clone(), title, note: self.last_build.note.clone() }, reset_view);
+        canvas.set_export_markers(&self.build_markers());
     }
 
-    fn rebuild_internal(&mut self, gallery_item: &CatalogueItemUi, backend: &AppBackend, cmp: bool) {
-        let item = self.override_item.as_ref().unwrap_or(gallery_item);
-        self.last_build = backend.build_combined(item, &self.info, &self.specs, &self.opts);
-        self.compare_result = (!self.specs.is_empty() && cmp).then(|| {
-            backend.equivalent_single(item, &self.info, &self.specs, &self.last_build.crystal, self.opts.core_radius, self.grid)
-        });
-    }
-
-    pub fn run_compare(&mut self, gallery_item: &CatalogueItemUi, backend: &AppBackend) {
-        let item = self.override_item.as_ref().unwrap_or(gallery_item);
-        self.compare_result = (!self.specs.is_empty()).then(|| {
-            backend.equivalent_single(item, &self.info, &self.specs, &self.last_build.crystal, self.opts.core_radius, self.grid)
-        });
-    }
-
-    pub fn apply_preset_pair(&mut self, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
+    pub fn apply_preset_pair(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
+        if self.initializer.is_busy() { return; }
         self.specs = preset_neighbour_pair(&self.info);
-        self.rebuild_internal(gallery_item, backend, self.auto_compare);
-        self.sync_to_canvas(gallery_item, canvas, true);
+        self.request_build(gallery_item, false, self.auto_compare, true);
     }
 
-    pub fn apply_preset_dislocation(&mut self, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
+    pub fn apply_preset_dislocation(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
+        if self.initializer.is_busy() { return; }
         self.specs = preset_shortest_dislocation(&self.info);
-        self.rebuild_internal(gallery_item, backend, self.auto_compare);
-        self.sync_to_canvas(gallery_item, canvas, true);
+        self.request_build(gallery_item, false, self.auto_compare, true);
     }
 
-    pub fn clear_defects(&mut self, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
+    pub fn clear_defects(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
         self.specs.clear();
-        self.rebuild_internal(gallery_item, backend, self.auto_compare);
-        self.sync_to_canvas(gallery_item, canvas, true);
+        self.request_build(gallery_item, false, false, true);
     }
 
-    fn active_centre_and_angle(&self) -> (Option<&str>, f64) {
+    pub(crate) fn active_centre_and_angle(&self) -> (Option<&str>, f64) {
         if let Some(c) = self.centre_filter_idx.checked_sub(1).and_then(|k| self.info.centres.get(k)) {
             let want = self.selected_angle_deg as f64;
             let ang = if c.angles.iter().any(|&a| (a - want).abs() <= 0.5) {
@@ -156,8 +351,9 @@ impl CombineTabState {
         }
     }
 
-    pub fn place_at_world(&mut self, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
-        let item = self.override_item.as_ref().unwrap_or(gallery_item);
+    pub fn place_at_world(&mut self, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, _canvas: &mut Canvas2D) {
+        if self.initializer.is_busy() { return; }
+        let item = self.effective_item(gallery_item);
         match self.tool_mode {
             ToolMode::PanAndDrag => return,
             ToolMode::PlaceDisclination => {
@@ -176,12 +372,13 @@ impl CombineTabState {
                 self.specs.push(DefectSpec::dislocation(b, Some(world)));
             }
         }
-        self.rebuild_internal(gallery_item, backend, self.auto_compare);
-        self.sync_to_canvas(gallery_item, canvas, false);
+        self.request_build(gallery_item, false, self.auto_compare, false);
     }
 
-    pub fn move_pin_to(&mut self, idx: usize, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
-        let item = self.override_item.as_ref().unwrap_or(gallery_item);
+    /// Move pin `idx` during a drag: cheap preview build; `finish_drag` does the full one.
+    pub fn move_pin_to(&mut self, idx: usize, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, _canvas: &mut Canvas2D) -> bool {
+        if self.initializer.is_busy() { return false; }
+        let item = self.effective_item(gallery_item);
         let Some(old_pos) = self.specs.get(idx).map(|s| spec_world_pos(&self.info, idx, s)) else {
             return false;
         };
@@ -201,15 +398,27 @@ impl CombineTabState {
             }
         };
         self.specs[idx] = new_spec;
-        self.rebuild_internal(gallery_item, backend, false);
-        self.compare_pending_after_drag = self.auto_compare;
-        self.sync_to_canvas(gallery_item, canvas, false);
+        self.dragging = true;
+        self.request_build(gallery_item, true, false, false);
         true
+    }
+
+    /// Drag released: full build, then compare when automatic comparison is on.
+    pub fn finish_drag(&mut self, gallery_item: &CatalogueItemUi) {
+        if std::mem::take(&mut self.dragging) {
+            self.request_build(gallery_item, false, self.auto_compare, false);
+        }
+    }
+
+    /// A comparison result that matches the current defects (for the `.json` summary).
+    fn current_report(&self) -> Option<&EquivalentSingleReport> {
+        let fresh = !self.compare_stale && !self.is_busy() && !self.last_build.preview;
+        self.compare_result.as_ref().filter(|_| fresh).and_then(|r| r.as_ref().ok())
     }
 
     pub fn to_notebook_json(&self, gallery_item: &CatalogueItemUi) -> NotebookConfigJson {
         let item = self.effective_item(gallery_item);
-        let summary = self.compare_result.as_ref().and_then(|r| r.as_ref().ok()).map(|rep| ConfigSummaryJson {
+        let summary = self.current_report().map(|rep| ConfigSummaryJson {
             charge: rep.charge.label.clone(),
             kind: rep.kind.clone(),
             equivalent: rep.equivalent,
@@ -234,27 +443,51 @@ impl CombineTabState {
     }
 
     pub fn load_notebook_json(&mut self, cfg: &NotebookConfigJson, backend: &AppBackend, canvas: &mut Canvas2D) -> Result<String, String> {
+        if cfg.format != papertilling_core::defect::combine_types::CONFIG_FORMAT {
+            return Err(format!("unsupported configuration format {:?}", cfg.format));
+        }
         let imported = backend.item_from_notebook_json(cfg)?;
-        self.reset_lattice_defaults(backend.combine_lattice_info(&imported));
-        self.opts.auto_radius = cfg.options.r_patch.is_none();
-        self.opts.manual_radius = cfg.options.r_patch.unwrap_or(self.info.r_auto_base).clamp(2.4, 16.0);
-        self.opts.draw_mode = if cfg.options.picture == "raw" { CombineDrawMode::Raw } else { CombineDrawMode::FastRelaxed };
-        self.grid = cfg.options.grid.clamp(1, 3);
-        self.opts.core_radius = cfg.options.radius.clamp(1, 4);
+        self.initializer.cancel();
+        self.reset_lattice_defaults(&imported, backend.combine_lattice_info(&imported));
+        let o = &cfg.options;
+        self.opts.auto_radius = o.r_patch.is_none();
+        self.opts.manual_radius = o.r_patch.unwrap_or(self.info.r_auto_base).clamp(MANUAL_R_MIN, MANUAL_R_MAX);
+        self.opts.draw_mode = if o.picture == "raw" { CombineDrawMode::Raw } else { CombineDrawMode::FastRelaxed };
+        self.grid = o.grid.clamp(1, 3);
+        self.opts.core_radius = o.radius.clamp(1, 4);
         self.specs = cfg.defects.clone();
-        let msg = format!("Imported {} ({}) with {} defect(s)", imported.label, imported.group, self.specs.len());
+        let mut clamped = Vec::new();
+        if o.r_patch.is_some_and(|r| (r - self.opts.manual_radius).abs() > 1e-9) {
+            clamped.push(format!("r_patch {:?} -> {}", o.r_patch.unwrap_or_default(), self.opts.manual_radius));
+        }
+        if o.grid != self.grid {
+            clamped.push(format!("grid {} -> {}", o.grid, self.grid));
+        }
+        if o.radius != self.opts.core_radius {
+            clamped.push(format!("radius {} -> {}", o.radius, self.opts.core_radius));
+        }
+        let mut msg = format!("Imported {} ({}) with {} defect(s)", imported.label, imported.group, self.specs.len());
+        if !clamped.is_empty() {
+            msg.push_str(&format!(" (outside the app's range: {})", clamped.join(", ")));
+        }
         self.override_item = Some(imported.clone());
-        self.rebuild_internal(&imported, backend, self.auto_compare || cfg.summary.is_some());
+        self.request_build(&imported, false, self.auto_compare || cfg.summary.is_some(), true);
         self.sync_to_canvas(&imported, canvas, true);
         self.json_status = msg.clone();
         Ok(msg)
     }
 
     pub fn export_json_dialog(&mut self, gallery_item: &CatalogueItemUi) {
+        if self.specs.is_empty() || self.initializer.is_busy() {
+            self.json_status = String::from("Place at least one defect before exporting a Notebook 3 configuration.");
+            return;
+        }
         let dlg = rfd::FileDialog::new().set_title("Export Notebook 3 defect configuration (.json)").set_file_name("defect_config.json").add_filter("JSON configuration", &["json"]);
         if let Some(path) = dlg.save_file() {
-            let res = self.to_notebook_json(gallery_item).to_json_pretty().and_then(|s| std::fs::write(&path, s).map_err(|e| e.to_string()));
-            self.json_status = res.map_or_else(|e| format!("JSON export error: {e}"), |()| format!("Exported {}", path.file_name().and_then(|s| s.to_str()).unwrap_or("config.json")));
+            let cfg = self.to_notebook_json(gallery_item);
+            let partial = if cfg.summary.is_none() && !self.specs.is_empty() { " (no summary: comparison not finished)" } else { "" };
+            let res = cfg.to_json_pretty().and_then(|s| std::fs::write(&path, s).map_err(|e| e.to_string()));
+            self.json_status = res.map_or_else(|e| format!("JSON export error: {e}"), |()| format!("Exported {}{partial}", path.file_name().and_then(|s| s.to_str()).unwrap_or("config.json")));
         }
     }
 
@@ -267,7 +500,7 @@ impl CombineTabState {
         }
     }
 
-    fn build_markers(&self) -> Vec<CanvasMarker> {
+    pub(crate) fn build_markers(&self) -> Vec<CanvasMarker> {
         self.specs.iter().enumerate().map(|(idx, s)| CanvasMarker {
             index: idx,
             pos: spec_world_pos(&self.info, idx, s),
@@ -279,284 +512,8 @@ impl CombineTabState {
             label: spec_short_label(&self.info, s),
         }).collect()
     }
-
-    pub fn show_side_panel(&mut self, ui: &mut egui::Ui, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
-        let (mut dirty, mut reset_view, mut trigger_compare) = (false, false, false);
-        ui.horizontal_wrapped(|ui| {
-            let item = self.effective_item(gallery_item);
-            ui.strong(format!("Lattice: {} ({})", item.label, item.group));
-            if self.override_item.is_some() && ui.small_button("Use Gallery").clicked() {
-                self.reload_for_item(gallery_item, backend, canvas, true);
-            }
-        });
-        ui.separator();
-        ui.strong("Tool Palette (Click / Drag)");
-        ui.radio_value(&mut self.tool_mode, ToolMode::PanAndDrag, "Pan / Select & Drag Defects");
-        let has_centres = !self.info.centres.is_empty();
-        ui.add_enabled_ui(has_centres, |ui| {
-            ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDisclination, "Click to Place Disclination");
-        });
-        ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDislocation, "Click to Place Dislocation");
-
-        if self.tool_mode == ToolMode::PlaceDisclination && has_centres {
-            let filt_c = self.centre_filter_idx.checked_sub(1).and_then(|k| self.info.centres.get(k));
-            ui.horizontal_wrapped(|ui| {
-                ui.small("α:");
-                for &ang in &self.info.allowed_angles {
-                    let ok = filt_c.is_none_or(|c| c.angles.iter().any(|&a| (a - ang as f64).abs() <= 0.5));
-                    if ui.add_enabled(ok, egui::Button::selectable(self.selected_angle_deg == ang, format!("{ang:+}°"))).clicked() {
-                        self.selected_angle_deg = ang;
-                    }
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.small("Centre:");
-                let sel_txt = self.centre_filter_idx.checked_sub(1).and_then(|k| self.info.centres.get(k))
-                    .map_or_else(|| String::from("Nearest allowed"), |c| format!("{} ({} {})", c.id, c.label, c.location));
-                let prev = self.centre_filter_idx;
-                egui::ComboBox::from_id_salt("comb_centre_cls").selected_text(sel_txt).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.centre_filter_idx, 0, "Nearest allowed centre");
-                    for (i, c) in self.info.centres.iter().enumerate() {
-                        ui.selectable_value(&mut self.centre_filter_idx, i + 1, format!("{} ({} {}, {}-fold)", c.id, c.label, c.location, c.order));
-                    }
-                });
-                if self.centre_filter_idx != prev {
-                    self.selected_angle_deg = self.active_centre_and_angle().1.round() as i32;
-                }
-            });
-        } else if self.tool_mode == ToolMode::PlaceDislocation {
-            ui.horizontal_wrapped(|ui| {
-                ui.small("Class:");
-                for (i, d) in self.info.dislocations.iter().enumerate() {
-                    let on = self.selected_disloc_idx == i && self.custom_mn == d.burgers_mn;
-                    if ui.selectable_label(on, format!("{}({},{})", d.id, d.burgers_mn.0, d.burgers_mn.1)).clicked() {
-                        self.selected_disloc_idx = i;
-                        self.custom_mn = d.burgers_mn;
-                    }
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.small("b = m·a1 + n·a2:");
-                ui.add(egui::DragValue::new(&mut self.custom_mn.0).range(-4..=4).prefix("m="));
-                ui.add(egui::DragValue::new(&mut self.custom_mn.1).range(-4..=4).prefix("n="));
-            });
-        }
-
-        ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(has_centres, egui::Button::new("+α / -α Pair")).clicked() {
-                self.apply_preset_pair(gallery_item, backend, canvas);
-            }
-            if ui.button("Shortest Disloc").clicked() {
-                self.apply_preset_dislocation(gallery_item, backend, canvas);
-            }
-            if ui.button("Clear All").clicked() {
-                self.clear_defects(gallery_item, backend, canvas);
-            }
-        });
-
-        ui.separator();
-        ui.strong(format!("Placed Defects ({})", self.specs.len()));
-        let (mut flip_idx, mut remove_idx) = (None, None);
-        if self.specs.is_empty() {
-            ui.small("Empty — use a preset or Click-to-Place.");
-        } else {
-            ui.push_id("placed_specs_tbl", |ui| {
-                TableBuilder::new(ui)
-                    .striped(true)
-                    .max_scroll_height(108.0)
-                    .column(Column::exact(24.0))
-                    .column(Column::exact(72.0))
-                    .column(Column::remainder())
-                    .column(Column::exact(32.0))
-                    .column(Column::exact(24.0))
-                    .header(17.0, |mut h| {
-                        for t in ["#", "Kind", "(x, y)", "±", ""] {
-                            h.col(|ui| { ui.strong(t); });
-                        }
-                    })
-                    .body(|mut body| {
-                        for (idx, sp) in self.specs.iter().enumerate() {
-                            let pos = spec_world_pos(&self.info, idx, sp);
-                            let kstr = spec_short_label(&self.info, sp);
-                            body.row(18.0, |mut row| {
-                                row.col(|ui| { ui.strong(format!("#{}", idx + 1)); });
-                                row.col(|ui| { ui.label(kstr); });
-                                row.col(|ui| { ui.small(format!("({:+.2}, {:+.2})", pos[0], pos[1])); });
-                                row.col(|ui| { if ui.small_button("±").clicked() { flip_idx = Some(idx); } });
-                                row.col(|ui| { if ui.small_button("×").clicked() { remove_idx = Some(idx); } });
-                            });
-                        }
-                    });
-            });
-        }
-        if let Some(i) = flip_idx {
-            match &mut self.specs[i] {
-                DefectSpec::Disclination { angle_deg, .. } => *angle_deg = -*angle_deg,
-                DefectSpec::Dislocation { b, .. } => *b = [-b[0], -b[1]],
-            }
-            dirty = true;
-        }
-        if let Some(i) = remove_idx {
-            self.specs.remove(i);
-            dirty = true;
-        }
-
-        ui.separator();
-        ui.strong("Patch & Scan Controls");
-        ui.horizontal(|ui| {
-            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::FastRelaxed, "Fast Relaxed (<100ms)").clicked() {
-                self.opts.draw_mode = CombineDrawMode::FastRelaxed;
-                dirty = true;
-            }
-            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::Raw, "Raw Surgery").clicked() {
-                self.opts.draw_mode = CombineDrawMode::Raw;
-                dirty = true;
-            }
-        });
-        if self.opts.draw_mode == CombineDrawMode::FastRelaxed && ui.checkbox(&mut self.opts.full_planar_repair, "Full Planar Repair").changed() {
-            dirty = true;
-        }
-        ui.horizontal(|ui| {
-            if ui.checkbox(&mut self.opts.auto_radius, "Auto (~500 sites)").changed() {
-                (dirty, reset_view) = (true, true);
-            }
-            if !self.opts.auto_radius && ui.add(egui::Slider::new(&mut self.opts.manual_radius, 2.8..=13.0).step_by(0.2)).changed() {
-                (dirty, reset_view) = (true, true);
-            }
-        });
-        ui.small(format!(
-            "Updated in {:.1} ms ({} sites, R={:.1})",
-            self.last_build.elapsed_ms, self.last_build.crystal.pos.len(), self.last_build.applied_radius
-        ));
-
-        ui.horizontal(|ui| {
-            trigger_compare |= ui.button("Compare Single").clicked();
-            trigger_compare |= ui.checkbox(&mut self.auto_compare, "Auto").changed() && self.auto_compare;
-            ui.small("grid:");
-            for g in [1_usize, 2, 3] {
-                if ui.selectable_label(self.grid == g, g.to_string()).clicked() {
-                    self.grid = g;
-                    trigger_compare |= self.auto_compare;
-                }
-            }
-        });
-
-        if dirty {
-            self.rebuild_internal(gallery_item, backend, self.auto_compare);
-            self.sync_to_canvas(gallery_item, canvas, reset_view);
-        } else if trigger_compare {
-            self.run_compare(gallery_item, backend);
-        }
-
-        ui.separator();
-        ui.strong("Total Charge & Equivalence");
-        ui.label(&self.last_build.charge_label);
-        ui.small(&self.last_build.charge_detail);
-        ui.small(format!("Core: {} nodes, {} edges | {}", self.last_build.core_nodes, self.last_build.core_edges, self.last_build.core_summary));
-        if !self.last_build.local_cores.is_empty() {
-            let lc: Vec<&str> = self.last_build.local_cores.iter().map(|c| c.label.as_str()).collect();
-            ui.small(format!("Cores: {}", lc.join(", ")));
-        }
-        match &self.compare_result {
-            Some(Ok(rep)) => {
-                let (bg, fg, tag) = if rep.equivalent {
-                    (egui::Color32::from_rgb(225, 244, 228), egui::Color32::from_rgb(34, 108, 42), "EQUIVALENT TO SINGLE")
-                } else {
-                    (egui::Color32::from_rgb(255, 241, 214), egui::Color32::from_rgb(168, 92, 10), "DISTINCT FROM SINGLE")
-                };
-                egui::Frame::NONE.fill(bg).inner_margin(4.0).corner_radius(3.0).show(ui, |ui| {
-                    ui.colored_label(fg, egui::RichText::new(tag).strong().size(11.0));
-                    ui.small(&rep.verdict);
-                });
-            }
-            Some(Err(err)) => { ui.small(format!("Single-defect check: {err}")); }
-            None => {}
-        }
-
-        ui.separator();
-        ui.strong("Notebook 3 .json");
-        ui.horizontal(|ui| {
-            if ui.button("Export .json (Notebook 3)...").clicked() {
-                self.export_json_dialog(gallery_item);
-            }
-            if ui.button("Import .json...").clicked() {
-                self.import_json_dialog(backend, canvas);
-            }
-        });
-        if !self.json_status.is_empty() {
-            ui.small(&self.json_status);
-        }
-    }
-
-    pub fn show_central(&mut self, ui: &mut egui::Ui, gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) {
-        let panel_h = if self.core_panel.collapsed { 28.0 } else { 246.0 };
-        StripBuilder::new(ui)
-            .clip(true)
-            .size(Size::remainder().at_least(150.0))
-            .size(Size::exact(panel_h))
-            .vertical(|mut strip| {
-                strip.cell(|ui| {
-                    ui.strong("2D Live Combined Crystal [drag pin: move/snap | drag empty: pan | scroll: zoom | dbl-click: fit]");
-                    ui.add_space(2.0);
-                    let click_to_place = self.tool_mode != ToolMode::PanAndDrag;
-                    let preview_world = match (self.tool_mode, self.last_hover_world) {
-                        (ToolMode::PlaceDisclination, Some(hw)) if !self.info.centres.is_empty() => {
-                            let (cid, ang) = self.active_centre_and_angle();
-                            Some(backend.snap_disclination(self.effective_item(gallery_item), &self.info, ang, cid, hw).0)
-                        }
-                        (ToolMode::PlaceDislocation, Some(hw)) => Some(hw),
-                        _ => None,
-                    };
-                    let markers = self.build_markers();
-                    let inter = canvas.show_interactive(ui, &markers, click_to_place, preview_world);
-                    self.last_hover_world = inter.hovered_world;
-                    if let Some((pin_idx, world)) = inter.dragged_marker {
-                        self.move_pin_to(pin_idx, world, gallery_item, backend, canvas);
-                    }
-                    if inter.drag_released && self.compare_pending_after_drag {
-                        self.compare_pending_after_drag = false;
-                        self.run_compare(gallery_item, backend);
-                    }
-                    if let Some(world) = inter.clicked_world {
-                        self.place_at_world(world, gallery_item, backend, canvas);
-                    }
-                });
-                strip.cell(|ui| {
-                    ui.separator();
-                    show_core_panel(&mut self.core_panel, ui, self.compare_result.as_ref());
-                });
-            });
-    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::CatalogueRuleUi;
-    use papertilling_core::types::Cell2D;
-
-    #[test]
-    fn combine_tab_state_init_and_presets() {
-        let backend = AppBackend::new();
-        let square = backend.find_named("square").unwrap();
-        let p1_first = &backend.catalogue_for_group("p1", CatalogueRuleUi::Points)[0];
-        let mut canvas = Canvas2D::new(Scene2D::PeriodicCell {
-            cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: vec![[0.0, 0.0]], bonds: Vec::new() },
-            repeat: 2,
-            show_unit_cell: false,
-        });
-        let mut st = CombineTabState::new(square, &backend);
-        assert_eq!(st.specs.len(), 2);
-        assert!(!st.last_build.crystal.pos.is_empty());
-        st.ensure_compared(square, &backend);
-        assert!(st.compare_result.is_some());
-        if let Some(Ok(rep)) = &st.compare_result {
-            assert!(rep.equivalent);
-        }
-        assert_eq!(CombineTabState::new(p1_first, &backend).specs.len(), 1);
-        st.apply_preset_dislocation(square, &backend, &mut canvas);
-        assert_eq!(st.specs.len(), 1);
-        st.clear_defects(square, &backend, &mut canvas);
-        assert!(st.specs.is_empty() && st.compare_result.is_none());
-    }
-}
+#[path = "combine_tab_tests.rs"]
+mod tests;

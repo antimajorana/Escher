@@ -1,8 +1,14 @@
 use std::path::Path;
 
-use crate::export::export_scene_to_path;
+use crate::export::export_scene_with_markers;
 pub use crate::scene2d::Scene2D;
 use crate::scene2d::{ScenePrimitives, compile_scene};
+
+mod hit;
+#[cfg(test)]
+mod tests;
+
+pub use hit::{PIN_PICK_RADIUS_PX, ViewTransform, pick_marker};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkerKind {
@@ -21,10 +27,14 @@ pub struct CanvasMarker {
 
 #[derive(Clone, Debug, Default)]
 pub struct CanvasInteraction {
+    /// A click (press and release without dragging) on empty canvas, in world coordinates.
     pub clicked_world: Option<[f64; 2]>,
     pub dragged_marker: Option<(usize, [f64; 2])>,
     pub drag_released: bool,
     pub hovered_world: Option<[f64; 2]>,
+    /// A click that landed on a pin (its `CanvasMarker::index`); `clicked_world` is then `None`, so a click
+    /// on an existing pin never places a second defect on top of it.
+    pub clicked_marker: Option<usize>,
 }
 
 pub struct Canvas2D {
@@ -35,6 +45,7 @@ pub struct Canvas2D {
     active_drag_pin: Option<usize>,
     scene: Scene2D,
     compiled: ScenePrimitives,
+    export_markers: Vec<CanvasMarker>,
 }
 
 impl Canvas2D {
@@ -50,10 +61,12 @@ impl Canvas2D {
             active_drag_pin: None,
             scene,
             compiled,
+            export_markers: Vec::new(),
         }
     }
 
     pub fn set_scene(&mut self, scene: Scene2D, reset_view: bool) {
+        self.export_markers.clear();
         self.compiled = compile_scene(&scene);
         self.scene = scene;
         if reset_view {
@@ -76,28 +89,33 @@ impl Canvas2D {
         (self.compiled.site_count, self.compiled.bond_count)
     }
 
+    #[cfg(test)]
+    pub(crate) fn scene(&self) -> &Scene2D { &self.scene }
+
     pub fn export_to_path(&self, path: &Path) -> Result<String, String> {
-        export_scene_to_path(&self.scene, path)
+        export_scene_with_markers(&self.scene, &self.export_markers, path)
+    }
+
+    pub(crate) fn set_export_markers(&mut self, markers: &[CanvasMarker]) {
+        self.export_markers.clear();
+        self.export_markers.extend_from_slice(markers);
+    }
+
+    /// The world <-> screen map of the current view inside `rect`.
+    pub fn view_at(&self, rect: egui::Rect) -> ViewTransform {
+        ViewTransform { origin: rect.center() + self.pan, zoom: self.zoom, world_center: self.world_center }
     }
 
     pub fn world_to_screen_at(&self, rect: egui::Rect, p: [f32; 2]) -> egui::Pos2 {
-        let center = rect.center() + self.pan;
-        egui::pos2(
-            center.x + (p[0] - self.world_center[0]) * self.zoom,
-            center.y - (p[1] - self.world_center[1]) * self.zoom,
-        )
+        self.view_at(rect).world_to_screen(p)
     }
 
     pub fn screen_to_world_at(&self, rect: egui::Rect, pos: egui::Pos2) -> [f64; 2] {
-        let center = rect.center() + self.pan;
-        let z = self.zoom.max(1e-3);
-        [
-            (self.world_center[0] + (pos.x - center.x) / z) as f64,
-            (self.world_center[1] - (pos.y - center.y) / z) as f64,
-        ]
+        self.view_at(rect).screen_to_world(pos)
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
+        self.export_markers.clear();
         let _ = self.show_inner(ui, &[], false, None, false);
     }
 
@@ -108,6 +126,7 @@ impl Canvas2D {
         click_to_place: bool,
         preview_world: Option<[f64; 2]>,
     ) -> CanvasInteraction {
+        self.set_export_markers(markers);
         self.show_inner(ui, markers, click_to_place, preview_world, true)
     }
 
@@ -141,19 +160,16 @@ impl Canvas2D {
             self.auto_fit_pending = false;
         }
 
-        let hit_r = 14.0_f32;
-        let hit_pin_at = |this: &Self, pt: egui::Pos2| -> Option<usize> {
-            markers
-                .iter()
-                .rev()
-                .filter_map(|m| {
-                    let sp = this.world_to_screen_at(rect, [m.pos[0] as f32, m.pos[1] as f32]);
-                    let d = sp.distance(pt);
-                    (d <= hit_r).then_some((m.index, d))
-                })
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(idx, _)| idx)
-        };
+        let hit_pin_at = |this: &Self, pt: egui::Pos2| pick_marker(markers, &this.view_at(rect), pt, PIN_PICK_RADIUS_PX);
+
+        // Scroll first, about the pointer, so the world point under it (and a pin being dragged) stays put.
+        if response.hovered() {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll.abs() > 0.0 {
+                let anchor = response.hover_pos().filter(|p| rect.contains(*p));
+                (self.pan, self.zoom) = hit::zoom_about(self.pan, self.zoom, scroll, rect.center(), anchor);
+            }
+        }
 
         if interactive && response.drag_started() {
             let origin = ui
@@ -164,7 +180,7 @@ impl Canvas2D {
 
         if response.dragged() {
             if let Some(pin_idx) = self.active_drag_pin {
-                if pin_idx < markers.len() {
+                if markers.iter().any(|m| m.index == pin_idx) {
                     if let Some(pos) = response.interact_pointer_pos() {
                         out.dragged_marker = Some((pin_idx, self.screen_to_world_at(rect, pos)));
                     }
@@ -183,51 +199,44 @@ impl Canvas2D {
         if response.double_clicked() {
             self.reset();
         } else if interactive
-            && click_to_place
             && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
-            out.clicked_world = Some(self.screen_to_world_at(rect, pos));
+            match hit_pin_at(self, pos) {
+                Some(idx) => out.clicked_marker = Some(idx),
+                None if click_to_place => out.clicked_world = Some(self.screen_to_world_at(rect, pos)),
+                None => {}
+            }
         }
 
-        if response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll.abs() > 0.0 {
-                self.zoom = (self.zoom * (scroll * 0.002).exp()).clamp(6.0, 420.0);
-            }
-            if interactive && let Some(hpos) = response.hover_pos() {
-                out.hovered_world = Some(self.screen_to_world_at(rect, hpos));
-                if self.active_drag_pin.is_some() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                } else if let Some(pidx) = hit_pin_at(self, hpos) {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                    if let Some(m) = markers.iter().find(|m| m.index == pidx) {
-                        response.clone().on_hover_text(format!(
-                            "#{} {} at ({:+.3}, {:+.3}) — drag to move",
-                            m.index + 1,
-                            m.label,
-                            m.pos[0],
-                            m.pos[1]
-                        ));
-                    }
-                } else if click_to_place {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        if response.hovered()
+            && interactive
+            && let Some(hpos) = response.hover_pos()
+        {
+            out.hovered_world = Some(self.screen_to_world_at(rect, hpos));
+            if self.active_drag_pin.is_some() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            } else if let Some(pidx) = hit_pin_at(self, hpos) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                if let Some(m) = markers.iter().find(|m| m.index == pidx) {
+                    response.clone().on_hover_text(format!(
+                        "#{} {} at ({:+.3}, {:+.3}) — drag to move",
+                        m.index + 1,
+                        m.label,
+                        m.pos[0],
+                        m.pos[1]
+                    ));
                 }
+            } else if click_to_place {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
             }
         }
 
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(248, 249, 252));
 
-        let center = rect.center() + self.pan;
         let zoom = self.zoom;
-        let world_c = self.world_center;
-        let to_screen = |p: [f32; 2]| -> egui::Pos2 {
-            egui::pos2(
-                center.x + (p[0] - world_c[0]) * zoom,
-                center.y - (p[1] - world_c[1]) * zoom,
-            )
-        };
+        let to_screen = |p: [f32; 2]| -> egui::Pos2 { self.world_to_screen_at(rect, p) };
 
         for poly in &self.compiled.polygons {
             if poly.points.len() >= 3 {

@@ -7,7 +7,7 @@ use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor
 use eframe::wgpu::{self, util::DeviceExt as _};
 use egui::PaintCallbackInfo;
 
-use crate::mesh3d::{GpuMeshData, Vertex3d, build_mvp, orbit_rotation};
+use crate::mesh3d::{GpuMeshData, Vertex3d, back_to_front_indices, build_mvp, orbit_rotation};
 
 pub const DEPTH_BITS: u8 = 24;
 
@@ -77,13 +77,29 @@ impl View3dState {
         self.mesh_generation
     }
 
+    #[cfg(test)]
+    pub fn mesh_data(&self) -> &GpuMeshData {
+        &self.mesh_data
+    }
+
+    #[cfg(test)]
+    pub fn caption(&self) -> &str {
+        &self.overlay_caption
+    }
+
+    /// Orbit by `(dyaw, dpitch)` radians: yaw wraps to (-pi, pi], pitch stops short of the poles.
+    pub fn orbit_by(&mut self, dyaw: f32, dpitch: f32) {
+        let yaw = (self.yaw + dyaw).rem_euclid(core::f32::consts::TAU);
+        self.yaw = if yaw > core::f32::consts::PI { yaw - core::f32::consts::TAU } else { yaw };
+        self.pitch = (self.pitch + dpitch).clamp(-1.50, 1.50);
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size().max(egui::vec2(64.0, 64.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::drag());
         if response.dragged() {
             let delta = response.drag_delta();
-            self.yaw += delta.x * 0.01;
-            self.pitch = (self.pitch + delta.y * 0.01).clamp(-1.50, 1.50);
+            self.orbit_by(delta.x * 0.01, delta.y * 0.01);
         }
         if response.double_clicked() {
             self.reset();
@@ -143,8 +159,21 @@ struct View3dGpuResources {
     uploaded_generation: u64,
     face_vb: wgpu::Buffer,
     face_count: u32,
+    opaque_count: u32,
+    sorted_ib: wgpu::Buffer,
+    sorted_count: u32,
+    sorted_rot: Option<[[f32; 4]; 4]>,
     wire_vb: wgpu::Buffer,
     wire_count: u32,
+}
+
+fn make_index_buffer(device: &wgpu::Device, count: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("face_sorted_ib"),
+        size: (4 * count.max(1)) as wgpu::BufferAddress,
+        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
 }
 
 fn make_vertex_buffer(device: &wgpu::Device, label: &str, data: &[Vertex3d]) -> (wgpu::Buffer, u32) {
@@ -269,6 +298,7 @@ pub fn init_view3d_resources(render_state: &egui_wgpu::RenderState) {
 
     let (face_vb, face_count) = make_vertex_buffer(device, "face_vb", &[]);
     let (wire_vb, wire_count) = make_vertex_buffer(device, "wire_vb", &[]);
+    let sorted_ib = make_index_buffer(device, 0);
     render_state
         .renderer
         .write()
@@ -281,6 +311,10 @@ pub fn init_view3d_resources(render_state: &egui_wgpu::RenderState) {
             uploaded_generation: 0,
             face_vb,
             face_count,
+            opaque_count: 0,
+            sorted_ib,
+            sorted_count: 0,
+            sorted_rot: None,
             wire_vb,
             wire_count,
         });
@@ -304,15 +338,29 @@ impl CallbackTrait for View3dCallback {
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(res) = resources.get_mut::<View3dGpuResources>() {
+            let mesh = &self.mesh_data;
             if res.uploaded_generation != self.mesh_generation {
-                let (fvb, fc) = make_vertex_buffer(device, "face_vb_dyn", &self.mesh_data.faces);
-                let (wvb, wc) = make_vertex_buffer(device, "wire_vb_dyn", &self.mesh_data.wires);
+                let (fvb, fc) = make_vertex_buffer(device, "face_vb_dyn", &mesh.faces);
+                let (wvb, wc) = make_vertex_buffer(device, "wire_vb_dyn", &mesh.wires);
+                let opaque = mesh.opaque_vertex_count.min(mesh.faces.len());
                 res.face_vb = fvb;
                 res.face_count = fc;
+                res.opaque_count = opaque as u32;
+                res.sorted_ib = make_index_buffer(device, mesh.faces.len() - opaque);
+                res.sorted_count = 0;
+                res.sorted_rot = None;
                 res.wire_vb = wvb;
                 res.wire_count = wc;
                 res.uploaded_generation = self.mesh_generation;
                 self.counters.uploaded.fetch_add(1, Ordering::Relaxed);
+            }
+            if res.sorted_rot != Some(self.rot) {
+                let order = back_to_front_indices(&mesh.faces, res.opaque_count as usize, &self.rot);
+                if !order.is_empty() {
+                    queue.write_buffer(&res.sorted_ib, 0, bytemuck::cast_slice(&order));
+                }
+                res.sorted_count = order.len() as u32;
+                res.sorted_rot = Some(self.rot);
             }
             let uniforms = Uniforms {
                 mvp: self.mvp,
@@ -337,7 +385,15 @@ impl CallbackTrait for View3dCallback {
         if res.face_count > 0 {
             render_pass.set_pipeline(&res.face_pipeline);
             render_pass.set_vertex_buffer(0, res.face_vb.slice(..));
-            render_pass.draw(0..res.face_count, 0..1);
+            // opaque markers first, then the translucent faces back to front (both write depth, so the wires
+            // drawn next are hidden behind the nearest face)
+            if res.opaque_count > 0 {
+                render_pass.draw(0..res.opaque_count, 0..1);
+            }
+            if res.sorted_count > 0 {
+                render_pass.set_index_buffer(res.sorted_ib.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..res.sorted_count, 0, 0..1);
+            }
         }
         if res.wire_count > 0 {
             render_pass.set_pipeline(&res.wire_pipeline);
@@ -345,5 +401,41 @@ impl CallbackTrait for View3dCallback {
             render_pass.draw(0..res.wire_count, 0..1);
         }
         self.counters.painted.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::View3dState;
+    use crate::mesh3d::GpuMeshData;
+
+    #[test]
+    fn orbit_wraps_yaw_clamps_pitch_and_reset_restores_the_default_view() {
+        let mut v = View3dState::default();
+        let start = (v.yaw, v.pitch, v.distance);
+        for _ in 0..10_000 {
+            v.orbit_by(0.37, 0.05);
+        }
+        assert!(v.yaw.abs() <= core::f32::consts::PI + 1e-6, "yaw {} not wrapped", v.yaw);
+        assert_eq!(v.pitch, 1.50);
+        v.orbit_by(0.0, -10.0);
+        assert_eq!(v.pitch, -1.50);
+        // wrapping keeps the angle: 10 000 x 0.37 rad
+        let want = (start.0 + 10_000.0 * 0.37_f32).rem_euclid(core::f32::consts::TAU);
+        let got = v.yaw.rem_euclid(core::f32::consts::TAU);
+        assert!((want - got).abs() < 1e-2 || (want - got).abs() > core::f32::consts::TAU - 1e-2);
+        v.distance = 7.0;
+        v.reset();
+        assert_eq!((v.yaw, v.pitch, v.distance), start);
+    }
+
+    #[test]
+    fn set_mesh_bumps_the_generation_so_the_gpu_buffers_are_re_uploaded() {
+        let mut v = View3dState::default();
+        let g0 = v.mesh_generation();
+        v.set_mesh(GpuMeshData::default(), "a");
+        v.set_mesh(GpuMeshData::default(), "b");
+        assert_eq!(v.mesh_generation(), g0 + 2);
+        assert_eq!(v.caption(), "b");
     }
 }

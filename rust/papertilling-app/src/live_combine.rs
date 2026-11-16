@@ -3,15 +3,14 @@ use std::time::Instant;
 use papertilling_core::defect::catalogue::DefectCatalogue;
 use papertilling_core::defect::charge::total_charge;
 use papertilling_core::defect::combine_api::{
-    classify_crystal_charge, equivalent_single, inspect_crystal_cores, nearest_allowed_centre,
+    classify_crystal_charge, inspect_crystal_cores,
 };
-use papertilling_core::defect::combine_types::{
-    CoreFaceSummary, EquivalentSingleReport, NotebookConfigJson,
-};
+use papertilling_core::defect::combine_types::{CoreFaceSummary, NotebookConfigJson};
 use papertilling_core::defect::core_graph::{LatticeCoreInfo, core_graph};
-use papertilling_core::defect::surgery::{DefectSpec, build_point_defects};
+use papertilling_core::defect::equivalence::CentreSnapper;
+use papertilling_core::defect::surgery::{DefectSpec, build_point_defects, patch_centre_and_radius};
 use papertilling_core::dsymbol;
-use papertilling_core::plane::draw::{ensure_embedded, relax_picture};
+use papertilling_core::plane::draw::{ensure_embedded, relax_picture, relax_preview};
 use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::planarity;
 use papertilling_core::types::{BuiltCrystal, Cell2D, Isometry2};
@@ -53,6 +52,9 @@ pub struct CombineLatticeInfo {
     pub allowed_angles: Vec<i32>,
     pub dislocations: Vec<CombineDislocOption>,
     pub r_auto_base: f64,
+    /// The catalogue writes Burgers coefficients in its reduced primitive basis, not the drawn cell.
+    pub burgers_basis: [[f64; 2]; 2],
+    pub snapper: CentreSnapper,
 }
 
 #[derive(Clone, Debug)]
@@ -76,6 +78,10 @@ pub struct CombineBuildOutput {
     pub core_summary: String,
     pub local_cores: Vec<CoreFaceSummary>,
     pub note: String,
+    /// Cheap in-drag picture: no planarity check and no core readouts (they stay at zero / empty).
+    pub preview: bool,
+    /// The surgery refused the defects (the reason); `crystal` is then a defect-free stand-in disk.
+    pub refused: Option<String>,
 }
 
 fn iso_rotation_about(at: [f64; 2], angle_deg: f64) -> Isometry2 {
@@ -170,31 +176,34 @@ pub fn combine_lattice_info(item: &CatalogueItemUi) -> CombineLatticeInfo {
     let r_500 = (500.0 / (std::f64::consts::PI * density)).sqrt();
     let r_auto_base = r_500.max((6.2 * lat_info.lmax).max(3.6 * lat_info.scale)).clamp(3.0, 14.0);
 
-    CombineLatticeInfo { cell, lat_info, centres, allowed_angles: angle_set, dislocations, r_auto_base }
+    let burgers_basis = [cat.cell.a1, cat.cell.a2];
+    let snapper = CentreSnapper::new(&item.group, &cell, item.frame);
+    CombineLatticeInfo { cell, lat_info, centres, allowed_angles: angle_set, dislocations, r_auto_base, burgers_basis, snapper }
 }
 
 pub fn snap_disclination_centre(
-    item: &CatalogueItemUi,
+    _item: &CatalogueItemUi,
     info: &CombineLatticeInfo,
     angle_deg: f64,
     centre_id_filter: Option<&str>,
     near: [f64; 2],
 ) -> ([f64; 2], String) {
-    if centre_id_filter.is_none()
-        && let Ok((pt, lbl)) = nearest_allowed_centre(&item.group, &info.cell, item.frame, angle_deg, near)
+    if let Some(cid) = centre_id_filter
+        && let Some(hit) = snap_to_class(info, angle_deg, cid, near)
     {
-        return (pt, lbl);
+        return hit;
     }
+    info.snapper.nearest(angle_deg, near).unwrap_or_else(|_| (near, String::from("unconstrained")))
+}
+
+fn snap_to_class(info: &CombineLatticeInfo, angle_deg: f64, centre_id: &str, near: [f64; 2]) -> Option<([f64; 2], String)> {
     let (inv, a) = (info.lat_info.lat.a_inv, info.lat_info.lat.a);
     let n0_0 = (inv[0][0] * near[0] + inv[0][1] * near[1]).floor() as i32;
     let n0_1 = (inv[1][0] * near[0] + inv[1][1] * near[1]).floor() as i32;
 
     let mut best: Option<(f64, [f64; 2], String)> = None;
     for c in &info.centres {
-        if centre_id_filter.is_some_and(|cid| c.id != cid) {
-            continue;
-        }
-        if !c.angles.iter().any(|&a_deg| (a_deg - angle_deg).abs() <= 0.5) {
+        if c.id != centre_id || !c.angles.iter().any(|&a_deg| (a_deg - angle_deg).abs() <= 0.5) {
             continue;
         }
         for &seed in &c.unit_seeds {
@@ -210,7 +219,7 @@ pub fn snap_disclination_centre(
             }
         }
     }
-    best.map_or((near, String::from("unconstrained")), |(_, p, lbl)| (p, lbl))
+    best.map(|(_, p, lbl)| (p, lbl))
 }
 
 pub fn preset_neighbour_pair(info: &CombineLatticeInfo) -> Vec<DefectSpec> {
@@ -238,11 +247,13 @@ pub fn preset_shortest_dislocation(info: &CombineLatticeInfo) -> Vec<DefectSpec>
 }
 
 pub fn burgers_from_mn(info: &CombineLatticeInfo, m: i32, n: i32) -> [f64; 2] {
-    [(m as f64) * info.cell.a1[0] + (n as f64) * info.cell.a2[0], (m as f64) * info.cell.a1[1] + (n as f64) * info.cell.a2[1]]
+    let [a1, a2] = info.burgers_basis;
+    [(m as f64) * a1[0] + (n as f64) * a2[0], (m as f64) * a1[1] + (n as f64) * a2[1]]
 }
 
 pub fn mn_from_burgers(info: &CombineLatticeInfo, b: [f64; 2]) -> Option<(i32, i32)> {
-    let a = [[info.cell.a1[0], info.cell.a2[0]], [info.cell.a1[1], info.cell.a2[1]]];
+    let [a1, a2] = info.burgers_basis;
+    let a = [[a1[0], a2[0]], [a1[1], a2[1]]];
     let det = a[0][0] * a[1][1] - a[0][1] * a[1][0];
     if det.abs() < 1e-12 {
         return None;
@@ -254,29 +265,40 @@ pub fn mn_from_burgers(info: &CombineLatticeInfo, b: [f64; 2]) -> Option<(i32, i
 }
 
 pub fn spec_world_pos(info: &CombineLatticeInfo, idx: usize, spec: &DefectSpec) -> [f64; 2] {
+    let (a1, a2) = (info.lat_info.lat.cell.a1, info.lat_info.lat.cell.a2);
     match *spec {
         DefectSpec::Disclination { at, .. } => at,
         DefectSpec::Dislocation { at: Some(p), .. } => p,
         DefectSpec::Dislocation { at: None, .. } => [
-            (0.371 + 3.0 * idx as f64) * info.cell.a1[0] + 0.413 * info.cell.a2[0],
-            (0.371 + 3.0 * idx as f64) * info.cell.a1[1] + 0.413 * info.cell.a2[1],
+            (0.371 + 3.0 * idx as f64) * a1[0] + 0.413 * a2[0],
+            (0.371 + 3.0 * idx as f64) * a1[1] + 0.413 * a2[1],
         ],
     }
 }
 
+pub fn centre_class_at(info: &CombineLatticeInfo, p: [f64; 2]) -> Option<&CombineCentreOption> {
+    info.centres.iter().find(|c| c.unit_seeds.iter().any(|&s| same_mod_cell(&info.lat_info, p, s)))
+}
+
 pub fn spec_short_label(info: &CombineLatticeInfo, spec: &DefectSpec) -> String {
     match *spec {
-        DefectSpec::Disclination { angle_deg, .. } => format!("D({angle_deg:+.0}°)"),
+        DefectSpec::Disclination { angle_deg, at, .. } => match centre_class_at(info, at) {
+            Some(c) => format!("D({}, {angle_deg:+.0}°)", c.label),
+            None => format!("D({angle_deg:+.0}°)"),
+        },
         DefectSpec::Dislocation { b, .. } => mn_from_burgers(info, b)
             .map_or_else(|| format!("T({:.1},{:.1})", b[0], b[1]), |(m, n)| format!("T({m},{n})")),
     }
 }
 
+/// Build, draw and read out the combined crystal. `preview` (live pin drag): a cheaper picture,
+/// no planarity check and no core readouts; the final build on drag release does the full work.
 pub fn build_combined_crystal(
     item: &CatalogueItemUi,
     info: &CombineLatticeInfo,
     specs: &[DefectSpec],
     opts: &CombineBuildOptions,
+    preview: bool,
 ) -> CombineBuildOutput {
     let t0 = Instant::now();
     let base_r = if opts.auto_radius { info.r_auto_base } else { opts.manual_radius };
@@ -294,6 +316,8 @@ pub fn build_combined_crystal(
             core_summary: String::from("defect-free reference disk"),
             local_cores: Vec::new(),
             note: String::new(),
+            preview,
+            refused: None,
         };
     }
 
@@ -315,13 +339,35 @@ pub fn build_combined_crystal(
         opts.manual_radius
     };
 
+    let area = (info.cell.a1[0] * info.cell.a2[1] - info.cell.a1[1] * info.cell.a2[0]).abs();
+    let inserted_turns: f64 = specs.iter().filter_map(|s| match s {
+        DefectSpec::Disclination { angle_deg, .. } if *angle_deg < 0.0 => Some(-angle_deg / 360.0),
+        _ => None,
+    }).sum();
+    let estimated_sites = std::f64::consts::PI * r_target * r_target * info.cell.basis.len() as f64
+        * (1.0 + inserted_turns) / area;
+    if !estimated_sites.is_finite() || estimated_sites > 20_000.0 {
+        let reason = String::from("desktop live-view budget exceeded (~20,000 sites); move pins closer or use a smaller manual patch. No equivalence was computed.");
+        return CombineBuildOutput {
+            crystal: build_pristine_disk(&info.lat_info, base_r.min(info.r_auto_base)),
+            elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
+            applied_radius: base_r.min(info.r_auto_base),
+            charge_label: String::from("Live view too large"),
+            charge_detail: reason.clone(),
+            core_nodes: 0, core_edges: 0, core_summary: String::from("not computed"),
+            local_cores: Vec::new(), note: reason.clone(), preview, refused: Some(reason),
+        };
+    }
+
     let mut notes = Vec::new();
     let mut applied_r = r_target;
     let mut crystal = match build_point_defects(&info.cell, specs, Some(r_target), None) {
         Ok(c) => c,
         Err(_) => match build_point_defects(&info.cell, specs, None, None) {
             Ok(c) => {
-                applied_r = r_target.max(max_d + 12.5 * info.lat_info.lmax + max_b);
+                if let Ok((_, r_safe)) = patch_centre_and_radius(&info.lat_info, specs, None, None) {
+                    applied_r = r_safe;
+                }
                 notes.push(String::from("expanded to safe surgical radius"));
                 c
             }
@@ -336,13 +382,17 @@ pub fn build_combined_crystal(
                     core_edges: 0,
                     core_summary: String::from("refused"),
                     local_cores: Vec::new(),
-                    note: err,
+                    note: format!("surgery refused (defect-free disk shown): {err}"),
+                    preview,
+                    refused: Some(err),
                 };
             }
         },
     };
 
-    if opts.draw_mode == CombineDrawMode::FastRelaxed {
+    if opts.draw_mode == CombineDrawMode::FastRelaxed && preview {
+        relax_preview_picture(&mut crystal);
+    } else if opts.draw_mode == CombineDrawMode::FastRelaxed {
         relax_picture(&mut crystal);
         if opts.full_planar_repair {
             let d_info = ensure_embedded(&mut crystal, false);
@@ -357,7 +407,6 @@ pub fn build_combined_crystal(
             }
         }
     }
-    let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let (charge_label, charge_detail) = match classify_crystal_charge(&item.group, &info.cell, item.frame, &crystal) {
         Ok(ch) => {
@@ -376,6 +425,22 @@ pub fn build_combined_crystal(
         },
     };
 
+    if preview {
+        return CombineBuildOutput {
+            crystal,
+            elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
+            applied_radius: applied_r,
+            charge_label,
+            charge_detail,
+            core_nodes: 0,
+            core_edges: 0,
+            core_summary: String::from("(core readout on release)"),
+            local_cores: Vec::new(),
+            note: notes.join("; "),
+            preview,
+            refused: None,
+        };
+    }
     let (core_nodes, core_edges) = core_graph(&crystal, &info.lat_info, opts.core_radius)
         .or_else(|_| core_graph(&crystal, &info.lat_info, 1))
         .map_or((0, 0), |g| (g.node_count(), g.edge_count()));
@@ -384,25 +449,21 @@ pub fn build_combined_crystal(
         core_summary: summarize_rings_and_core(&crystal, &info.lat_info),
         local_cores: inspect_crystal_cores(&crystal),
         crystal,
-        elapsed_ms,
+        elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
         applied_radius: applied_r,
         charge_label,
         charge_detail,
         core_nodes,
         core_edges,
         note: notes.join("; "),
+        preview,
+        refused: None,
     }
 }
 
-pub fn run_equivalent_single(
-    item: &CatalogueItemUi,
-    info: &CombineLatticeInfo,
-    specs: &[DefectSpec],
-    crystal: &BuiltCrystal,
-    core_radius: usize,
-    grid: usize,
-) -> Result<EquivalentSingleReport, String> {
-    equivalent_single(&item.group, &info.cell, item.frame, specs, crystal, core_radius, grid, true)
+/// In-drag picture (the full `relax_picture` runs on release).
+fn relax_preview_picture(crystal: &mut BuiltCrystal) {
+    relax_preview(crystal, 8.0);
 }
 
 pub fn item_from_notebook_json(
@@ -411,7 +472,14 @@ pub fn item_from_notebook_json(
 ) -> Result<CatalogueItemUi, String> {
     let fam = LatticeFamily::from_recipe(&cfg.recipe, Some(cfg.frame))?;
     let cell = fam.cell();
-    let group = if cfg.group.is_empty() { cfg.recipe.group.clone() } else { cfg.group.clone() };
+    let det = cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0];
+    if cell.basis.is_empty() || cell.bonds.is_empty() || !det.is_finite() || det == 0.0
+        || cell.a1.iter().chain(&cell.a2).chain(cell.basis.iter().flatten()).any(|x| !x.is_finite()) {
+        return Err(String::from("configuration recipe/frame does not define a finite, non-degenerate lattice"));
+    }
+    // Python load_config rebuilds from the recipe; `group` is redundant descriptive metadata,
+    // not permission to classify the same cell using a different wallpaper group.
+    let group = cfg.recipe.group.clone();
     let (dsymbol_key, network_key, symmetry_index) =
         match fam.dsymbol().and_then(|ds| ds.canonical_key().map_err(|e| e.to_string())) {
             Ok(ck) => {
@@ -452,6 +520,11 @@ pub fn item_from_notebook_json(
 }
 
 #[cfg(test)]
+mod json_tests;
+#[cfg(test)]
+mod parity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::{AppBackend, CatalogueRuleUi};
@@ -486,7 +559,7 @@ mod tests {
             core_radius: 2,
         };
         let bad = [DefectSpec::disclination(73.0, [0.123, 0.456])];
-        let out_bad = build_combined_crystal(kagome, &info, &bad, &opts);
+        let out_bad = build_combined_crystal(kagome, &info, &bad, &opts, false);
         assert!(!out_bad.crystal.pos.is_empty() && !out_bad.note.is_empty());
     }
 }

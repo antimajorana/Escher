@@ -1,0 +1,213 @@
+//! Headless egui tests of `Canvas2D::show_interactive`: real pointer events (press, move, release, wheel)
+//! through `egui::Context::run_ui`, no window.
+
+use super::*;
+use papertilling_core::types::Cell2D;
+
+const SCREEN: egui::Vec2 = egui::vec2(800.0, 600.0);
+
+struct Harness {
+    ctx: egui::Context,
+    time: f64,
+    canvas: Canvas2D,
+    rect: egui::Rect,
+    fit_zoom: f32,
+}
+
+fn square_scene() -> Scene2D {
+    Scene2D::PeriodicCell {
+        cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: vec![[0.0, 0.0]], bonds: Vec::new() },
+        repeat: 3,
+        show_unit_cell: false,
+    }
+}
+
+fn pin(index: usize, pos: [f64; 2]) -> CanvasMarker {
+    CanvasMarker { index, pos, kind: MarkerKind::DisclinationPlus, label: String::from("D(+90°)") }
+}
+
+fn press(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+}
+
+fn wheel(dy: f32) -> egui::Event {
+    egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, dy),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+impl Harness {
+    /// After the first frame (auto-fit), the view is set to 50 points per world unit, so world points within
+    /// about +-6 of the scene centre are on the 800 x 600 canvas.
+    fn new() -> Self {
+        let mut h = Self { ctx: egui::Context::default(), time: 0.0, canvas: Canvas2D::new(square_scene()), rect: egui::Rect::NOTHING, fit_zoom: 0.0 };
+        h.frame(Vec::new(), &[], false);
+        h.fit_zoom = h.canvas.zoom;
+        h.canvas.zoom = 50.0;
+        h
+    }
+
+    fn frame(&mut self, events: Vec<egui::Event>, markers: &[CanvasMarker], click_to_place: bool) -> CanvasInteraction {
+        self.time += 1.0 / 60.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            time: Some(self.time),
+            events,
+            ..Default::default()
+        };
+        let mut out = CanvasInteraction::default();
+        let (canvas, rect) = (&mut self.canvas, &mut self.rect);
+        let _ = self.ctx.run_ui(input, |ui| {
+            *rect = ui.available_rect_before_wrap();
+            out = canvas.show_interactive(ui, markers, click_to_place, None);
+        });
+        out
+    }
+
+    fn screen(&self, w: [f64; 2]) -> egui::Pos2 {
+        self.canvas.world_to_screen_at(self.rect, [w[0] as f32, w[1] as f32])
+    }
+
+    fn world(&self, s: egui::Pos2) -> [f64; 2] {
+        self.canvas.screen_to_world_at(self.rect, s)
+    }
+
+    /// After a 1 s pause (so consecutive gestures never count as a double click): press at `from`, move in
+    /// `steps` frames to `to`, release; returns every frame's output.
+    fn drag(&mut self, from: egui::Pos2, to: egui::Pos2, steps: usize, markers: &[CanvasMarker], place: bool) -> Vec<CanvasInteraction> {
+        self.time += 1.0;
+        let mut outs = vec![self.frame(vec![egui::Event::PointerMoved(from)], markers, place)];
+        outs.push(self.frame(vec![press(from, true)], markers, place));
+        for k in 1..=steps {
+            let p = from + (to - from) * (k as f32 / steps as f32);
+            outs.push(self.frame(vec![egui::Event::PointerMoved(p)], markers, place));
+        }
+        outs.push(self.frame(vec![press(to, false)], markers, place));
+        outs
+    }
+
+    fn click(&mut self, at: egui::Pos2, markers: &[CanvasMarker], place: bool) -> Vec<CanvasInteraction> {
+        self.drag(at, at, 0, markers, place)
+    }
+}
+
+fn close(a: [f64; 2], b: [f64; 2], tol: f64) -> bool {
+    (a[0] - b[0]).hypot(a[1] - b[1]) < tol
+}
+
+#[test]
+fn click_on_empty_places_click_on_pin_selects() {
+    let mut h = Harness::new();
+    let markers = [pin(0, [1.0, 1.0])];
+    let empty = h.screen([2.0, 0.0]);
+    let outs = h.click(empty, &markers, true);
+    let placed: Vec<[f64; 2]> = outs.iter().filter_map(|o| o.clicked_world).collect();
+    assert_eq!(placed.len(), 1, "one click on empty canvas places exactly once");
+    assert!(close(placed[0], [2.0, 0.0], 1e-3));
+    assert!(outs.iter().all(|o| o.clicked_marker.is_none() && o.dragged_marker.is_none()));
+
+    // a click 5 pt from the pin centre (inside the 14 pt pick radius) selects it and never places a stacked defect
+    let on_pin = h.screen([1.0, 1.0]) + egui::vec2(3.0, -4.0);
+    let outs = h.click(on_pin, &markers, true);
+    assert!(outs.iter().all(|o| o.clicked_world.is_none()));
+    assert_eq!(outs.iter().filter_map(|o| o.clicked_marker).collect::<Vec<_>>(), vec![0]);
+
+    // pan mode: a click on empty canvas places nothing
+    let outs = h.click(h.screen([2.5, 0.5]), &markers, false);
+    assert!(outs.iter().all(|o| o.clicked_world.is_none() && o.clicked_marker.is_none()));
+}
+
+#[test]
+fn drag_from_pin_moves_it_and_does_not_pan() {
+    let mut h = Harness::new();
+    let markers = [pin(0, [0.0, 0.0]), pin(1, [2.0, 2.0])];
+    let pan0 = h.canvas.pan;
+    let (from, to) = (h.screen([2.0, 2.0]), h.screen([2.0, 2.0]) + egui::vec2(60.0, 30.0));
+    let target = h.world(to);
+    let outs = h.drag(from, to, 6, &markers, true);
+    let moves: Vec<(usize, [f64; 2])> = outs.iter().filter_map(|o| o.dragged_marker).collect();
+    assert!(!moves.is_empty(), "a drag that starts on a pin reports pin moves");
+    assert!(moves.iter().all(|&(i, _)| i == 1));
+    assert!(close(moves.last().unwrap().1, target, 1e-3));
+    assert_eq!(h.canvas.pan, pan0, "dragging a pin must not pan the view");
+    assert!(outs.last().unwrap().drag_released);
+    assert!(outs.iter().all(|o| o.clicked_world.is_none()), "a drag is not a click");
+    assert_eq!(h.canvas.active_drag_pin, None);
+}
+
+#[test]
+fn drag_on_empty_canvas_pans() {
+    let mut h = Harness::new();
+    let markers = [pin(0, [0.0, 0.0])];
+    let pan0 = h.canvas.pan;
+    let from = h.screen([2.5, 2.5]);
+    let outs = h.drag(from, from + egui::vec2(-50.0, 20.0), 5, &markers, true);
+    assert!(outs.iter().all(|o| o.dragged_marker.is_none() && !o.drag_released && o.clicked_world.is_none()));
+    let d = h.canvas.pan - pan0;
+    assert!((d.x + 50.0).abs() < 1.0 && (d.y - 20.0).abs() < 1.0, "pan moved by {d:?}");
+}
+
+#[test]
+fn tiny_jiggle_on_pin_is_a_click_not_a_drag() {
+    let mut h = Harness::new();
+    let markers = [pin(0, [1.0, 0.0])];
+    let p = h.screen([1.0, 0.0]);
+    let outs = h.drag(p, p + egui::vec2(2.0, 1.0), 2, &markers, true);
+    assert!(outs.iter().all(|o| o.dragged_marker.is_none()));
+    assert_eq!(outs.iter().filter_map(|o| o.clicked_marker).count(), 1);
+    assert!(outs.iter().all(|o| o.clicked_world.is_none()));
+}
+
+#[test]
+fn scroll_zoom_during_pin_drag_keeps_pin_under_pointer() {
+    let mut h = Harness::new();
+    let markers = [pin(0, [1.0, 1.0])];
+    let from = h.screen([1.0, 1.0]);
+    let to = from + egui::vec2(40.0, 0.0);
+    h.frame(vec![egui::Event::PointerMoved(from)], &markers, false);
+    h.frame(vec![press(from, true)], &markers, false);
+    let mut last = None;
+    for k in 1..=4 {
+        let o = h.frame(vec![egui::Event::PointerMoved(from + (to - from) * (k as f32 / 4.0))], &markers, false);
+        last = o.dragged_marker.or(last);
+    }
+    let (idx, before) = last.expect("pin drag started");
+    assert_eq!(idx, 0);
+    let zoom0 = h.canvas.zoom;
+    let mut seen = Vec::new();
+    for k in 0..12 {
+        let ev = if k == 0 { vec![wheel(240.0)] } else { Vec::new() };
+        if let Some((_, w)) = h.frame(ev, &markers, false).dragged_marker {
+            seen.push(w);
+        }
+    }
+    assert!(h.canvas.zoom > zoom0 * 1.2, "wheel zoomed in ({zoom0} -> {})", h.canvas.zoom);
+    assert!(!seen.is_empty());
+    for w in &seen {
+        assert!(close(*w, before, 2e-3), "pin under the pointer moved from {before:?} to {w:?} while zooming");
+    }
+    let end = h.frame(vec![press(to, false)], &markers, false);
+    assert!(end.drag_released);
+}
+
+#[test]
+fn double_click_fits_the_view() {
+    let mut h = Harness::new();
+    let p = h.screen([2.5, 2.5]);
+    h.drag(p, p + egui::vec2(80.0, 0.0), 4, &[], false);
+    assert_ne!(h.canvas.pan, egui::Vec2::ZERO);
+    assert_ne!(h.canvas.zoom, h.fit_zoom);
+    let q = h.screen([2.0, 2.0]);
+    let mut outs = h.click(q, &[], false);
+    for pressed in [true, false] {
+        outs.push(h.frame(vec![press(q, pressed)], &[], false)); // second click within 0.3 s
+    }
+    h.frame(Vec::new(), &[], false); // the fit is applied on the next frame
+    assert_eq!(h.canvas.pan, egui::Vec2::ZERO);
+    assert!((h.canvas.zoom - h.fit_zoom).abs() < 1e-3);
+    assert!(outs.iter().all(|o| o.clicked_world.is_none()));
+}

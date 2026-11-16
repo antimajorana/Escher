@@ -4,13 +4,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 
 use faer::Mat;
-use faer::Side;
 use faer::prelude::Solve;
-use faer::sparse::{SparseColMat, Triplet};
+use faer::sparse::Pair;
+use faer::sparse::linalg::solvers::Llt;
 
 use crate::defect::core_graph::{TWO_PI, corners_order, cross2, norm2, sub2};
 use crate::defect::surgery::mark_long_bonds;
 use crate::plane::planarity::{has_frames, median_slice};
+use crate::plane::relax_normal::NormalFactor;
 use crate::types::BuiltCrystal;
 
 /// Precomputed spring, corner-triangle, and weak-anchor data matching `fast_relax.py`.
@@ -137,19 +138,40 @@ impl RelaxSetup {
     }
 }
 
-type NormalEqs = (Vec<Triplet<usize, usize, f64>>, Vec<f64>, Vec<f64>, f64);
+/// Destination of the `J^T J` entries produced by `RelaxSetup::assemble` (values and/or their indices).
+struct JtjSink<'a> {
+    vals: Option<&'a mut Vec<f64>>,
+    idx: Option<&'a mut Vec<Pair<usize, usize>>>,
+}
+
+impl JtjSink<'_> {
+    #[inline]
+    fn active(&self) -> bool {
+        self.vals.is_some() || self.idx.is_some()
+    }
+
+    #[inline]
+    fn push(&mut self, row: usize, col: usize, val: f64) {
+        if let Some(v) = self.vals.as_deref_mut() {
+            v.push(val);
+        }
+        if let Some(i) = self.idx.as_deref_mut() {
+            i.push(Pair::new(row, col));
+        }
+    }
+}
 
 impl RelaxSetup {
-
+    /// Gradient `J^T r`, diagonal of `J^T J` (empty unless `sink` is active) and cost; the `J^T J` entries go to
+    /// `sink` in a fixed order that depends only on the springs, triangles and `free_map` (never on `z`).
     fn assemble(
         &self,
         z: &[f64],
         free_map: Option<&[Option<usize>]>,
         ndof: usize,
-        build_jtj: bool,
-    ) -> NormalEqs {
-        let cap = if build_jtj { self.springs.len() * 16 + self.tris.len() * 36 + ndof } else { 0 };
-        let mut triplets = Vec::with_capacity(cap);
+        mut sink: JtjSink<'_>,
+    ) -> (Vec<f64>, Vec<f64>, f64) {
+        let build_jtj = sink.active();
         let mut diag = if build_jtj { vec![0.0; ndof] } else { Vec::new() };
         let mut g = vec![0.0; ndof];
         let mut sum_sq = 0.0;
@@ -169,7 +191,7 @@ impl RelaxSetup {
                     continue;
                 }
                 diag[cp] += vp * vp;
-                triplets.push(Triplet::new(cp, cp, vp * vp));
+                sink.push(cp, cp, vp * vp);
                 for q in (p + 1)..cols.len() {
                     let Some(cq) = (match free_map {
                         Some(m) => m[cols[q]],
@@ -180,10 +202,10 @@ impl RelaxSetup {
                     let vpq = vp * vals[q];
                     if cp == cq {
                         diag[cp] += 2.0 * vpq;
-                        triplets.push(Triplet::new(cp, cp, 2.0 * vpq));
+                        sink.push(cp, cp, 2.0 * vpq);
                     } else {
-                        triplets.push(Triplet::new(cp, cq, vpq));
-                        triplets.push(Triplet::new(cq, cp, vpq));
+                        sink.push(cp, cq, vpq);
+                        sink.push(cq, cp, vpq);
                     }
                 }
             }
@@ -214,35 +236,40 @@ impl RelaxSetup {
                 g[k] += a2 * (z[c] - self.x0[c]);
                 if build_jtj {
                     diag[k] += a2;
-                    triplets.push(Triplet::new(k, k, a2));
+                    sink.push(k, k, a2);
                 }
             }
         }
-        (triplets, diag, g, 0.5 * sum_sq)
+        (diag, g, 0.5 * sum_sq)
     }
-}
 
-fn build_spd_cholesky(
-    ndof: usize,
-    base_triplets: &[Triplet<usize, usize, f64>],
-    diag: &[f64],
-    mu: f64,
-) -> Option<faer::sparse::linalg::solvers::Llt<usize, f64>> {
-    let mat = if mu == 0.0 {
-        SparseColMat::<usize, f64>::try_new_from_triplets(ndof, ndof, base_triplets).ok()?
-    } else {
-        let mut aug = Vec::with_capacity(base_triplets.len() + ndof);
-        aug.extend_from_slice(base_triplets);
-        for (k, &dk) in diag.iter().enumerate() {
-            aug.push(Triplet::new(k, k, mu * dk.max(1e-12)));
-        }
-        SparseColMat::<usize, f64>::try_new_from_triplets(ndof, ndof, &aug).ok()?
-    };
-    mat.sp_cholesky(Side::Lower).ok()
+    /// `J^T J` values at `z` (into `vals`, cleared first), its diagonal, the gradient and the cost.
+    fn assemble_jtj(&self, z: &[f64], free_map: Option<&[Option<usize>]>, ndof: usize, vals: &mut Vec<f64>) -> (Vec<f64>, Vec<f64>, f64) {
+        vals.clear();
+        self.assemble(z, free_map, ndof, JtjSink { vals: Some(vals), idx: None })
+    }
+
+    /// Cached factorisation of `J^T J` for this setup and coordinate subset (pattern pass at `x0`).
+    fn normal_factor(&self, free_map: Option<&[Option<usize>]>, ndof: usize) -> NormalFactor {
+        let mut idx = Vec::with_capacity(self.springs.len() * 16 + self.tris.len() * 36 + ndof);
+        self.assemble(&self.x0, free_map, ndof, JtjSink { vals: None, idx: Some(&mut idx) });
+        NormalFactor::new(ndof, idx)
+    }
+
+    /// Factors of `J^T J + mu D` at `z` for each `mu`, reusing one cached factor (parity tests).
+    #[cfg(test)]
+    pub(crate) fn factors_for_test(&self, z: &[f64], mus: &[f64]) -> Vec<Option<Llt<usize, f64>>> {
+        let ndof = 2 * self.n;
+        let mut normal = self.normal_factor(None, ndof);
+        let mut vals = Vec::new();
+        let (diag, _, _) = self.assemble_jtj(z, None, ndof, &mut vals);
+        mus.iter().map(|&mu| normal.factor(&vals, &diag, mu)).collect()
+    }
 }
 
 /// Minimise `1/2 |r(z)|^2` via sparse Cholesky Gauss-Newton normal equations `(J^T J + mu D) dz = -J^T r`,
 /// reusing the Cholesky factor on chord steps once relative cost drop falls below `freeze = 1e-3`.
+/// The sparsity pattern and the symbolic analysis are computed once (see `relax_normal`).
 pub fn gauss_newton(
     setup: &RelaxSetup,
     z0: &[f64],
@@ -257,16 +284,22 @@ pub fn gauss_newton(
     let mut z = z0.to_vec();
     let mut f = setup.cost(&z);
     let mut mu = 0.0_f64;
-    let mut llt: Option<faer::sparse::linalg::solvers::Llt<usize, f64>> = None;
+    let mut llt: Option<Llt<usize, f64>> = None;
     let (mut frozen, mut nfact, mut last_it) = (false, 0usize, 0usize);
+    let mut normal = setup.normal_factor(None, ndof);
+    let mut vals = Vec::with_capacity(normal.len());
 
     for it in 1..=max_iter {
         last_it = it;
-        let (mut base_trips, mut diag, g, _) = setup.assemble(&z, None, ndof, llt.is_none() || !frozen);
+        let (mut diag, g, _) = if llt.is_none() || !frozen {
+            setup.assemble_jtj(&z, None, ndof, &mut vals)
+        } else {
+            setup.assemble(&z, None, ndof, JtjSink { vals: None, idx: None })
+        };
         let rhs = Mat::from_fn(ndof, 1, |row, _| -g[row]);
         let (z2, f2) = loop {
             if llt.is_none() || !frozen {
-                let Some(fac) = build_spd_cholesky(ndof, &base_trips, &diag, mu) else {
+                let Some(fac) = normal.factor(&vals, &diag, mu) else {
                     mu = if mu == 0.0 { 1e-4 } else { 10.0 * mu };
                     if mu > 1e12 {
                         return (z, f, it, nfact);
@@ -284,9 +317,7 @@ pub fn gauss_newton(
             }
             if frozen {
                 frozen = false;
-                let (t, d, _, _) = setup.assemble(&z, None, ndof, true);
-                base_trips = t;
-                diag = d;
+                diag = setup.assemble_jtj(&z, None, ndof, &mut vals).0;
                 continue;
             }
             mu = if mu == 0.0 { 1e-4 } else { 10.0 * mu };
@@ -308,30 +339,48 @@ pub fn gauss_newton(
     (z, f, last_it, nfact)
 }
 
-fn gn_step(setup: &RelaxSetup, z: &[f64], free: Option<&[usize]>) -> Option<(Vec<f64>, f64)> {
-    let total = 2 * setup.n;
-    let (free_map, ndof) = match free {
-        Some(f) => {
-            let mut m = vec![None; total];
-            for (k, &c) in f.iter().enumerate() {
-                m[c] = Some(k);
+/// Free-coordinate map (`None` = every coordinate free) and its cached normal-equation factor.
+struct StepSolver {
+    free_map: Option<Vec<Option<usize>>>,
+    ndof: usize,
+    normal: Option<NormalFactor>,
+    vals: Vec<f64>,
+}
+
+impl StepSolver {
+    fn new(setup: &RelaxSetup, free: Option<&[usize]>) -> Self {
+        let total = 2 * setup.n;
+        let (free_map, ndof) = match free {
+            Some(f) => {
+                let mut m = vec![None; total];
+                for (k, &c) in f.iter().enumerate() {
+                    m[c] = Some(k);
+                }
+                (Some(m), f.len())
             }
-            (Some(m), f.len())
-        }
-        None => (None, total),
-    };
-    if ndof == 0 {
-        return Some((Vec::new(), setup.cost(z)));
+            None => (None, total),
+        };
+        Self { free_map, ndof, normal: None, vals: Vec::new() }
     }
-    let (trips, diag, g, f) = setup.assemble(z, free_map.as_deref(), ndof, true);
-    let rhs = Mat::from_fn(ndof, 1, |row, _| -g[row]);
-    for mu in [0.0, 1e-8, 1e-5, 1e-2] {
-        if let Some(llt) = build_spd_cholesky(ndof, &trips, &diag, mu) {
-            let sol = llt.solve(&rhs);
-            return Some(((0..ndof).map(|k| sol[(k, 0)]).collect(), f));
+
+    /// One Gauss-Newton direction with the Levenberg shifts `mu = 0, 1e-8, 1e-5, 1e-2` as fall-backs.
+    fn step(&mut self, setup: &RelaxSetup, z: &[f64]) -> Option<(Vec<f64>, f64)> {
+        let ndof = self.ndof;
+        if ndof == 0 {
+            return Some((Vec::new(), setup.cost(z)));
         }
+        let fm = self.free_map.as_deref();
+        let normal = self.normal.get_or_insert_with(|| setup.normal_factor(fm, ndof));
+        let (diag, g, f) = setup.assemble_jtj(z, fm, ndof, &mut self.vals);
+        let rhs = Mat::from_fn(ndof, 1, |row, _| -g[row]);
+        for mu in [0.0, 1e-8, 1e-5, 1e-2] {
+            if let Some(llt) = normal.factor(&self.vals, &diag, mu) {
+                let sol = llt.solve(&rhs);
+                return Some(((0..ndof).map(|k| sol[(k, 0)]).collect(), f));
+            }
+        }
+        None
     }
-    None
 }
 
 /// Gauss-Newton with backtracking restricted to `free` coordinate indices (holding pinned rim fixed).
@@ -347,9 +396,10 @@ pub fn relax_pinned(
     }
     let mut z = z0.to_vec();
     let mut last_it = 0usize;
+    let mut solver = StepSolver::new(setup, Some(free));
     for it in 1..=max_iter {
         last_it = it;
-        let Some((dz, f)) = gn_step(setup, &z, Some(free)) else { break };
+        let Some((dz, f)) = solver.step(setup, &z) else { break };
         let mut a = 1.0_f64;
         let mut accepted = None;
         while a > 1e-3 {
@@ -389,8 +439,9 @@ pub fn relax_guarded<F: FnMut(&[f64]) -> usize>(
     let mut z = z0.to_vec();
     let mut b = badness(&z);
     let (mut steps, mut checks) = (0usize, 0usize);
+    let mut solver = StepSolver::new(setup, None);
     for _ in 0..max_iter {
-        let Some((dz, f)) = gn_step(setup, &z, None) else { break };
+        let Some((dz, f)) = solver.step(setup, &z) else { break };
         let mut a = 1.0_f64;
         let mut accepted = None;
         for _ in 0..=halvings {

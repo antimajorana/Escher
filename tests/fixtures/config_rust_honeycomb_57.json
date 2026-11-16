@@ -1,0 +1,77 @@
+{
+  "format": "papertilling.config.v1",
+  "lattice_label": "Honeycomb",
+  "group": "p6m",
+  "recipe": {
+    "group": "p6m",
+    "sites": [
+      [
+        0.333333333333,
+        0.666666666667
+      ]
+    ],
+    "bonds": [
+      [
+        [
+          0.333333333333,
+          0.666666666667
+        ],
+        [
+          -0.333333333333,
+          0.333333333333
+        ]
+      ]
+    ],
+    "a": 1.7320508075688772,
+    "b": null,
+    "gamma": null
+  },
+  "frame": {
+    "q": [
+      [
+        1.0,
+        1.2093841455807397e-16
+      ],
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "origin": [
+      0.8660254037844386,
+      0.4999999999999999
+    ]
+  },
+  "defects": [
+    {
+      "kind": "disclination",
+      "angle": 60.0,
+      "at": [
+        0.8660254037853043,
+        0.5000000000014999
+      ]
+    },
+    {
+      "kind": "disclination",
+      "angle": -60.0,
+      "at": [
+        2.5980762113541815,
+        0.5000000000014999
+      ]
+    }
+  ],
+  "options": {
+    "picture": "raw",
+    "grid": 2,
+    "radius": 2
+  },
+  "summary": {
+    "charge": "dislocation [b] = P+ orbit of [1.7321, 0.0] (|b| = 1.7321)",
+    "kind": "dislocation",
+    "equivalent": true,
+    "matches": [
+      "completion core 5"
+    ],
+    "verdict": "equivalent to the single defect (core: completion core 5)"
+  }
+}

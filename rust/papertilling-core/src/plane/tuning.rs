@@ -9,6 +9,11 @@ use super::loci::{Locus, supergroup_loci_for_family};
 use super::tuning_eval::{BareBond, EvalFamily, cell_mat, mat2_inv, mat2_vec};
 use crate::types::{Cell2D, Recipe};
 
+mod sliders;
+pub use sliders::{
+    SliderSpec, SliderState, inward_limits, nominal_range, slider_value, snap_to_special,
+};
+
 const REFINE: usize = 33;
 const ROUNDS: usize = 2;
 const TOL_LOCUS: f64 = 1e-7;
@@ -249,12 +254,13 @@ pub(crate) fn allowed_interval_family(
     let vals = fam.merged_values(values_override);
     let x0 = *vals.get(param_name).ok_or_else(|| format!("{param_name:?} is not a free parameter; free: {:?}", fam.names))?;
     let (lo, hi) = (lo_in.min(x0), hi_in.max(x0));
+    let Some(col) = fam.site_names.iter().position(|nm| nm == param_name) else {
+        // cell parameter: never forbidden (proved; tuning.py), current_ok = True whatever the sites do, as in Python
+        return Ok(AllowedInterval { interval: (lo, hi), edges: (None, None), segments: Vec::new(), current_ok: true });
+    };
     let u0 = fam.site_vector(&vals);
     let (code0, sig0) = classify_grid_family(fam, std::slice::from_ref(&u0), None);
     let current_ok = code0[0] == 0;
-    let Some(col) = fam.site_names.iter().position(|nm| nm == param_name) else {
-        return Ok(AllowedInterval { interval: (lo, hi), edges: (None, None), segments: Vec::new(), current_ok });
-    };
 
     let n = n_scan.unwrap_or(401).max(2);
     let step = (hi - lo) / ((n - 1) as f64);
@@ -448,95 +454,4 @@ pub fn special_points(
     let fam = EvalFamily::from_recipe(recipe)?;
     let loci = supergroup_loci_for_family(&fam).unwrap_or_default();
     special_points_with_loci(&fam, &loci, param_name, lo, hi, values_override)
-}
-
-/// Round `[a, b]` inward onto multiples of `step`, always preserving `x0` (`widgets._inward`).
-pub fn inward_limits(a: f64, b: f64, x0: f64, step: f64) -> (f64, f64) {
-    let a2 = ((a / step - 1e-9).ceil() * step * 1e10).round() / 1e10;
-    let b2 = ((b / step + 1e-9).floor() * step * 1e10).round() / 1e10;
-    (a2.min(x0), b2.max(x0))
-}
-
-/// Clamp `val` to `interval` and snap onto a `SpecialPoint` within `0.5 * step` (`widgets.explore`).
-pub fn snap_to_special(val: f64, step: f64, special: &[SpecialPoint], interval: (f64, f64)) -> f64 {
-    let v = val.clamp(interval.0, interval.1);
-    for sp in special {
-        if (v - sp.value).abs() <= 0.5 * step + 1e-12 && interval.0 <= sp.value && sp.value <= interval.1 {
-            return sp.value;
-        }
-    }
-    v
-}
-
-/// Live state of one constrained parameter slider (`widgets.explore`).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SliderSpec {
-    pub name: String,
-    pub nominal_range: (f64, f64),
-    pub step: f64,
-    pub limits: (f64, f64),
-    pub allowed: AllowedInterval,
-    pub special: Vec<SpecialPoint>,
-}
-
-/// Coupled multi-parameter constrained slider controller for a `Recipe`.
-#[derive(Clone, Debug)]
-pub struct SliderState {
-    pub recipe: Recipe,
-    pub values: BTreeMap<String, f64>,
-    pub sliders: Vec<SliderSpec>,
-    fam: EvalFamily,
-    loci: Vec<Locus>,
-}
-
-impl SliderState {
-    /// Initialise coupled sliders for all free parameters of `recipe`.
-    pub fn new(recipe: Recipe) -> Result<Self, String> {
-        let fam = EvalFamily::from_recipe(&recipe)?;
-        let values = fam.values();
-        let loci = supergroup_loci_for_family(&fam).unwrap_or_default();
-        let sliders = fam.names.iter().map(|nm| {
-            let v = values[nm];
-            let (lo, hi, step) = match nm.as_str() {
-                "b" => (0.4, 3.0, 0.01),
-                "gamma" => (45.0, 135.0, 0.5),
-                _ => (v - 0.5, v + 0.5, 0.002),
-            };
-            SliderSpec {
-                name: nm.clone(), nominal_range: (lo, hi), step, limits: (lo, hi),
-                allowed: AllowedInterval { interval: (lo, hi), edges: (None, None), segments: Vec::new(), current_ok: true },
-                special: Vec::new(),
-            }
-        }).collect();
-        let mut st = Self { recipe, values, sliders, fam, loci };
-        st.refresh_all()?;
-        Ok(st)
-    }
-
-    fn refresh_all(&mut self) -> Result<(), String> {
-        for s in &mut self.sliders {
-            let (lo, hi) = s.nominal_range;
-            let r = allowed_interval_family(&self.fam, &s.name, lo, hi, Some(&self.values), None)?;
-            let sp = special_points_with_loci(&self.fam, &self.loci, &s.name, lo, hi, Some(&self.values))?;
-            let (a, b) = if r.current_ok { r.interval } else { (lo, hi) };
-            s.limits = if r.edges != (None, None) { inward_limits(a, b, self.values[&s.name], s.step) } else { (a, b) };
-            s.allowed = r;
-            s.special = sp;
-        }
-        Ok(())
-    }
-
-    /// Look up the current slider specification for `name`.
-    pub fn spec(&self, name: &str) -> Option<&SliderSpec> {
-        self.sliders.iter().find(|s| s.name == name)
-    }
-
-    /// Move `name` to `raw_val` (clamping to current limits, snapping within `0.5 * step`, and refreshing all sliders).
-    pub fn set_value(&mut self, name: &str, raw_val: f64) -> Result<f64, String> {
-        let s = self.spec(name).ok_or_else(|| format!("unknown slider {name:?}"))?;
-        let snapped = snap_to_special(raw_val, s.step, &s.special, s.limits);
-        self.values.insert(name.to_string(), snapped);
-        self.refresh_all()?;
-        Ok(snapped)
-    }
 }

@@ -13,9 +13,11 @@ use crate::defect::core_graph::{
 use crate::types::{BuiltCrystal, Cell2D};
 
 /// Specification of an elementary dislocation or disclination on an open patch.
+/// JSON: `kind` is `"dislocation"` / `"disclination"` (also read: Python's aliases `"translation"` / `"rotation"`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DefectSpec {
+    #[serde(alias = "translation")]
     Dislocation {
         b: [f64; 2],
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -23,6 +25,7 @@ pub enum DefectSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cut: Option<[f64; 2]>,
     },
+    #[serde(alias = "rotation")]
     Disclination {
         #[serde(rename = "angle", alias = "angle_deg")]
         angle_deg: f64,
@@ -59,9 +62,20 @@ fn validate_specs(lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> Result<Ve
     let mut out = Vec::with_capacity(specs.len());
     let mut total_frank_req = 0.0;
     for (idx, s) in specs.iter().enumerate() {
+        let (point, cut, finite_charge) = match *s {
+            DefectSpec::Dislocation { b, at, cut } => (at, cut, b.iter().all(|x| x.is_finite())),
+            DefectSpec::Disclination { angle_deg, at, cut } => (Some(at), cut, angle_deg.is_finite()),
+        };
+        if !finite_charge || point.is_some_and(|p| p.iter().any(|x| !x.is_finite()))
+            || cut.is_some_and(|c| c.iter().any(|x| !x.is_finite()) || norm2(c) == 0.0) {
+            return Err(format!("spec {}: charge, position and non-zero cut direction must be finite", idx + 1));
+        }
         match *s {
             DefectSpec::Dislocation { b, at, cut } => {
                 let f = mat2_vec(lat.a_inv, b);
+                if f.iter().any(|v| !v.is_finite() || v.abs() > (i32::MAX - 8) as f64) {
+                    return Err(format!("spec {}: Burgers vector exceeds supported lattice indices", idx + 1));
+                }
                 if norm2(b) < 1e-9
                     || (f[0] - f[0].round_ties_even()).abs() > 1e-6
                     || (f[1] - f[1].round_ties_even()).abs() > 1e-6
@@ -106,6 +120,10 @@ pub fn patch_centre_and_radius(
     r_opt: Option<f64>,
     centre_opt: Option<[f64; 2]>,
 ) -> Result<([f64; 2], f64), String> {
+    if r_opt.is_some_and(|r| !r.is_finite() || r <= 0.0)
+        || centre_opt.is_some_and(|p| p.iter().any(|x| !x.is_finite())) {
+        return Err("patch radius must be finite and positive; centre must be finite".to_string());
+    }
     let norm = validate_specs(lat_info, specs)?;
     let n = norm.len() as f64;
     let ctr = centre_opt.unwrap_or_else(|| {
@@ -119,6 +137,14 @@ pub fn patch_centre_and_radius(
         let max_d = norm.iter().map(|s| norm2(sub2(s.at, ctr))).fold(0.0_f64, f64::max);
         max_d + (12.5 * lat_info.lmax + max_b).max(5.0 * lat_info.scale)
     });
+    let fc = mat2_vec(lat_info.lat.a_inv, ctr);
+    let cell = &lat_info.lat.cell;
+    let h = (cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0]).abs()
+        / norm2(cell.a1).max(norm2(cell.a2)).max(1e-12);
+    let span = (r / h.max(1e-12)).ceil() + 2.0;
+    if !r.is_finite() || r <= 0.0 || fc.iter().any(|x| !x.is_finite() || x.abs() + span >= (i32::MAX - 4) as f64) {
+        return Err("patch extent exceeds supported finite lattice indices".to_string());
+    }
     Ok((ctr, r))
 }
 
@@ -185,6 +211,12 @@ pub fn build_point_defects(
     r_opt: Option<f64>,
     centre_opt: Option<[f64; 2]>,
 ) -> Result<BuiltCrystal, String> {
+    let det = cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0];
+    if cell.basis.is_empty() || cell.bonds.is_empty() || !det.is_finite() || det == 0.0
+        || cell.a1.iter().chain(&cell.a2).chain(cell.basis.iter().flatten()).any(|x| !x.is_finite())
+        || cell.bonds.iter().any(|b| b.i >= cell.basis.len() || b.j >= cell.basis.len()) {
+        return Err("invalid lattice cell: finite independent vectors, sites and valid bonds are required".to_string());
+    }
     let lat_info = LatticeCoreInfo::new(cell);
     let norm = validate_specs(&lat_info, specs)?;
     let (ctr, r_patch) = patch_centre_and_radius(&lat_info, specs, r_opt, centre_opt)?;
@@ -214,7 +246,10 @@ pub fn build_point_defects(
             }
         }
         if let Some(e) = last_err {
-            return Err(format!("defect {}: {e}", idx + 1));
+            // Python build._run wording: "defect N (kind): reason", with the legacy builder's advice
+            let kind = if d.is_disloc { "dislocation" } else { "disclination" };
+            let advice = if e.contains("two walks disagree") { "; use another cut direction or defect order" } else { "" };
+            return Err(format!("defect {} ({kind}): {e}{advice}", idx + 1));
         }
     }
     let crystal = builder.finish()?;
@@ -227,7 +262,7 @@ pub fn build_point_defects(
         let min_deg = crystal.adj.iter().map(Vec::len).min().unwrap_or(0);
         if frames_bad != 0 || euler != 2 || (frank - expected_frank).abs() > 1e-2 || min_deg < 1 {
             return Err(format!(
-                "combinatorial check failed (frames_bad={frames_bad}, euler={euler}, frank={frank:.3} vs {expected_frank:.3}, min_deg={min_deg})"
+                "combinatorial check failed (frames_bad={frames_bad}, euler={euler}, frank={frank:.3} vs {expected_frank:.3}, min_deg={min_deg}); move the defects apart or give other cuts"
             ));
         }
     }

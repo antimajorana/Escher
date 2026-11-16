@@ -29,6 +29,7 @@ from __future__ import annotations
 import itertools
 import math
 from functools import cached_property
+from ._graph import _orbits
 
 import numpy as np
 
@@ -75,29 +76,6 @@ def _rot90(u):
 def _canon_dir(u):
     u = np.asarray(u, float) / np.linalg.norm(u)
     return -u if (u[1] < -1e-7 or (abs(u[1]) < 1e-7 and u[0] < 0)) else u
-
-
-def _orbits(items, ops, image, same):
-    """Orbits of items under ops (union-find). Returns lists of indices, in order of first member."""
-    parent = list(range(len(items)))
-
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]; i = parent[i]
-        return i
-    for i, it in enumerate(items):
-        for g in ops:
-            im = image(it, g)
-            for j, other in enumerate(items):
-                if same(im, other):
-                    a, b = find(i), find(j)
-                    if a != b:
-                        parent[max(a, b)] = min(a, b)
-                    break
-    out = {}
-    for i in range(len(items)):
-        out.setdefault(find(i), []).append(i)
-    return list(out.values())
 
 
 class _Group:

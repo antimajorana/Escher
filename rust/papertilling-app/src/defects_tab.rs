@@ -4,6 +4,17 @@ use crate::backend::{
     AppBackend, CatalogueItemUi, DefectCatalogueUi, DefectReadoutUi, DefectSelectionUi,
 };
 use crate::canvas2d::{Canvas2D, Scene2D};
+use crate::combine_worker::LatestWorker;
+use papertilling_core::types::{BuiltCrystal, Cell2D};
+
+struct BuildJob {
+    item: CatalogueItemUi,
+    selection: DefectSelectionUi,
+    radius: f64,
+    relaxed: bool,
+}
+
+type BuildOutput = (DefectCatalogueUi, BuiltCrystal, DefectReadoutUi);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DefectSubTab {
@@ -33,6 +44,13 @@ pub struct DefectsTabState {
     pub radius: f64,
     pub relaxed: bool,
     pub readout: DefectReadoutUi,
+    /// The lattice changed while another tab was shown: catalogue and readout are rebuilt when this tab draws.
+    stale: bool,
+    initializing: bool,
+    worker: LatestWorker<BuildJob, BuildOutput>,
+    last_scene: Option<Scene2D>,
+    reset_on_result: bool,
+    error: Option<String>,
 }
 
 impl DefectsTabState {
@@ -40,8 +58,11 @@ impl DefectsTabState {
         let catalogue = backend.defect_catalogue(item);
         let radius = 3.8;
         let relaxed = true;
-        let (_, readout) =
+        let (crystal, readout) =
             backend.build_defect(item, &DefectSelectionUi::Dislocation(0), radius, relaxed);
+        let last_scene = Some(Scene2D::CrystalPatch {
+            crystal, title: readout.title.clone(), note: readout.note.clone(),
+        });
         Self {
             sub_tab: DefectSubTab::Dislocations,
             catalogue,
@@ -51,6 +72,18 @@ impl DefectsTabState {
             radius,
             relaxed,
             readout,
+            stale: false,
+            initializing: false,
+            worker: LatestWorker::spawn("defects-build", (), |_: &mut (), job: BuildJob| {
+                let catalogue = crate::live_ops::catalogue_for_lattice(&job.item);
+                let (crystal, readout) = crate::live_ops::build_defect_patch(
+                    &job.item, &job.selection, job.radius, job.relaxed,
+                );
+                (catalogue, crystal, readout)
+            }),
+            last_scene,
+            reset_on_result: false,
+            error: None,
         }
     }
 
@@ -69,10 +102,13 @@ impl DefectsTabState {
         canvas: &mut Canvas2D,
         sync_canvas: bool,
     ) {
-        self.catalogue = backend.defect_catalogue(item);
         self.selected_disloc = 0;
         self.selected_disclin = 0;
         self.selected_wall = 0;
+        self.worker.cancel();
+        self.last_scene = None;
+        self.initializing = true;
+        self.stale = true;
         if sync_canvas {
             self.rebuild_crystal(item, backend, canvas, true);
         }
@@ -81,21 +117,52 @@ impl DefectsTabState {
     pub fn rebuild_crystal(
         &mut self,
         item: &CatalogueItemUi,
-        backend: &AppBackend,
+        _backend: &AppBackend,
         canvas: &mut Canvas2D,
         reset_view: bool,
     ) {
-        let sel = self.current_selection();
-        let (crystal, readout) = backend.build_defect(item, &sel, self.radius, self.relaxed);
-        canvas.set_scene(
-            Scene2D::CrystalPatch {
-                crystal,
-                title: readout.title.clone(),
-                note: readout.note.clone(),
-            },
-            reset_view,
-        );
-        self.readout = readout;
+        self.worker.submit(BuildJob {
+            item: item.clone(), selection: self.current_selection(),
+            radius: self.radius, relaxed: self.relaxed,
+        });
+        self.stale = false;
+        self.error = None;
+        self.reset_on_result |= reset_view;
+        let mut scene = self.last_scene.clone().unwrap_or_else(|| Scene2D::PeriodicCell {
+            cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: Vec::new(), bonds: Vec::new() },
+            repeat: 1, show_unit_cell: false,
+        });
+        if let Scene2D::CrystalPatch { note, .. } = &mut scene {
+            *note = String::from("Previous result — stale while the new defect builds in the background.");
+        }
+        canvas.set_scene(scene, reset_view);
+    }
+
+    pub(crate) fn is_busy(&self) -> bool { self.stale || self.worker.is_busy() }
+
+    fn take_result(&mut self, result: Result<BuildOutput, String>, canvas: &mut Canvas2D) {
+        self.initializing = false;
+        match result {
+            Ok((catalogue, crystal, readout)) => {
+                self.catalogue = catalogue;
+                let scene = Scene2D::CrystalPatch {
+                    crystal, title: readout.title.clone(), note: readout.note.clone(),
+                };
+                canvas.set_scene(scene.clone(), self.reset_on_result);
+                self.last_scene = Some(scene);
+                self.readout = readout;
+            }
+            Err(err) => self.error = Some(err),
+        }
+        self.reset_on_result = false;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wait_idle(&mut self, canvas: &mut Canvas2D) {
+        if let Some(result) = self.worker.wait(std::time::Duration::from_secs(120)) {
+            self.take_result(result, canvas);
+        }
+        assert!(!self.is_busy(), "defect build did not complete");
     }
 
     pub fn show_side_panel(
@@ -105,10 +172,23 @@ impl DefectsTabState {
         backend: &AppBackend,
         canvas: &mut Canvas2D,
     ) {
+        self.worker.set_repaint_ctx(ui.ctx());
+        if self.stale {
+            self.rebuild_crystal(active_item, backend, canvas, true);
+        }
+        if let Some(result) = self.worker.poll() { self.take_result(result, canvas); }
         let mut dirty = false;
         let mut reset_view = false;
 
         ui.strong(format!("Active lattice: {} ({})", active_item.label, active_item.group));
+        if self.initializing {
+            ui.spinner();
+            ui.label("Preparing the defect catalogue and picture in the background…");
+            return;
+        }
+        if let Some(err) = &self.error {
+            ui.colored_label(egui::Color32::DARK_RED, err);
+        }
         ui.add_space(3.0);
         ui.horizontal(|ui| {
             for st in DefectSubTab::ALL {
@@ -356,6 +436,12 @@ impl DefectsTabState {
 
         ui.separator();
         ui.strong("Core Charge & Topology Readout");
+        if self.is_busy() || self.error.is_some() {
+            ui.horizontal(|ui| {
+                if self.is_busy() { ui.spinner(); }
+                ui.label("Previous readout — stale");
+            });
+        }
         ui.label(&self.readout.charge_summary);
         ui.small(&self.readout.holonomy_detail);
         ui.small(format!("Core structure: {}", self.readout.core_rings));
@@ -367,3 +453,7 @@ impl DefectsTabState {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "defects_tab_tests.rs"]
+pub(crate) mod tests;

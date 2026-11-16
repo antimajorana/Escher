@@ -1,14 +1,11 @@
-use std::sync::OnceLock;
+use std::sync::{Once, OnceLock};
 
-use papertilling_core::defect::combine_types::{EquivalentSingleReport, NotebookConfigJson};
-use papertilling_core::defect::surgery::DefectSpec;
+use papertilling_core::defect::combine_types::NotebookConfigJson;
 use papertilling_core::types::{
     BuiltCrystal, Cell2D, Frame2D, Recipe, SurfaceCheckReport, SurfaceMesh,
 };
 
-use crate::live_combine::{
-    self, CombineBuildOptions, CombineBuildOutput, CombineLatticeInfo,
-};
+use crate::live_combine::{self, CombineLatticeInfo};
 use crate::live_ops;
 use crate::live_plane::{self, PlaneCatalogues};
 
@@ -326,7 +323,12 @@ pub struct AppBackend {
     cats: &'static PlaneCatalogues,
     groups: Vec<GroupInfo>,
     named: Vec<CatalogueItemUi>,
-    verdict_matrix: OnceLock<Vec<SurfaceVerdictRowUi>>,
+}
+
+/// The 17 x 8 surface verdict matrix depends only on the stored catalogues: one per process.
+fn verdict_matrix_cell() -> &'static OnceLock<Vec<SurfaceVerdictRowUi>> {
+    static CELL: OnceLock<Vec<SurfaceVerdictRowUi>> = OnceLock::new();
+    &CELL
 }
 
 impl Default for AppBackend {
@@ -340,12 +342,18 @@ impl AppBackend {
         let cats = live_plane::shared_catalogues();
         let groups = live_plane::build_groups_info(cats);
         let named = live_plane::build_named_lattices(cats);
-        Self {
-            cats,
-            groups,
-            named,
-            verdict_matrix: OnceLock::new(),
-        }
+        Self { cats, groups, named }
+    }
+
+    /// Start computing the surface verdict matrix (about 1.3 s) off the UI thread.
+    pub fn prefetch_surface_verdicts(&self) {
+        static START: Once = Once::new();
+        START.call_once(|| {
+            let cats = self.cats;
+            let _ = std::thread::Builder::new().name(String::from("verdict-matrix")).spawn(move || {
+                verdict_matrix_cell().get_or_init(|| live_ops::build_verdict_matrix(cats));
+            });
+        });
     }
 
     pub fn groups(&self) -> &[GroupInfo] {
@@ -390,9 +398,14 @@ impl AppBackend {
         live_plane::build_cell_for_item(item, params)
     }
 
+    #[cfg(test)]
     pub fn surface_verdict_matrix(&self) -> &[SurfaceVerdictRowUi] {
-        self.verdict_matrix
-            .get_or_init(|| live_ops::build_verdict_matrix(self.cats))
+        verdict_matrix_cell().get_or_init(|| live_ops::build_verdict_matrix(self.cats))
+    }
+
+    pub fn surface_verdict_matrix_ready(&self) -> Option<&[SurfaceVerdictRowUi]> {
+        self.prefetch_surface_verdicts();
+        verdict_matrix_cell().get().map(Vec::as_slice)
     }
 
     pub fn build_surface(
@@ -431,28 +444,6 @@ impl AppBackend {
         near: [f64; 2],
     ) -> ([f64; 2], String) {
         live_combine::snap_disclination_centre(item, info, angle_deg, centre_id_filter, near)
-    }
-
-    pub fn build_combined(
-        &self,
-        item: &CatalogueItemUi,
-        info: &CombineLatticeInfo,
-        specs: &[DefectSpec],
-        opts: &CombineBuildOptions,
-    ) -> CombineBuildOutput {
-        live_combine::build_combined_crystal(item, info, specs, opts)
-    }
-
-    pub fn equivalent_single(
-        &self,
-        item: &CatalogueItemUi,
-        info: &CombineLatticeInfo,
-        specs: &[DefectSpec],
-        crystal: &BuiltCrystal,
-        core_radius: usize,
-        grid: usize,
-    ) -> Result<EquivalentSingleReport, String> {
-        live_combine::run_equivalent_single(item, info, specs, crystal, core_radius, grid)
     }
 
     pub fn item_from_notebook_json(

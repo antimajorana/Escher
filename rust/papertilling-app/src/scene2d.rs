@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use papertilling_core::types::{BuiltCrystal, Cell2D, SurfaceMesh};
 use crate::scene_crystal::compile_crystal_patch;
 
+#[derive(Clone)]
 pub enum Scene2D {
     PeriodicCell {
         cell: Cell2D,
@@ -274,6 +275,33 @@ fn compile_surface_net(mesh: &SurfaceMesh) -> ScenePrimitives {
         }
     }
 
+    // Colour chart-local rings with the same palette as the 3D faces. Do not fill across a
+    // quotient seam: those bonds are shown as stubs, not as a polygon spanning the chart.
+    let mut vectors = std::collections::HashMap::new();
+    for &(a, b, v) in &mesh.bonds {
+        vectors.insert((a, b), v);
+        vectors.insert((b, a), [-v[0], -v[1]]);
+    }
+    for face in &mesh.faces {
+        if face.len() < 3 || face.iter().any(|&v| v >= mesh.uv.len()) {
+            continue;
+        }
+        let local = (0..face.len()).all(|i| {
+            let (a, b) = (face[i], face[(i + 1) % face.len()]);
+            vectors.get(&(a, b)).is_some_and(|v| {
+                (mesh.uv[b][0] - mesh.uv[a][0] - v[0])
+                    .hypot(mesh.uv[b][1] - mesh.uv[a][1] - v[1]) < 1e-6
+            })
+        });
+        if local {
+            polygons.push(PolyPrim {
+                points: face.iter().map(|&v| [mesh.uv[v][0] as f32, mesh.uv[v][1] as f32]).collect(),
+                fill: ring_tint_rgba(face.len()),
+                stroke: None,
+            });
+        }
+    }
+
     for &(a, b, v) in &mesh.bonds {
         if a >= mesh.uv.len() || b >= mesh.uv.len() {
             continue;
@@ -450,5 +478,23 @@ fn net_face_uv_center(uv: &[[f64; 2]], face: &[usize]) -> Option<[f32; 2]> {
         }
     }
     (cnt > 0).then(|| [(sum[0] / cnt as f64) as f32, (sum[1] / cnt as f64) as f32])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn net_rings_use_the_3d_palette_without_filling_across_seams() {
+        let mut mesh = crate::surfaces_tab::empty_net("square chart");
+        mesh.uv = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        mesh.faces = vec![vec![0, 1, 2, 3]];
+        mesh.bonds = vec![(0, 1, [1.0, 0.0]), (1, 2, [0.0, 1.0]), (2, 3, [-1.0, 0.0]), (3, 0, [0.0, -1.0])];
+        let drawn = compile_surface_net(&mesh);
+        assert_eq!(drawn.polygons.len(), 1);
+        assert_eq!(drawn.polygons[0].fill, ring_tint_rgba(4));
+        mesh.bonds[0].2 = [-3.0, 0.0]; // this edge wraps around the quotient instead
+        assert!(compile_surface_net(&mesh).polygons.is_empty());
+    }
 }
 
