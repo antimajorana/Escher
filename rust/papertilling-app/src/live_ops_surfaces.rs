@@ -3,7 +3,7 @@ use papertilling_core::plane::groups::WALLPAPER_GROUPS;
 use papertilling_core::surface::{
     RefusalKind, SurfaceError, check_surface, cylinder, default_cylinder, default_genus_surface,
     default_klein_bottle, default_mobius_band, default_torus, genus_surface_with_options,
-    klein_bottle, mobius_band, polyhedron, surface_table, symmetry_facts, torus,
+    klein_bottle, mobius_band, polyhedron, surface_table, symmetry_facts_of_cell, torus,
     try_poly_for_table_with_centre,
 };
 use papertilling_core::types::{Cell2D, SurfaceCheckReport, SurfaceMesh};
@@ -122,7 +122,8 @@ pub fn build_surface_mesh(
     params: &SurfaceBuildParamsUi,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
-    if let Some(reason) = symmetry_facts(&item.group).impossible_reason(surface_table_name(target)) {
+    let facts = symmetry_facts_of_cell(&item.group, &cell);
+    if let Some(reason) = facts.impossible_reason(surface_table_name(target)) {
         return Err(format!("IMPOSSIBLE (group): {reason}"));
     }
     let (h, k) = (params.h, params.k);
@@ -134,7 +135,7 @@ pub fn build_surface_mesh(
         SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane => {
             let proj = target == SurfaceTargetUi::ProjectivePlane;
             return polyhedron(
-                &item.group,
+                &facts.group,
                 &cell,
                 Some((h.max(0), k.max(0))),
                 centre_filter(params.centre_mode),
@@ -165,7 +166,8 @@ pub fn build_surface_mesh_auto(
     genus_g: u32,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
-    if let Some(reason) = symmetry_facts(&item.group).impossible_reason(surface_table_name(target)) {
+    let facts = symmetry_facts_of_cell(&item.group, &cell);
+    if let Some(reason) = facts.impossible_reason(surface_table_name(target)) {
         return Err(format!("IMPOSSIBLE (group): {reason}"));
     }
     let mesh = match target {
@@ -176,7 +178,7 @@ pub fn build_surface_mesh_auto(
         SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane => {
             let proj = target == SurfaceTargetUi::ProjectivePlane;
             let row = try_poly_for_table_with_centre(
-                &item.group,
+                &facts.group,
                 &cell,
                 proj,
                 centre_filter(centre_mode),

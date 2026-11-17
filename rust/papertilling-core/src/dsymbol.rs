@@ -269,3 +269,70 @@ pub fn network_key(key: &[KeyRow]) -> Result<DSymbolKey, DSymbolError> {
 pub fn symmetry_index(key: &[KeyRow]) -> Result<usize, DSymbolError> {
     Ok(key.len() / network_key(key)?.len())
 }
+
+/// True iff the bare tiling admits no orientation-reversing combinatorial automorphism
+/// (i.e. the minimal D-symbol `(s0, s1, s2)` chamber graph is bipartite).
+pub fn is_topologically_chiral(key: &[KeyRow]) -> Result<bool, DSymbolError> {
+    let min_key = network_key(key)?;
+    let n = min_key.len();
+    let mut color = vec![u8::MAX; n];
+    let mut stack = Vec::with_capacity(n);
+    for start in 0..n {
+        if color[start] != u8::MAX {
+            continue;
+        }
+        color[start] = 0;
+        stack.push(start);
+        while let Some(u) = stack.pop() {
+            let next_col = 1 - color[u];
+            let (_, _, s0, s1, s2) = min_key[u];
+            for v in [s0 as usize, s1 as usize, s2 as usize] {
+                if v == u {
+                    return Ok(false);
+                }
+                if color[v] == u8::MAX {
+                    color[v] = next_col;
+                    stack.push(v);
+                } else if color[v] != next_col {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod chiral_tests {
+    use super::*;
+
+    #[test]
+    fn topological_chirality_distinguishes_snub_hexagonal_from_achiral_nets() {
+        // Square net 4.4.4.4 has minimal D-symbol size 1 (fixed points -> not bipartite -> achiral).
+        let sq = vec![(4_u32, 4_u32, 0_u32, 0_u32, 0_u32)];
+        assert!(!is_topologically_chiral(&sq).unwrap());
+
+        // Chiral Square (4.8.8 in p4) also has an achiral bare graph (|D_min| = 3 with mirror symmetries).
+        let d488 = vec![
+            (4, 3, 1, 1, 0),
+            (8, 3, 0, 2, 2),
+            (8, 3, 2, 1, 1),
+        ];
+        assert!(!is_topologically_chiral(&d488).unwrap());
+
+        // Snub hexagonal tiling 3.3.3.3.6 (p6 #1 in points.json) has |D_min| = 10 and is bipartite.
+        let snub_hex = vec![
+            (3, 5, 1, 1, 2),
+            (3, 5, 0, 0, 3),
+            (3, 5, 3, 4, 0),
+            (3, 5, 2, 5, 1),
+            (3, 5, 6, 2, 6),
+            (3, 5, 7, 3, 8),
+            (3, 5, 4, 7, 4),
+            (3, 5, 5, 6, 9),
+            (6, 5, 9, 9, 5),
+            (6, 5, 8, 8, 7),
+        ];
+        assert!(is_topologically_chiral(&snub_hex).unwrap());
+    }
+}

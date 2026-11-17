@@ -41,6 +41,14 @@ impl GalleryTabState {
                     if title_resp.double_clicked() {
                         self.begin_rename();
                     }
+                    if self.readout.chiral {
+                        let tip = if self.readout.topologically_chiral {
+                            "± Chiral enantiomorph pair in 2D (chiral bare graph, merged under Euclidean normalizer)"
+                        } else {
+                            "± Chiral enantiomorph pair in 2D (merged under Euclidean normalizer)"
+                        };
+                        ui.small("±").on_hover_text(tip);
+                    }
                     if self.active_item.has_custom_name() {
                         ui.small(format!("[{}]", self.active_item.default_label));
                     }
@@ -106,10 +114,19 @@ impl GalleryTabState {
 
     fn group_tables(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
         let mut changed = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Rule:");
             for r in CatalogueRuleUi::ALL {
-                if ui.selectable_label(self.rule == r, r.label()).clicked() {
+                let desc = match r {
+                    CatalogueRuleUi::Bonds => "Standard lattice: minimal site and bond orbits; bonds may lower point symmetry",
+                    CatalogueRuleUi::Sheet => "Atomic crystals: bare site positions alone already have exact group G",
+                    CatalogueRuleUi::Points => "Delaunay lattice: bare site positions have exact group G; bonds are Voronoi-neighbour dual edges",
+                };
+                if ui
+                    .selectable_label(self.rule == r, r.short_label())
+                    .on_hover_text(format!("{} — {desc}", r.label()))
+                    .clicked()
+                {
                     self.select_rule(r, backend, canvas);
                     changed = true;
                 }
@@ -197,7 +214,19 @@ impl GalleryTabState {
                             });
                             row.col(|ui| {
                                 let txt = it.display_with_orig();
-                                if ui.selectable_label(self.selected_cat_idx == idx, txt).clicked() {
+                                if it.chiral {
+                                    ui.horizontal(|ui| {
+                                        if ui.selectable_label(self.selected_cat_idx == idx, txt).clicked() {
+                                            picked_cat = Some(idx);
+                                        }
+                                        let tip = if it.topologically_chiral {
+                                            "± Chiral enantiomorph pair in 2D (chiral bare graph)"
+                                        } else {
+                                            "± Chiral enantiomorph pair in 2D (merged under Euclidean normalizer)"
+                                        };
+                                        ui.small("±").on_hover_text(tip);
+                                    });
+                                } else if ui.selectable_label(self.selected_cat_idx == idx, txt).clicked() {
                                     picked_cat = Some(idx);
                                 }
                             });
@@ -242,7 +271,16 @@ impl GalleryTabState {
                         body.row(18.0, |mut row| {
                             row.col(|ui| {
                                 let txt = it.display_with_orig();
-                                if ui.selectable_label(self.selected_named_idx == idx, txt).clicked() {
+                                if it.chiral {
+                                    ui.horizontal(|ui| {
+                                        if ui.selectable_label(self.selected_named_idx == idx, txt).clicked() {
+                                            picked_named = Some(idx);
+                                        }
+                                        ui.small("±").on_hover_text(
+                                            "± Chiral enantiomorph pair in 2D (merged under Euclidean normalizer)",
+                                        );
+                                    });
+                                } else if ui.selectable_label(self.selected_named_idx == idx, txt).clicked() {
                                     picked_named = Some(idx);
                                 }
                             });

@@ -8,6 +8,7 @@ use papertilling_core::defect::surgery::{
     DefectSpec, build_point_defects_with_cuts, patch_centre_and_radius,
 };
 use papertilling_core::dsymbol;
+use papertilling_core::plane::basis_reduce::is_geometrically_chiral;
 use papertilling_core::plane::draw::{ensure_embedded, relax_picture, relax_preview};
 use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::planarity;
@@ -199,15 +200,17 @@ pub fn item_from_notebook_json(
     // Python load_config rebuilds from the recipe; `group` is redundant descriptive metadata,
     // not permission to classify the same cell using a different wallpaper group.
     let group = cfg.recipe.group.clone();
-    let (dsymbol_key, network_key, symmetry_index) =
+    let (dsymbol_key, network_key, symmetry_index, topologically_chiral) =
         match fam.dsymbol().and_then(|ds| ds.canonical_key().map_err(|e| e.to_string())) {
             Ok(ck) => {
                 let nk = dsymbol::network_key(&ck).unwrap_or_else(|_| ck.clone());
                 let si = dsymbol::symmetry_index(&ck).unwrap_or(1);
-                (format_dsymbol_key(&ck), format_dsymbol_key(&nk), si)
+                let tc = dsymbol::is_topologically_chiral(&nk).unwrap_or(false);
+                (format_dsymbol_key(&ck), format_dsymbol_key(&nk), si, tc)
             }
-            Err(_) => (String::from("-"), String::from("-"), 1),
+            Err(_) => (String::from("-"), String::from("-"), 1, false),
         };
+    let chiral = is_geometrically_chiral(&cell).unwrap_or(false);
     // Display names are user-controlled and need not be unique. They never establish identity.
     let same_action = |it: &&CatalogueItemUi| it.group == group && dsymbol_key != "-" && it.dsymbol_key == dsymbol_key;
     let matched_named = named_list.iter()
@@ -244,6 +247,8 @@ pub fn item_from_notebook_json(
         dsymbol_key,
         network_key,
         symmetry_index,
+        chiral,
+        topologically_chiral,
         occupied_wyckoff: occupied_wyckoff_letters(&cfg.recipe),
         recipe: cfg.recipe.clone(),
         frame: cfg.frame,

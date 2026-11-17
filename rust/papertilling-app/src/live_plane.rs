@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-use papertilling_core::dsymbol::DSymbolKey;
+use papertilling_core::dsymbol::{self, DSymbolKey};
+use papertilling_core::plane::basis_reduce::is_geometrically_chiral;
 use papertilling_core::plane::catalogue::{
     GroupCatalogue, NamedCatalogue, NamedLattice, parse_catalogue_str, parse_named_str,
 };
@@ -153,6 +154,8 @@ pub fn build_named_lattices(cats: &PlaneCatalogues, aliases: &AliasStore) -> Vec
                 dsymbol_key,
                 network_key: format_dsymbol_key(&nl.network_key),
                 symmetry_index: nl.symmetry_index,
+                chiral: is_geometrically_chiral(&nl.cell).unwrap_or(false),
+                topologically_chiral: dsymbol::is_topologically_chiral(&nl.network_key).unwrap_or(false),
                 occupied_wyckoff: occupied_wyckoff_letters(&nl.recipe),
                 recipe: nl.recipe.clone(),
                 frame: nl.frame,
@@ -219,7 +222,7 @@ pub fn catalogue_for_group(
                 )
             };
             let dsymbol_key = format_dsymbol_key(&entry.canonical_key);
-            let alias_key = LatticeAliasKey::new(&entry.recipe.group, rule.label(), idx + 1, &dsymbol_key);
+            let alias_key = LatticeAliasKey::new(&entry.recipe.group, rule.slug(), idx + 1, &dsymbol_key);
             let label = aliases.get(&alias_key).map_or_else(|| default_label.clone(), str::to_owned);
             CatalogueItemUi {
                 index: idx + 1,
@@ -236,6 +239,8 @@ pub fn catalogue_for_group(
                 dsymbol_key,
                 network_key: format_dsymbol_key(&entry.network_key),
                 symmetry_index: entry.symmetry_index,
+                chiral: is_geometrically_chiral(&cell).unwrap_or(false),
+                topologically_chiral: dsymbol::is_topologically_chiral(&entry.network_key).unwrap_or(false),
                 occupied_wyckoff: occupied_wyckoff_letters(&entry.recipe),
                 recipe: entry.recipe.clone(),
                 frame: Frame2D::default(),

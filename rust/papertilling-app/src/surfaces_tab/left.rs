@@ -45,7 +45,7 @@ impl SurfacesTabState {
         }
 
         ui.separator();
-        ui.strong("17 x 8 verdicts, first `points` lattice of each group (click)");
+        ui.strong("17 x 8 verdicts, first Delaunay (points) lattice of each group (click)");
         let matrix = backend.surface_verdict_matrix_ready().unwrap_or_else(|| {
             ui.horizontal(|ui| {
                 ui.spinner();

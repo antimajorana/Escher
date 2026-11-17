@@ -60,6 +60,16 @@ pub fn symmetry_facts(group: &str) -> SymmetryFacts {
     SymmetryFacts { group: group.to_string(), rotation_orders, reversing }
 }
 
+/// Cell-aware symmetry facts: identifies the realized wallpaper group of `cell`
+/// (falling back to `fallback_group` on failure) so special-locus mirror/glide
+/// symmetries on Sohncke recipes match `refusal.py`.
+pub fn symmetry_facts_of_cell(fallback_group: &str, cell: &Cell2D) -> SymmetryFacts {
+    let real_group = cell
+        .try_identify_wallpaper_group(false)
+        .unwrap_or_else(|_| fallback_group.to_string());
+    symmetry_facts(&real_group)
+}
+
 /// Settings attempted for flat surfaces (`torus`, `cylinder`, `Moebius band`, `Klein bottle`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlatAttempt {

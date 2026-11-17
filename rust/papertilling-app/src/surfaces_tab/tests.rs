@@ -275,3 +275,35 @@ fn net_and_3d_follow_every_control_change_and_refusals_clear_both() {
     step(&mut st, &mut canvas, &mut view, &kagome, "kagome sphere clamped");
     assert_eq!((st.params.h, st.params.k), (1, 8));
 }
+
+#[test]
+fn special_locus_cell_enables_non_orientable_and_rp2_surfaces_on_chiral_recipe() {
+    let backend = AppBackend::new();
+    let mut canvas = blank_canvas();
+    let oblique = backend.find_named("oblique").unwrap();
+
+    // Off-locus oblique (p2) has no mirrors/glides -> IMPOSSIBLE for Mobius & RP2.
+    assert!(
+        build_surface_mesh_auto(oblique, SurfaceTargetUi::MobiusBand, CentreModeUi::Auto, 2)
+            .unwrap_err()
+            .starts_with("IMPOSSIBLE")
+    );
+    assert!(
+        build_surface_mesh_auto(oblique, SurfaceTargetUi::ProjectivePlane, CentreModeUi::Auto, 2)
+            .unwrap_err()
+            .starts_with("IMPOSSIBLE")
+    );
+
+    // Move oblique onto b=1, gamma=90 (p4m square special locus): cell-aware symmetry_facts_of_cell allows both.
+    let mut gallery = crate::gallery_tab::GalleryTabState::new(&backend, &mut canvas);
+    let idx = backend.named_lattices().iter().position(|it| it.named_key.as_deref() == Some("oblique")).unwrap();
+    gallery.select_named(idx, &backend, &mut canvas);
+    gallery.set_param("b", 1.0, &mut canvas).unwrap();
+    gallery.set_param("gamma", 90.0, &mut canvas).unwrap();
+    let tuned = gallery.active_item().clone();
+
+    let (mob, mob_rep) = build_surface_mesh_auto(&tuned, SurfaceTargetUi::MobiusBand, CentreModeUi::Auto, 2).unwrap();
+    assert!(mob_rep.ok && !mob.orientable);
+    let (rp2, rp2_rep) = build_surface_mesh_auto(&tuned, SurfaceTargetUi::ProjectivePlane, CentreModeUi::Auto, 2).unwrap();
+    assert!(rp2_rep.ok && !rp2.orientable);
+}

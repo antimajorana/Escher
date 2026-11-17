@@ -40,7 +40,7 @@ pub use pieces::{
 pub use polyhedra::{CentreClass, candidate_centres, polyhedron, projective_plane, sphere};
 pub use report::{
     FlatAttempt, SURFACES, SurfaceTableRow, SymmetryFacts, surface_table_with, symmetry_facts,
-    try_poly_for_table_with_centre, try_rp2_for_table, try_sphere_for_table,
+    symmetry_facts_of_cell, try_poly_for_table_with_centre, try_rp2_for_table, try_sphere_for_table,
 };
 
 /// Evaluate all 8 canonical `SURFACES` rows (`torus`, `cylinder`, `Moebius band`, `Klein bottle`,

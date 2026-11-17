@@ -12,22 +12,47 @@ pub struct GroupInfo {
     pub counts: [usize; 3], // [points, sheet, bonds]
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CatalogueRuleUi {
-    Points,
-    Sheet,
+    #[default]
     Bonds,
+    Sheet,
+    Points,
 }
 
 impl CatalogueRuleUi {
-    pub const ALL: [Self; 3] = [Self::Points, Self::Sheet, Self::Bonds];
+    pub const ALL: [Self; 3] = [Self::Bonds, Self::Sheet, Self::Points];
 
-    pub fn label(self) -> &'static str {
+    pub fn slug(self) -> &'static str {
         match self {
             Self::Points => "points",
             Self::Sheet => "sheet",
             Self::Bonds => "bonds",
         }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Points => "Delaunay",
+            Self::Sheet => "Atomic",
+            Self::Bonds => "Standard",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Points => "Delaunay lattice",
+            Self::Sheet => "Atomic crystals",
+            Self::Bonds => "Standard lattice",
+        }
+    }
+
+    #[cfg(test)]
+    pub fn matches(self, s: &str) -> bool {
+        let q = s.trim();
+        q.eq_ignore_ascii_case(self.slug())
+            || q.eq_ignore_ascii_case(self.short_label())
+            || q.eq_ignore_ascii_case(self.label())
     }
 
     pub fn index(self) -> usize {
@@ -64,6 +89,8 @@ pub struct CatalogueItemUi {
     pub dsymbol_key: String,
     pub network_key: String,
     pub symmetry_index: usize,
+    pub chiral: bool,
+    pub topologically_chiral: bool,
     pub occupied_wyckoff: Vec<char>,
     pub recipe: Recipe,
     pub frame: Frame2D,
@@ -116,6 +143,8 @@ pub struct DSymbolReadoutUi {
     pub dsymbol_key: String,
     pub network_key: String,
     pub symmetry_index: usize,
+    pub chiral: bool,
+    pub topologically_chiral: bool,
     pub active_group: String,
     pub status_ok: bool,
     pub status_message: String,

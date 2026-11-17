@@ -1,6 +1,7 @@
 //! Euclidean 2D plane module: 17 wallpaper groups, ITA Wyckoff tables, cells,
 //! families, catalogues, parameter tuning, supergroup loci, and planar drawing.
 
+pub mod basis_reduce;
 pub mod catalogue;
 pub mod cell;
 pub mod custom_builder;

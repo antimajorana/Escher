@@ -169,6 +169,12 @@ impl GalleryTabState {
         ui.small(format!("D-symbol key: {}", self.readout.dsymbol_key));
         ui.small(format!("Network key: {}", self.readout.network_key));
         ui.small(format!("Symmetry index [Aut(net) : G] = {}", self.readout.symmetry_index));
+        let hand = match (self.readout.chiral, self.readout.topologically_chiral) {
+            (true, true) => "± chiral enantiomorph pair (chiral bare graph)",
+            (true, false) => "± chiral enantiomorph pair (achiral bare graph)",
+            (false, _) => "achiral (mirror/glide symmetry)",
+        };
+        ui.small(format!("Chirality: {hand}"));
         let moved = self.active_item.recipe != self.base_item().recipe;
         ui.small(format!(
             "Lattice revision {}: the other tabs use this lattice{}",

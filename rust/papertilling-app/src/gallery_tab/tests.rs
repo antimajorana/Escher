@@ -35,7 +35,7 @@ pub(super) fn select(st: &mut GalleryTabState, backend: &AppBackend, canvas: &mu
         let idx = backend.named_lattices().iter().position(|it| it.named_key.as_deref() == Some(who)).unwrap();
         st.select_named(idx, backend, canvas);
     } else {
-        let r = CatalogueRuleUi::ALL.into_iter().find(|r| r.label() == rule).unwrap();
+        let r = CatalogueRuleUi::ALL.into_iter().find(|r| r.matches(rule)).unwrap();
         st.select_rule(r, backend, canvas);
         st.select_group_by_symbol(group, backend, canvas);
         st.select_catalogue_entry(who.parse().unwrap(), backend, canvas);
@@ -264,4 +264,45 @@ fn tuned_named_lattice_keeps_its_frame_and_draws_what_it_exports() {
         }));
     }
     assert!(st.readout.status_ok, "{}", st.readout.status_message);
+}
+
+#[test]
+fn stage1_rule_defaults_naming_alias_slugs_and_chirality_badge_update_live() {
+    let backend = AppBackend::new();
+    let mut cv = canvas();
+    let mut st = GalleryTabState::new(&backend, &mut cv);
+    assert_eq!(st.rule, CatalogueRuleUi::Bonds);
+    assert_eq!(CatalogueRuleUi::ALL, [CatalogueRuleUi::Bonds, CatalogueRuleUi::Sheet, CatalogueRuleUi::Points]);
+    assert_eq!(CatalogueRuleUi::Bonds.label(), "Standard lattice");
+    assert_eq!(CatalogueRuleUi::Sheet.label(), "Atomic crystals");
+    assert_eq!(CatalogueRuleUi::Points.label(), "Delaunay lattice");
+    assert_eq!(CatalogueRuleUi::Bonds.slug(), "bonds");
+    assert_eq!(CatalogueRuleUi::Sheet.slug(), "sheet");
+    assert_eq!(CatalogueRuleUi::Points.slug(), "points");
+
+    let p4g_bonds = backend.catalogue_for_group("p4g", CatalogueRuleUi::Bonds);
+    assert_eq!(p4g_bonds[0].alias_key.rule, "bonds");
+
+    for key in ["chiral_square", "chiral_kagome", "chiral_triangular"] {
+        let it = backend.find_named(key).unwrap();
+        assert!(it.chiral, "{key} must have geometric chiral=true");
+        assert!(!it.topologically_chiral, "{key} bare graph is achiral");
+    }
+    for key in ["square", "kagome", "honeycomb", "shastry_sutherland", "brick_pg"] {
+        let it = backend.find_named(key).unwrap();
+        assert!(!it.chiral, "{key} must be achiral");
+        assert!(!it.topologically_chiral);
+    }
+
+    let p6_pts = backend.catalogue_for_group("p6", CatalogueRuleUi::Points);
+    assert!(p6_pts[0].chiral);
+    assert!(p6_pts[0].topologically_chiral, "p6 #1 (snub hexagonal 3.3.3.3.6) must be topologically chiral");
+
+    // Moving oblique (p2, geometrically chiral) onto b=1, gamma=90 (p4m square special locus) flips chiral -> false.
+    select(&mut st, &backend, &mut cv, "named", "p2", "oblique");
+    assert!(st.readout.chiral);
+    st.set_param("b", 1.0, &mut cv).unwrap();
+    st.set_param("gamma", 90.0, &mut cv).unwrap();
+    assert!(!st.readout.chiral, "square special locus must flip readout.chiral to false");
+    assert_eq!(st.readout.active_group, "p4m");
 }

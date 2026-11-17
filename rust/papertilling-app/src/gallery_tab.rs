@@ -65,7 +65,7 @@ fn same_lattice(a: &CatalogueItemUi, b: &CatalogueItemUi) -> bool {
 impl GalleryTabState {
     pub fn new(backend: &AppBackend, canvas: &mut Canvas2D) -> Self {
         let selected_group_idx = backend.groups().iter().position(|g| g.symbol == "p6m").unwrap_or(0);
-        let rule = CatalogueRuleUi::Sheet;
+        let rule = CatalogueRuleUi::Bonds;
         let catalogue = backend.catalogue_for_group(backend.groups()[selected_group_idx].symbol, rule);
         let selected_cat_idx = catalogue
             .iter()
