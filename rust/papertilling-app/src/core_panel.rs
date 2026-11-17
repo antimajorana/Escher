@@ -27,10 +27,29 @@ pub const COMPLETION_PANELS: usize = 5;
 /// Gallery cards shown at most when nothing matches (Python `plot_core_gallery(max_panels=30)`).
 pub const MAX_PANELS: usize = 30;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CoreFilterMode {
+    #[default]
+    All,
+    VolterraOnly,
+    MatchingOnly,
+}
+
+impl CoreFilterMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::VolterraOnly => "Volterra only",
+            Self::MatchingOnly => "Matching",
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct CorePanelState {
     pub collapsed: bool,
     pub show_all_completions: bool,
+    pub filter: CoreFilterMode,
     cards: CardCache,
     inspector: Option<CoreInspectorModal>,
 }
@@ -125,6 +144,11 @@ pub fn show_core_panel(
             legend_chip(ui, to_color32(CHORD_RGBA), "Chord (-- #d81b60)");
             legend_chip(ui, to_color32(UNDER_SITE_RGBA), "Under-coord (○)");
             legend_chip(ui, MATCH_BORDER_RGB, "MATCH");
+            ui.separator();
+            ui.small("Show:");
+            for fm in [CoreFilterMode::All, CoreFilterMode::VolterraOnly, CoreFilterMode::MatchingOnly] {
+                ui.selectable_value(&mut state.filter, fm, fm.label());
+            }
         }
     });
 
@@ -174,17 +198,25 @@ pub fn show_core_panel(
             }
             for entry in &sel.volterra {
                 let m = match_set.contains(entry.name.as_str());
+                if state.filter == CoreFilterMode::MatchingOnly && !m {
+                    continue;
+                }
                 if draw_core_card(ui, cache, entry, "Volterra", m) {
                     clicked_card = Some((entry, "Volterra", m));
                 }
             }
-            if !sel.volterra.is_empty() && !sel.completions.is_empty() {
-                ui.separator();
-            }
-            for entry in &sel.completions {
-                let m = match_set.contains(entry.name.as_str());
-                if draw_core_card(ui, cache, entry, "Completion", m) {
-                    clicked_card = Some((entry, "Completion", m));
+            if state.filter != CoreFilterMode::VolterraOnly {
+                if !sel.volterra.is_empty() && !sel.completions.is_empty() {
+                    ui.separator();
+                }
+                for entry in &sel.completions {
+                    let m = match_set.contains(entry.name.as_str());
+                    if state.filter == CoreFilterMode::MatchingOnly && !m {
+                        continue;
+                    }
+                    if draw_core_card(ui, cache, entry, "Completion", m) {
+                        clicked_card = Some((entry, "Completion", m));
+                    }
                 }
             }
             if report.config_core.is_none() && report.gallery.is_empty() {

@@ -40,6 +40,16 @@ pub fn export_scene_full(
     title_override: Option<&str>,
     path: &Path,
 ) -> Result<String, String> {
+    let prims = compile_scene(scene);
+    export_scene_with_overlays(&prims, markers, title_override, path)
+}
+
+pub(crate) fn export_scene_with_overlays(
+    prims: &ScenePrimitives,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    path: &Path,
+) -> Result<String, String> {
     let ext = path.extension().map(|s| s.to_string_lossy().to_ascii_lowercase());
     let (target, is_svg): (PathBuf, bool) = match ext.as_deref() {
         Some("svg") => (path.to_path_buf(), true),
@@ -49,11 +59,11 @@ pub fn export_scene_full(
     };
     let name = target.file_name().map_or_else(|| target.display().to_string(), |s| s.to_string_lossy().into_owned());
     if is_svg {
-        let svg = render_scene_svg_with_title(scene, markers, title_override, SVG_SIZE, SVG_SIZE);
+        let svg = render_prims_svg(prims, markers, title_override, SVG_SIZE, SVG_SIZE);
         std::fs::write(&target, svg).map_err(|e| format!("{}: {e}", target.display()))?;
         Ok(format!("Exported SVG ({name})"))
     } else {
-        let png_bytes = encode_scene_png_with_title(scene, markers, title_override, PNG_SIZE, PNG_SIZE)?;
+        let png_bytes = encode_prims_png(prims, markers, title_override, PNG_SIZE, PNG_SIZE)?;
         std::fs::write(&target, png_bytes).map_err(|e| format!("{}: {e}", target.display()))?;
         Ok(format!("Exported high-DPI PNG ({name})"))
     }
@@ -126,6 +136,7 @@ pub fn render_scene_svg_with_markers(scene: &Scene2D, markers: &[CanvasMarker], 
     render_scene_svg_with_title(scene, markers, None, width, height)
 }
 
+#[cfg(test)]
 pub fn render_scene_svg_with_title(
     scene: &Scene2D,
     markers: &[CanvasMarker],
@@ -133,7 +144,17 @@ pub fn render_scene_svg_with_title(
     width: u32,
     height: u32,
 ) -> String {
-    let mut prims = compile_scene(scene);
+    render_prims_svg(&compile_scene(scene), markers, title_override, width, height)
+}
+
+pub(crate) fn render_prims_svg(
+    base_prims: &ScenePrimitives,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    width: u32,
+    height: u32,
+) -> String {
+    let mut prims = base_prims.clone();
     if let Some(t) = title_override.filter(|t| !t.is_empty()) {
         prims.title = t.to_string();
     }
@@ -265,6 +286,7 @@ pub fn encode_scene_png_with_markers(scene: &Scene2D, markers: &[CanvasMarker], 
     encode_scene_png_with_title(scene, markers, None, width, height)
 }
 
+#[cfg(test)]
 pub fn encode_scene_png_with_title(
     scene: &Scene2D,
     markers: &[CanvasMarker],
@@ -272,8 +294,18 @@ pub fn encode_scene_png_with_title(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
+    encode_prims_png(&compile_scene(scene), markers, title_override, width, height)
+}
+
+pub(crate) fn encode_prims_png(
+    base_prims: &ScenePrimitives,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
     let mut img = Raster::new(width, height, BACKGROUND)?;
-    let mut prims = compile_scene(scene);
+    let mut prims = base_prims.clone();
     if let Some(t) = title_override.filter(|t| !t.is_empty()) {
         prims.title = t.to_string();
     }

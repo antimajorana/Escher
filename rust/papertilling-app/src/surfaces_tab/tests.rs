@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use super::*;
 use crate::live_ops::{build_surface_mesh, build_surface_mesh_auto};
+use crate::mesh3d::mesh_from_surface;
 
 /// Python's `surface_table` (pure Python, `PAPERTILLING_NO_RUST=1`) on the first `points` lattice of each group and on
 /// some named lattices, pasted from `rust/papertilling-core/tests/fixtures/surface_table_py.json` (written by
@@ -14,15 +15,15 @@ const PYTHON_TABLE: [(&str, &str); 25] = [
     ("pg#1", "224 240 232 240 IMP IMP 288 288"),
     ("cm#1", "234 234 247 216 IMP IMP 216 216"),
     ("pmm#1", "216 208 259 238 4 7 72 72"),
-    ("pmg#1", "264 220 247 264 NF NF 144 144"),
-    ("pgg#1", "256 192 232 234 NF NF 288 288"),
+    ("pmg#1", "264 220 247 264 IMP IMP 144 144"),
+    ("pgg#1", "256 192 232 234 IMP IMP 288 288"),
     ("cmm#1", "210 220 247 216 4 13 72 72"),
     ("p4#1", "220 240 IMP IMP 24 IMP 288 288"),
     ("p4m#1", "220 216 259 221 6 6 72 72"),
-    ("p4g#1", "220 240 328 204 24 NF 288 288"),
-    ("p3#1", "234 234 IMP IMP NF IMP 216 216"),
+    ("p4g#1", "220 240 328 204 24 6 288 288"),
+    ("p3#1", "234 234 IMP IMP IMP IMP 216 216"),
     ("p3m1#1", "234 234 325 210 12 18 216 216"),
-    ("p31m#1", "234 234 247 216 NF NF 216 216"),
+    ("p31m#1", "234 234 247 216 IMP IMP 216 216"),
     ("p6#1", "216 216 IMP IMP 60 IMP 432 432"),
     ("p6m#1", "220 220 247 216 12 16 72 72"),
     ("square", "220 216 259 221 6 6 72 72"),
@@ -30,8 +31,8 @@ const PYTHON_TABLE: [(&str, &str); 25] = [
     ("kagome", "234 208 325 210 30 45 216 216"),
     ("triangular", "220 220 247 216 12 16 72 72"),
     ("chiral_square", "220 240 IMP IMP 24 IMP 288 288"),
-    ("shastry_sutherland", "220 240 369 204 24 NF 288 288"),
-    ("zigzag", "210 204 261 234 NF NF 144 144"),
+    ("shastry_sutherland", "220 240 369 204 24 6 288 288"),
+    ("zigzag", "210 204 261 234 IMP IMP 144 144"),
     ("brick_pg", "144 192 336 216 IMP IMP 576 576"),
 ];
 
@@ -123,11 +124,15 @@ fn centre_modes_follow_the_frozen_order_face_centre_before_site() {
     assert_eq!(counts(&build(CentreModeUi::Auto)), (6, 12, 8));
     assert_eq!(counts(&build(CentreModeUi::Face)), (6, 12, 8));
     assert_eq!(counts(&build(CentreModeUi::Site)), (8, 12, 6));
-    // p4g (Shastry-Sutherland): the projective plane stays NOT FOUND (never IMPOSSIBLE), the sphere is found
+    // p4g (Shastry-Sutherland): alternating-centre (2a(i)+2a(ii)) hemi-cube RP2 succeeds (V=6, E=15, F=10); sphere is found.
     let ss = backend.find_named("shastry_sutherland").unwrap();
-    let rp2 = build_surface_mesh_auto(ss, SurfaceTargetUi::ProjectivePlane, CentreModeUi::Auto, 2).unwrap_err();
-    assert!(rp2.starts_with("NOT FOUND"), "{rp2}");
+    let (rp2, rp2_rep) = build_surface_mesh_auto(ss, SurfaceTargetUi::ProjectivePlane, CentreModeUi::Auto, 2).unwrap();
+    assert!(rp2_rep.ok && rp2.sites.len() == 6 && rp2.bonds.len() == 15 && rp2.faces.len() == 10);
     assert!(build_surface_mesh_auto(ss, SurfaceTargetUi::Sphere, CentreModeUi::Auto, 2).is_ok());
+    // Proof (c): zigzag (pmg) sphere & RP2 are IMPOSSIBLE (lattice) even when global pmg symmetry has order-2 rotations.
+    let zz = backend.find_named("zigzag").unwrap();
+    let zz_err = build_surface_mesh_auto(zz, SurfaceTargetUi::Sphere, CentreModeUi::Auto, 2).unwrap_err();
+    assert!(zz_err.starts_with("IMPOSSIBLE (lattice)"), "{zz_err}");
     // a proof from the symmetry is IMPOSSIBLE whatever the size: p4 has no mirror or glide
     let ch = backend.find_named("chiral_square").unwrap();
     let p = SurfaceBuildParamsUi { h: 3, k: 2, ..Default::default() };

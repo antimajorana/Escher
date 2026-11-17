@@ -185,42 +185,79 @@ pub fn equivalent_single_cached(
     cache.last_match_ms = 0.0;
     let lat_info = LatticeCoreInfo::new(cell);
     let charge = classify_crystal_charge(group, cell, frame, crystal)?;
-    let rim = resolve_patch_rim(crystal, &lat_info, specs);
-    let h_cfg: UnGraph<u16, ()> = core_graph_with_rim(crystal, &rim, &lat_info, radius)?;
-    let config_core = config_core_entry(crystal, &rim, &lat_info, radius, draw_gallery);
+    let has_half_wall = specs.iter().any(|s| matches!(s, DefectSpec::HalfWall { .. }));
+    let need_core = matches!(charge.kind.as_str(), "dislocation" | "vacuum")
+        || (charge.kind == "disclination" && charge.single.is_some());
+
+    let mut config_core = None;
+    let h_cfg_opt: Option<UnGraph<u16, ()>> = if need_core {
+        let rim = resolve_patch_rim(crystal, &lat_info, specs);
+        match core_graph_with_rim(crystal, &rim, &lat_info, radius) {
+            Ok(h) => {
+                config_core = config_core_entry(crystal, &rim, &lat_info, radius, draw_gallery);
+                Some(h)
+            }
+            Err(_) if has_half_wall => None,
+            Err(e) => return Err(e),
+        }
+    } else {
+        None
+    };
 
     let (mut candidates, mut matches, mut scan, mut gallery) = (Vec::new(), Vec::new(), None, Vec::new());
-    if charge.kind == "dislocation" {
-        let b = charge.b.unwrap_or([0.0, 0.0]);
-        let found = cache.dislocation(cell, b, radius, grid, draw_gallery)?;
-        gallery = found.gallery.clone();
-        let match_start = Instant::now();
-        let h_wl = wl_hash_labelled(&h_cfg);
-        for (name, wl, graph) in &found.cores {
-            if *wl == h_wl && isomorphic_cores(&h_cfg, graph) {
-                matches.push(name.clone());
+    let (mut volterra_matches, mut completion_matches) = (Vec::new(), Vec::new());
+    let mut match_tier = "none".to_string();
+
+    if let Some(ref h_cfg) = h_cfg_opt {
+        if charge.kind == "dislocation" {
+            let b = charge.b.unwrap_or([0.0, 0.0]);
+            let found = cache.dislocation(cell, b, radius, grid, draw_gallery)?;
+            gallery = found.gallery.clone();
+            let match_start = Instant::now();
+            let h_wl = wl_hash_labelled(h_cfg);
+            for (name, wl, graph) in &found.cores {
+                if *wl == h_wl && isomorphic_cores(h_cfg, graph) {
+                    matches.push(name.clone());
+                }
             }
+            cache.last_match_ms = match_start.elapsed().as_secs_f64() * 1000.0;
+            candidates = found.candidates.clone();
+            if matches.is_empty() && specs.len() == 1 && matches!(specs[0], DefectSpec::Dislocation { .. }) {
+                matches.push("its own core (the configuration is one dislocation; its cut end is not among the scanned ones)".to_string());
+            }
+            volterra_matches = matches
+                .iter()
+                .filter(|m| m.starts_with("its own core") || candidates.iter().any(|c| c.name == **m && c.volterra == Some(true)))
+                .cloned()
+                .collect();
+            completion_matches = matches
+                .iter()
+                .filter(|m| candidates.iter().any(|c| c.name == **m && !c.volterra.unwrap_or(false)))
+                .cloned()
+                .collect();
+            if !volterra_matches.is_empty() {
+                match_tier = "volterra".to_string();
+            } else if !completion_matches.is_empty() {
+                match_tier = "completion".to_string();
+            }
+            scan = Some(found.info.clone());
+        } else if charge.kind == "disclination"
+            && let Some(DefectSpec::Disclination { angle_deg, at, .. }) = charge.single
+        {
+            let h_single = cache.disclination_core(&lat_info, angle_deg, at, radius)?;
+            let cand_name = format!("single {} deg at {}", fmt_signed_g(angle_deg), fmt_vec2_round4(at));
+            if isomorphic_cores(h_cfg, &h_single) {
+                matches.push(cand_name.clone());
+                match_tier = "exact".to_string();
+            }
+            candidates.push(CoreCandidateInfo {
+                name: cand_name, volterra: None, rings: Vec::new(), under: Vec::new(), added: 0,
+                lattice_bonds: 0, reconstruction_bonds: 0, bipartite: None, core_point: None, cut: None,
+            });
+        } else if charge.kind == "vacuum" && h_cfg.node_count() == 0 {
+            matches.push("perfect lattice".to_string());
+            match_tier = "exact".to_string();
         }
-        cache.last_match_ms = match_start.elapsed().as_secs_f64() * 1000.0;
-        candidates = found.candidates.clone();
-        if matches.is_empty() && specs.len() == 1 && matches!(specs[0], DefectSpec::Dislocation { .. }) {
-            matches.push("its own core (the configuration is one dislocation; its cut end is not among the scanned ones)".to_string());
-        }
-        scan = Some(found.info.clone());
-    } else if charge.kind == "disclination"
-        && let Some(DefectSpec::Disclination { angle_deg, at, .. }) = charge.single
-    {
-        let h_single = cache.disclination_core(&lat_info, angle_deg, at, radius)?;
-        let cand_name = format!("single {} deg at {}", fmt_signed_g(angle_deg), fmt_vec2_round4(at));
-        if isomorphic_cores(&h_cfg, &h_single) {
-            matches.push(cand_name.clone());
-        }
-        candidates.push(CoreCandidateInfo {
-            name: cand_name, volterra: None, rings: Vec::new(), under: Vec::new(), added: 0,
-            lattice_bonds: 0, reconstruction_bonds: 0, bipartite: None, core_point: None, cut: None,
-        });
-    } else if charge.kind == "vacuum" && h_cfg.node_count() == 0 {
-        matches.push("perfect lattice".to_string());
     }
 
     let equivalent = !matches.is_empty();
@@ -235,10 +272,11 @@ pub fn equivalent_single_cached(
         "not equivalent to the single defect".to_string()
     };
 
+    let (core_nodes, core_edges) = h_cfg_opt.as_ref().map_or((0, 0), |h| (h.node_count(), h.edge_count()));
     Ok(EquivalentSingleReport {
         kind: charge.kind.clone(), single: charge.single.clone(), charge, candidates, matches,
-        equivalent, verdict, scan, core_nodes: h_cfg.node_count(), core_edges: h_cfg.edge_count(),
-        config_core, gallery,
+        volterra_matches, completion_matches, match_tier, equivalent, verdict, scan,
+        core_nodes, core_edges, config_core, gallery,
     })
 }
 

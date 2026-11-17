@@ -7,8 +7,9 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use super::polyhedra::build_polyhedron;
+use super::report::{try_rp2_for_table, try_sphere_for_table};
 use super::{
-    RefusalKind, check_surface, cylinder, genus_surface, klein_bottle, mobius_band, surface_table, torus,
+    RefusalKind, SurfaceVerdict, check_surface, cylinder, genus_surface, klein_bottle, mobius_band, surface_table, torus,
 };
 use crate::types::{Bond2D, Cell2D, SurfaceMesh};
 
@@ -170,6 +171,15 @@ fn surface_table_matches_python_on_17_first_lattices_and_named() {
         }
     }
     assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    let mut not_found_17x8 = Vec::new();
+    for case in &fx.cases[..17] {
+        for (sname, row) in &case.table {
+            if row.status == "NOT FOUND" {
+                not_found_17x8.push(format!("{} {}", case.label, sname));
+            }
+        }
+    }
+    assert!(not_found_17x8.is_empty(), "17x8 still has NOT FOUND: {not_found_17x8:?}");
 }
 
 #[test]
@@ -213,6 +223,15 @@ fn sphere_and_rp2_sizes_and_centre_modes_match_python() {
     }
     assert!(n_rows > 0);
     assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    let mut not_found_17x8 = Vec::new();
+    for case in &fx.cases[..17] {
+        for (sname, row) in &case.table {
+            if row.status == "NOT FOUND" {
+                not_found_17x8.push(format!("{} {}", case.label, sname));
+            }
+        }
+    }
+    assert!(not_found_17x8.is_empty(), "17x8 still has NOT FOUND: {not_found_17x8:?}");
 }
 
 #[test]
@@ -249,6 +268,15 @@ fn flat_and_genus_at_tab_sizes_match_python() {
         }
     }
     assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+    let mut not_found_17x8 = Vec::new();
+    for case in &fx.cases[..17] {
+        for (sname, row) in &case.table {
+            if row.status == "NOT FOUND" {
+                not_found_17x8.push(format!("{} {}", case.label, sname));
+            }
+        }
+    }
+    assert!(not_found_17x8.is_empty(), "17x8 still has NOT FOUND: {not_found_17x8:?}");
 }
 
 #[test]
@@ -264,4 +292,71 @@ fn negative_control_the_comparison_sees_a_missing_face_or_a_moved_cone() {
     assert!(!mesh_mismatches(&mesh, &row.row).is_empty());
     mesh.faces.pop();
     assert!(mesh_mismatches(&mesh, &row.row).len() >= 2);
+}
+
+#[test]
+fn stage1_alternating_p4g_rectangular_rp2_and_proof_c_controls() {
+    let fx = fixture();
+    for label in ["p4g#1", "shastry_sutherland"] {
+        let case = fx.cases.iter().find(|c| c.label == label).unwrap();
+        let cell = to_cell(&case.cell);
+        for cf in [None, Some("2a"), Some("2a(i)+2a(ii)"), Some("face centre")] {
+            let s1 = build_polyhedron(&case.group, &cell, Some((1, 1)), cf, true).unwrap();
+            assert_eq!((s1.mesh.sites.len(), s1.mesh.bonds.len(), s1.mesh.faces.len(), s1.mesh.chi, s1.mesh.orientable), (6, 15, 10, 1, false));
+            assert!(s1.checks().ok);
+            let mut labels: Vec<String> = s1.mesh.cones.iter().filter_map(|c| c.class_label.clone()).collect();
+            labels.sort();
+            assert_eq!(labels, vec!["2a(i)", "2a(i)", "2a(ii)", "2a(ii)"]);
+            assert_eq!(s1.mesh.cover.as_ref().unwrap().xyz.len(), 12);
+        }
+        let s2 = build_polyhedron(&case.group, &cell, Some((2, 2)), None, true).unwrap();
+        assert_eq!((s2.mesh.sites.len(), s2.mesh.bonds.len(), s2.mesh.faces.len(), s2.mesh.chi), (54, 135, 82, 1));
+        assert!(s2.checks().ok);
+        let e21 = build_polyhedron(&case.group, &cell, Some((2, 1)), None, true).unwrap_err();
+        assert!(matches!(e21.kind, RefusalKind::NotFound { .. }));
+        let e2a = build_polyhedron(&case.group, &cell, Some((1, 1)), Some("2a(i)"), true).unwrap_err();
+        assert!(matches!(e2a.kind, RefusalKind::NotFound { .. }));
+    }
+
+    for label in ["pmg#1", "pgg#1", "p3#1", "p31m#1", "zigzag"] {
+        let case = fx.cases.iter().find(|c| c.label == label).unwrap();
+        let cell = to_cell(&case.cell);
+        let err = build_polyhedron(&case.group, &cell, None, None, false).unwrap_err();
+        assert_eq!(err.kind, RefusalKind::Impossible, "{label}");
+        assert_eq!(err.scope, Some("lattice"), "{label}");
+        assert!(err.reason.contains("proved for this lattice"), "{label}: {}", err.reason);
+        let row = try_sphere_for_table(&case.group, &cell);
+        assert_eq!(row.status, "IMPOSSIBLE");
+        assert_eq!(row.scope.as_deref(), Some("lattice"));
+        assert_eq!(row.tried.len(), 1);
+        assert!(matches!(row.to_verdict(), SurfaceVerdict::Impossible { ref scope, .. } if scope == "lattice"));
+    }
+
+    let cs = fx.cases.iter().find(|c| c.label == "chiral_square").unwrap();
+    let row_cs = try_rp2_for_table(&cs.group, &to_cell(&cs.cell));
+    assert_eq!(row_cs.status, "IMPOSSIBLE");
+    assert_eq!(row_cs.scope.as_deref(), Some("group"));
+    assert!(matches!(row_cs.to_verdict(), SurfaceVerdict::Impossible { ref scope, .. } if scope == "group"));
+
+    let rect = Cell2D {
+        a1: [2.0, 0.0],
+        a2: [0.0, 1.0],
+        basis: vec![[0.0, 0.0]],
+        bonds: vec![Bond2D { i: 0, j: 0, n1: -1, n2: 0, kind: 0 }, Bond2D { i: 0, j: 0, n1: 0, n2: -1, kind: 1 }],
+    };
+    let rect_row = try_rp2_for_table("pmm", &rect);
+    assert_eq!(rect_row.status, "OK");
+    let rect_66 = build_polyhedron("pmm", &rect, Some((6, 6)), Some("site"), true).unwrap();
+    assert_eq!((rect_66.mesh.sites.len(), rect_66.mesh.bonds.len(), rect_66.mesh.faces.len()), (10, 18, 9));
+
+    let obl = Cell2D {
+        a1: [1.0, 0.0],
+        a2: [0.32, 0.34],
+        basis: vec![[0.0, 0.0]],
+        bonds: vec![Bond2D { i: 0, j: 0, n1: -1, n2: 0, kind: 0 }, Bond2D { i: 0, j: 0, n1: 0, n2: -1, kind: 1 }],
+    };
+    for cf in ["bond midpoint", "face centre"] {
+        let e = build_polyhedron("p2", &obl, Some((1, 1)), Some(cf), false).unwrap_err();
+        assert!(matches!(e.kind, RefusalKind::NotFound { .. }), "oblique {cf}: {e}");
+    }
 }

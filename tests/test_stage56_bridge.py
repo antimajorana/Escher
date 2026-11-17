@@ -213,6 +213,9 @@ def test_papertilling_rs_direct_and_bridge_parity(monkeypatch):
     )
     eq = json.loads(rs.equivalent_single_json("p4m", sq_cell_json, pair_specs_json, grid=1))
     assert eq["equivalent"] is True and eq["matches"] == ["Volterra core 1"]
+    assert eq["volterra_matches"] == ["Volterra core 1"]
+    assert eq["completion_matches"] == []
+    assert eq["match_tier"] == "volterra"
     gal = json.loads(rs.core_gallery_json("p4m", sq_cell_json, [1.0, 0.0], grid=1))
     assert [tuple(g["rings"]) for g in gal["gallery"]] == [(5,), (7,)]
 
@@ -235,3 +238,103 @@ def test_papertilling_rs_direct_and_bridge_parity(monkeypatch):
     assert [(round(d["value"], 7), d["group"]) for d in sp_on] == [
         (round(d["value"], 7), d["group"]) for d in sp_off
     ]
+
+
+def test_rust_insights_stages2_to_5_parity(monkeypatch):
+    """Parity between `papertilling_rs` Stages 2–5 bindings and pure-Python fallbacks."""
+    rs = pytest.importorskip("papertilling_rs")
+    from papertilling import _rust
+    from papertilling.defects import DefectCatalogue
+    from papertilling.defects.circuit import auto_burgers_circuit, burgers_circuit
+    from papertilling.spectrum import spectrum
+    from papertilling.surfaces import projective_plane, sphere, torus
+    from papertilling.surfaces.elastic import relax_configuration_3d
+
+    sq = named("square")
+    cell = sq.cell()
+    sq_cell_json = json.dumps(
+        {
+            "a1": [float(v) for v in cell.a1],
+            "a2": [float(v) for v in cell.a2],
+            "basis": [[float(x) for x in p] for p in cell.basis],
+            "bonds": [
+                {"i": int(b[0]), "j": int(b[1]), "n1": int(b[2]), "n2": int(b[3]), "kind": int(b[4])}
+                for b in cell.bonds
+            ],
+        }
+    )
+    pair_specs = [
+        {"kind": "disclination", "angle": 90.0, "at": [0.0, 0.0]},
+        {"kind": "disclination", "angle": -90.0, "at": [0.5, 0.5]},
+    ]
+    pair_specs_json = json.dumps(pair_specs)
+
+    # 1. Stage 2/3: Burgers circuit + auto Burgers circuit parity.
+    cfg_pair = build(sq, pair_specs)
+    py_whole = auto_burgers_circuit(cfg_pair)
+    rs_whole = json.loads(rs.auto_burgers_circuit_json(sq.group, sq_cell_json, pair_specs_json))
+    assert rs_whole["orientation_preserving"] == py_whole["orientation_preserving"] is True
+    assert rs_whole["charge"]["kind"] == py_whole["charge"]["kind"] == "dislocation"
+    assert abs(rs_whole["burgers_norm"] - py_whole["burgers_norm"]) < 1e-8
+    assert abs(rs_whole["frank_angle_deg"] - py_whole["frank_angle_deg"]) < 1e-8
+
+    py_plus = auto_burgers_circuit(cfg_pair, target=[0.0, 0.0], exclude=[0.5, 0.5])
+    rs_plus = json.loads(
+        rs.auto_burgers_circuit_json(
+            sq.group, sq_cell_json, pair_specs_json, target_json="[0.0, 0.0]", exclude_json="[0.5, 0.5]"
+        )
+    )
+    assert abs(rs_plus["frank_angle_deg"] - 90.0) < 1e-8
+    assert abs(rs_plus["frank_angle_deg"] - py_plus["frank_angle_deg"]) < 1e-8
+
+    rs_manual = json.loads(
+        rs.burgers_circuit_json(sq.group, sq_cell_json, pair_specs_json, json.dumps(py_whole["path"]))
+    )
+    py_manual = burgers_circuit(cfg_pair, py_whole["path"])
+    assert abs(rs_manual["burgers_norm"] - py_manual["burgers_norm"]) < 1e-8
+    assert np.allclose(rs_manual["closure_vector"], py_manual["closure_vector"], atol=1e-8)
+
+    # 2. Stage 4: 3D elastic relaxation on C60, RP2 antipodal double cover, and defect sheet.
+    hc = named("honeycomb")
+    monkeypatch.setenv("PAPERTILLING_NO_RUST", "0")
+    assert _rust.get() is rs
+    c60_on = sphere(hc, (1, 1)).relax_3d(kappa_b=0.05)
+    rp2_on = projective_plane(sq).relax_3d(kappa_b=0.05)
+    sh_on = relax_configuration_3d(build(sq, [{"kind": "disclination", "angle": 90.0, "at": [0.0, 0.0]}]), kappa_b=0.05, max_iter=1500)
+
+    monkeypatch.setenv("PAPERTILLING_NO_RUST", "1")
+    assert _rust.get() is None
+    c60_off = sphere(hc, (1, 1)).relax_3d(kappa_b=0.05)
+    rp2_off = projective_plane(sq).relax_3d(kappa_b=0.05)
+    sh_off = relax_configuration_3d(build(sq, [{"kind": "disclination", "angle": 90.0, "at": [0.0, 0.0]}]), kappa_b=0.05, max_iter=1500)
+
+    assert abs(c60_on["total_energy"] - c60_off["total_energy"]) < 1e-8
+    assert abs(rp2_on["total_energy"] - rp2_off["total_energy"]) < 1e-8
+    assert abs(sh_on["total_energy"] - sh_off["total_energy"]) < 1e-8
+    for key in ("stretch_energy", "bend_energy", "total_energy", "r_mean", "fvk_gamma", "asphericity"):
+        assert np.isclose(c60_on[key], c60_off[key], rtol=1e-7, atol=1e-8), f"C60 {key}"
+        assert np.isclose(rp2_on[key], rp2_off[key], rtol=1e-6, atol=1e-6), f"RP2 {key}"
+        assert np.isclose(sh_on[key], sh_off[key], rtol=1e-5, atol=1e-6), f"sheet {key}"
+    v_rp2 = len(rp2_on["xyz"])
+    assert np.allclose(rp2_on["cover_xyz"][v_rp2:], -rp2_on["cover_xyz"][:v_rp2], atol=1e-12)
+
+    # 3. Stage 5: Spectrum parity on C60, flux!=0 torus, and Wc1 Mobius seam_sign=-1.
+    c60_mesh = sphere(hc, (1, 1))
+    tor_mesh = torus(hc, (4, 0), (0, 4))
+    wc1 = DefectCatalogue(sq).mobius_seams[0].build()
+    for obj, kw in [
+        (c60_mesh, {"mu": 0.2, "beta": 1.5}),
+        (tor_mesh, {"flux": 0.25}),
+        (wc1, {"seam_sign": -1, "mu": 0.1}),
+    ]:
+        monkeypatch.setenv("PAPERTILLING_NO_RUST", "0")
+        s_on = spectrum(obj, **kw)
+        monkeypatch.setenv("PAPERTILLING_NO_RUST", "1")
+        s_off = spectrum(obj, **kw)
+        assert np.allclose(s_on["eigenvalues"], s_off["eigenvalues"], atol=1e-8)
+        assert np.allclose(s_on["ldos"], s_off["ldos"], atol=1e-8)
+        assert np.allclose(s_on["delta_rho"], s_off["delta_rho"], atol=1e-8)
+        assert np.allclose(s_on["delta_Q"], s_off["delta_Q"], atol=1e-8)
+        assert np.allclose(s_on["core_weight"], s_off["core_weight"], atol=1e-8)
+        assert s_on["zero_mode_count"] == s_off["zero_mode_count"]
+        assert len(s_on["multiplets"]) == len(s_off["multiplets"])

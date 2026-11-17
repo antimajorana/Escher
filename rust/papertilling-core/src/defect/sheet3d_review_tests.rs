@@ -202,7 +202,8 @@ fn sheet3d_review_mobius_keeps_seam_constraints_and_reports_unsupported_faces() 
             assert!((res.bond_rest_len[i] - e.vec[0].hypot(e.vec[1])).abs() < 1e-12);
         }
     }
-    assert!(seams > 0 && res.faces.is_empty());
+    assert!(seams > 0 && !res.faces.is_empty());
+    assert!(res.bend_energy.is_finite() && res.bend_energy > 0.0);
     // Independently sum EVERY original bond, not just the ones the implementation chose to retain.
     let known_energy: f64 = wall
         .edges
@@ -216,10 +217,28 @@ fn sheet3d_review_mobius_keeps_seam_constraints_and_reports_unsupported_faces() 
         })
         .sum();
     assert!((res.bond_stretch_energy - known_energy).abs() < 1e-8);
+    let cat_mob = DefectCatalogue::new(&group, &cell, frame);
+    let res_full = relax_sheet_3d(&wall, &cell, &Sheet3DOptions::default(), None);
     assert!(
-        res.diagnostics
-            .iter()
-            .any(|s| s.contains("Möbius") && s.contains("not a physical"))
+        crate::defect::gsv_mobius::min_twisted_hinge_alignment(&res_full.xyz, &res_full.faces)
+            .is_some_and(|a| a.is_finite() && a > -0.65)
+    );
+    let smooth_mob = crate::defect::wall_build::build_mobius_seam(
+        &cell,
+        cat_mob.mobius_seams[0].sigma,
+        28,
+        1.0,
+    );
+    let res_smooth = relax_sheet_3d(
+        &smooth_mob,
+        &cell,
+        &Sheet3DOptions { max_iters: 800, ..Default::default() },
+        None,
+    );
+    assert!(
+        crate::defect::gsv_mobius::min_twisted_hinge_alignment(&res_smooth.xyz, &res_smooth.faces)
+            .expect("smooth mobius hinges")
+            > 0.85
     );
     assert_eq!(wall, original);
 }

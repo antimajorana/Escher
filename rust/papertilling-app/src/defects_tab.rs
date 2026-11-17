@@ -3,8 +3,12 @@ use crate::backend::{
 };
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::combine_worker::{LatestWorker, empty_crystal, empty_sheet3d};
+use crate::defects_inspectors::DefectInspectors;
+use crate::export_obj::export_sheet_obj;
+use crate::live_ops::defect_context;
+use crate::live_ops_ao::{Defect2dMode, build_ao_crystal_overlay};
 use crate::mesh3d::{
-    DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d, sheet3d_caption,
+    DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d_with_spectral, sheet3d_caption,
 };
 use crate::view3d::View3dState;
 use papertilling_core::defect::sheet3d::Sheet3DResult;
@@ -14,7 +18,8 @@ struct BuildJob {
     item: CatalogueItemUi,
     selection: DefectSelectionUi,
     radius: f64,
-    relaxed: bool,
+    draw_mode: Defect2dMode,
+    wall_half: bool,
     kappa_b: f64,
     reuse_crystal: Option<(DefectCatalogueUi, BuiltCrystal, DefectReadoutUi)>,
 }
@@ -53,16 +58,20 @@ pub struct DefectsTabState {
     pub(crate) selected_disloc: usize,
     pub(crate) selected_disclin: usize,
     pub(crate) selected_wall: usize,
+    pub wall_half: bool,
     pub radius: f64,
     pub relaxed: bool,
+    pub draw_mode: Defect2dMode,
     pub view_mode: DefectViewMode,
     pub sheet_opts: Sheet3dViewOpts,
+    pub inspectors: DefectInspectors,
+    pub(crate) last_item: CatalogueItemUi,
     pub readout: DefectReadoutUi,
     pub(crate) stale: bool,
     pub(crate) initializing: bool,
     worker: LatestWorker<BuildJob, BuildOutput>,
     last_scene: Option<Scene2D>,
-    last_crystal: BuiltCrystal,
+    pub(crate) last_crystal: BuiltCrystal,
     pub(crate) last_sheet: Sheet3DResult,
     flat_crystal: BuiltCrystal,
     pub(crate) flat_sheet: Sheet3DResult,
@@ -92,10 +101,14 @@ impl DefectsTabState {
             selected_disloc: 0,
             selected_disclin: 0,
             selected_wall: 0,
+            wall_half: false,
             radius,
             relaxed,
+            draw_mode: Defect2dMode::RelaxedDrawing,
             view_mode: DefectViewMode::Split2D3D,
             sheet_opts,
+            inspectors: DefectInspectors::new(),
+            last_item: item.clone(),
             readout,
             stale: false,
             initializing: false,
@@ -104,11 +117,12 @@ impl DefectsTabState {
                     Some(prev) => prev,
                     None => {
                         let cat = crate::live_ops::catalogue_for_lattice(&job.item);
-                        let (c, r) = crate::live_ops::build_defect_patch(
+                        let (c, r) = crate::live_ops::build_defect_patch_mode(
                             &job.item,
                             &job.selection,
                             job.radius,
-                            job.relaxed,
+                            job.draw_mode,
+                            job.wall_half,
                         );
                         (cat, c, r)
                     }
@@ -147,6 +161,8 @@ impl DefectsTabState {
         canvas: &mut Canvas2D,
         sync_canvas: bool,
     ) {
+        self.last_item = item.clone();
+        self.inspectors.clear_for_switch();
         self.selected_disloc = 0;
         self.selected_disclin = 0;
         self.selected_wall = 0;
@@ -174,11 +190,14 @@ impl DefectsTabState {
         canvas: &mut Canvas2D,
         reset_view: bool,
     ) {
+        self.last_item = item.clone();
+        self.relaxed = self.draw_mode != Defect2dMode::Raw;
         self.worker.submit(BuildJob {
             item: item.clone(),
             selection: self.current_selection(),
             radius: self.radius,
-            relaxed: self.relaxed,
+            draw_mode: self.draw_mode,
+            wall_half: self.wall_half,
             kappa_b: self.sheet_opts.kappa_b,
             reuse_crystal: None,
         });
@@ -201,11 +220,13 @@ impl DefectsTabState {
         let reuse = (!self.is_busy() && !self.initializing && !self.last_crystal.pos.is_empty()).then(|| {
             (self.catalogue.clone(), self.last_crystal.clone(), self.readout.clone())
         });
+        self.relaxed = self.draw_mode != Defect2dMode::Raw;
         self.worker.submit(BuildJob {
             item: item.clone(),
             selection: self.current_selection(),
             radius: self.radius,
-            relaxed: self.relaxed,
+            draw_mode: self.draw_mode,
+            wall_half: self.wall_half,
             kappa_b: self.sheet_opts.kappa_b,
             reuse_crystal: reuse,
         });
@@ -222,6 +243,28 @@ impl DefectsTabState {
         if let Some(result) = self.worker.poll() {
             self.take_result(result, canvas);
         }
+        if self.inspectors.spectrum.poll(ctx) {
+            let item = self.last_item.clone();
+            let ao = defect_context(&item).ok().and_then(|c| {
+                build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &c.cell)
+            });
+            self.inspectors.sync_to_canvas(canvas, &self.last_crystal, ao);
+            self.view3d_dirty = true;
+        }
+    }
+
+    pub(crate) fn refresh_and_sync_inspectors(&mut self, item: &CatalogueItemUi, canvas: &mut Canvas2D) {
+        let ctx_ok = defect_context(item).ok();
+        if self.inspectors.circuit.enabled
+            && !self.last_crystal.pos.is_empty()
+            && let Some(ctx) = &ctx_ok
+        {
+            self.inspectors.refresh_circuit(&item.group, &ctx.cell, item.frame, &self.last_crystal, &[]);
+        }
+        let ao = ctx_ok.and_then(|ctx| {
+            build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &ctx.cell)
+        });
+        self.inspectors.sync_to_canvas(canvas, &self.last_crystal, ao);
     }
 
     pub fn sync_view3d(&mut self, view3d: &mut View3dState) {
@@ -242,7 +285,12 @@ impl DefectsTabState {
         } else {
             (&self.last_crystal, &self.last_sheet)
         };
-        let gpu = mesh_from_sheet3d(c, s, &self.sheet_opts);
+        let gpu = mesh_from_sheet3d_with_spectral(
+            c,
+            s,
+            &self.sheet_opts,
+            self.inspectors.spectral_3d_for(self.sheet_opts.color_mode),
+        );
         let mut cap = sheet3d_caption(&self.readout.title, s, &self.sheet_opts);
         if self.is_busy() {
             cap.push_str(" | previous result — stale");
@@ -251,6 +299,11 @@ impl DefectsTabState {
         }
         view3d.set_mesh(gpu, cap);
         self.view3d_dirty = false;
+    }
+
+    pub fn export_active_obj(&self, path: &std::path::Path) -> Result<String, String> {
+        let sheet = if self.sheet_opts.show_flat_baseline { &self.flat_sheet } else { &self.last_sheet };
+        export_sheet_obj(&self.readout.title, sheet, path)
     }
 
     #[cfg(test)]
@@ -278,6 +331,11 @@ impl DefectsTabState {
                 self.flat_sheet = flat_s;
                 self.readout = readout;
                 self.view3d_dirty = true;
+                let item = self.last_item.clone();
+                self.refresh_and_sync_inspectors(&item, canvas);
+                if self.inspectors.spectrum.expanded && !self.last_crystal.pos.is_empty() {
+                    self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), None);
+                }
             }
             Err(err) => {
                 self.error = Some(err.clone());

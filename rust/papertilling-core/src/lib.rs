@@ -3,6 +3,7 @@
 pub mod defect;
 pub mod dsymbol;
 pub mod plane;
+pub mod spectrum;
 pub mod surface;
 pub mod types;
 

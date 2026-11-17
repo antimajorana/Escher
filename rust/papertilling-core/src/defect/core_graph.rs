@@ -443,6 +443,23 @@ fn multi_bfs(adj: &[Vec<usize>], sources: &HashSet<usize>, cutoff: Option<usize>
     dist
 }
 
+/// Vertex indices of irregular sites (strictly inside `rim`, signature not in `perfect_sigs`).
+pub(crate) fn irregular_sites_with_rim(
+    crystal: &BuiltCrystal,
+    rim: &HashSet<usize>,
+    lat_info: &LatticeCoreInfo,
+) -> HashSet<usize> {
+    let adj: Vec<Vec<usize>> = crystal.adj.iter().map(|es| es.iter().map(|e| e.to).collect()).collect();
+    let deg: Vec<usize> = adj.iter().map(Vec::len).collect();
+    let drim = multi_bfs(&adj, rim, None);
+    (0..adj.len())
+        .filter(|&i| {
+            drim.get(&i).copied().unwrap_or(usize::MAX) > lat_info.r_det
+                && !lat_info.perfect_sigs.contains(&layer_signature(&adj, &deg, i, lat_info.r_det))
+        })
+        .collect()
+}
+
 /// Extract the degree-labelled core graph given an explicit `rim` vertex set.
 pub fn core_graph_with_rim(
     crystal: &BuiltCrystal,

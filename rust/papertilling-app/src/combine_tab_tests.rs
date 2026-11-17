@@ -74,6 +74,7 @@ fn drag_previews_then_compares_the_released_configuration_once() {
     let square = backend.find_named("square").unwrap();
     let mut canvas = canvas();
     let mut st = CombineTabState::new(square, &backend);
+    st.motion_mode = MotionMode::FreeSetup;
     st.run_compare(square);
     st.wait_idle(square, Some(&mut canvas));
     let before = st.cache_stats;
@@ -236,4 +237,87 @@ fn pin_cut_angle_override_and_coincident_superposition() {
 
     crate::live_combine::cuts::merge_coincident_pins(&st.info, &mut st.specs);
     assert!(st.specs.is_empty());
+}
+
+#[test]
+fn default_conserved_mode_locks_disclinations_and_projects_glide_to_1d() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut canvas = canvas();
+    let mut st = CombineTabState::new(square, &backend);
+    st.wait_idle(square, Some(&mut canvas));
+    assert_eq!(st.motion_mode, MotionMode::Conserved);
+
+    assert!(!st.move_pin_with_mods(0, [1.0, 0.0], false, square, &backend, &mut canvas));
+    assert_eq!(spec_world_pos(&st.info, 0, &st.specs[0]), [0.0, 0.0]);
+    assert!(st.kinematic_status.contains("immobile"), "{}", st.kinematic_status);
+    assert_eq!(canvas.kinematic_overlay().locked_pins, vec![0, 1]);
+
+    st.tool_mode = ToolMode::PlaceDislocation;
+    st.custom_mn = (1, 0);
+    st.place_at_world([0.37, 0.41], square, &backend, &mut canvas);
+    st.wait_idle(square, Some(&mut canvas));
+    assert!(st.move_pin_with_mods(2, [2.37, 1.85], false, square, &backend, &mut canvas));
+    let glided_pos = spec_world_pos(&st.info, 2, &st.specs[2]);
+    assert!((glided_pos[0] - 2.37).abs() < 1e-9 && (glided_pos[1] - 0.41).abs() < 1e-9, "{glided_pos:?}");
+    st.finish_drag_kinematics(square, Some(&mut canvas));
+    st.wait_idle(square, Some(&mut canvas));
+    assert!(!canvas.kinematic_overlay().glide_lines.is_empty());
+}
+
+#[test]
+fn shift_drag_disclination_annihilates_pair_and_undo_restores() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut canvas = canvas();
+    let mut st = CombineTabState::new(square, &backend);
+    st.wait_idle(square, Some(&mut canvas));
+
+    assert!(st.move_pin_with_mods(1, [0.05, 0.05], true, square, &backend, &mut canvas));
+    let rx = canvas.kinematic_overlay().reaction.as_ref().expect("reaction preview arrow");
+    assert_eq!(rx.to, [0.0, 0.0]);
+    assert!(rx.valid);
+
+    st.finish_drag_kinematics(square, Some(&mut canvas));
+    st.wait_idle(square, Some(&mut canvas));
+    assert_eq!(st.specs.len(), 3);
+    assert!(st.last_build.refused.is_none());
+    let rep = st.compare_result.as_ref().unwrap().as_ref().unwrap();
+    assert_eq!(rep.kind, "dislocation");
+    assert!((rep.charge.length.unwrap() - 1.0).abs() < 1e-6);
+
+    st.undo_last(square);
+    st.wait_idle(square, Some(&mut canvas));
+    assert_eq!(st.specs.len(), 2);
+}
+
+#[test]
+fn glide_dislocation_back_onto_disclination_absorbs_and_shifts_centre() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut canvas = canvas();
+    let mut st = CombineTabState::new(square, &backend);
+    st.specs = vec![DefectSpec::disclination(90.0, [0.0, 0.0]), DefectSpec::disclination(-90.0, [1.5, 0.5])];
+    st.request_build(square, false, false, false);
+    st.wait_idle(square, Some(&mut canvas));
+
+    assert!(st.move_pin_with_mods(1, [0.5, 0.5], true, square, &backend, &mut canvas));
+    st.finish_drag_kinematics(square, Some(&mut canvas));
+    st.wait_idle(square, Some(&mut canvas));
+    assert_eq!(st.specs.len(), 3);
+
+    // Glide emitted dislocation (pin 2) onto disclination #2 at (0.5, 0.5) along its ΔN=0 glide rail.
+    let DefectSpec::Dislocation { b, .. } = st.specs[2] else {
+        panic!("expected emitted dislocation at index 2");
+    };
+    let target = [0.5 - 0.5 * b[0], 0.5 - 0.5 * b[1]];
+    assert!(st.move_pin_with_mods(2, target, false, square, &backend, &mut canvas));
+    let abs_arrow = canvas.kinematic_overlay().reaction.as_ref().expect("expected live absorption preview arrow");
+    assert!((abs_arrow.to[0] - 1.5).abs() < 1e-5 && (abs_arrow.to[1] - 0.5).abs() < 1e-5, "{:?}", abs_arrow.to);
+    st.finish_drag_kinematics(square, Some(&mut canvas));
+    st.wait_idle(square, Some(&mut canvas));
+
+    assert_eq!(st.specs.len(), 2);
+    let rec = spec_world_pos(&st.info, 1, &st.specs[1]);
+    assert!((rec[0] - 1.5).abs() < 1e-5 && (rec[1] - 0.5).abs() < 1e-5, "{rec:?}");
 }

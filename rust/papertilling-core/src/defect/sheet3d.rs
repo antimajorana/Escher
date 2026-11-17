@@ -1,25 +1,36 @@
 //! Discrete 3D elastic sheet relaxation for crystal patches with defects (`Defects` and `Combine` tabs).
 //!
-//! Relaxes 3D vertex coordinates `X_i = (x_i, y_i, z_i)` under nearest-neighbour bond stretching
-//! (plus unfrustrated bulk-tile corner-chord shear rigidity) and orientation-safe dihedral hinge bending:
-//!
-//!   E = 1/2 sum_{(i,j)} (||X_i - X_j|| - l_{ij}^0)^2 + (kappa_b / 2) sum_{hinges} E_bend(f_1, f_2).
+//! Relaxes 3D vertex coordinates `X_i = (x_i, y_i, z_i)` under exact G-gauge-invariant GSV
+//! metric elasticity (bond stretch + interior-face corner shear) and orientation-safe /
+//! Z_2-twisted dihedral hinge bending.
 
-use std::collections::{HashMap, HashSet};
+#[cfg(test)]
+use std::collections::HashSet;
 
-use crate::defect::charge::{check_frames, loop_charge, total_frank};
+use crate::defect::charge::{loop_charge, total_frank};
+#[cfg(test)]
 use crate::defect::cone_geometry::{add2, norm2, same_iso, sub2};
-use crate::defect::sheet3d_energy::{
-    Spring, build_hinges, compute_strains, compute_vertex_omega, dist3_at, eval_2d_energies,
-    eval_2d_stretch_fg, eval_energies, eval_sheet_fg,
+use crate::defect::gsv_elastic::{
+    Elastic2DOptions, canonical_align_2d, relax_elastic_2d_with_model,
 };
+use crate::defect::gsv_mobius::seed_mobius_3d;
+use crate::defect::gsv_model::{GsvModel, compute_gsv_diagnostics, eval_gsv_fg};
+use crate::defect::sheet3d_energy::{
+    bond_stretch_energy_3d, build_hinges, compute_strains, compute_vertex_omega, dist3_at,
+    eval_gsv_sheet_fg, eval_hinge_bending_fg,
+};
+#[cfg(test)]
+use crate::defect::sheet3d_energy::{Spring, eval_sheet_fg};
 use crate::defect::sheet3d_opt::{center_and_align_horizontal, lbfgs_minimize};
-use crate::types::{BuiltCrystal, Cell2D, Isometry2};
+#[cfg(test)]
+use crate::types::Isometry2;
+use crate::types::{BuiltCrystal, Cell2D};
 
-#[path = "sheet3d_topology.rs"]
-mod topology;
+use crate::defect::sheet3d_topology as topology;
+#[cfg(test)]
+use topology::extract_interior_faces;
+use topology::validate_inputs;
 pub use topology::validate_crystal as validate_sheet_crystal;
-use topology::{extract_interior_faces, prepare_planar_chart, validate_inputs};
 
 /// Elastic parameters and solver budget for [`relax_sheet_3d`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -62,14 +73,20 @@ pub struct Sheet3DResult {
     pub mean_bond_len: f64,
     /// Nearest-neighbour bond-stretching energy `0.5 * sum_{e in E} (||X_i - X_j|| - l0)^2` in 3D.
     pub bond_stretch_energy: f64,
-    /// Total stretching (bond + bulk-tile shear chord) energy in 3D.
+    /// Total GSV stretching + corner-shear energy in 3D.
     pub stretch_energy: f64,
     /// Hinge bending energy `0.5 * kappa_b * a0^2 * sum E_bend` in 3D.
     pub bend_energy: f64,
     /// Nearest-neighbour bond-stretching energy of the forced-2D (`z = 0`) relaxed embedding.
     pub planar_2d_bond_energy: f64,
-    /// Total stretching energy of the forced-2D (`z = 0`) relaxed embedding.
+    /// Total GSV energy of the forced-2D (`z = 0`) relaxed embedding.
     pub planar_2d_stretch_energy: f64,
+    /// Per-site total GSV energy (`0.5 * sum_e E_s + sum_{corners} E_shear`) in 3D.
+    pub site_gsv_energy: Vec<f64>,
+    /// Per-bond total GSV energy (`E_s(e) + 0.5 * sum_{corners ni e} E_shear`) in 3D.
+    pub bond_gsv_energy: Vec<f64>,
+    /// Per-bond dimensionless RMS shear strain across incident face corners.
+    pub bond_shear_strain: Vec<f64>,
     pub iterations: usize,
     /// Whether the 3D objective reached the requested RMS gradient tolerance.
     pub converged: bool,
@@ -89,6 +106,9 @@ impl Sheet3DResult {
             .chain(&self.bond_rest_len)
             .chain(&self.face_strain)
             .chain(&self.vertex_omega)
+            .chain(&self.site_gsv_energy)
+            .chain(&self.bond_gsv_energy)
+            .chain(&self.bond_shear_strain)
             .all(|x| x.is_finite())
             && [
                 self.mean_bond_len,
@@ -104,6 +124,9 @@ impl Sheet3DResult {
             && self.bond_rest_len.iter().all(|&l| l > 0.0)
             && self.is_boundary.len() == self.xyz.len()
             && self.vertex_omega.len() == self.xyz.len()
+            && self.site_gsv_energy.len() == self.xyz.len()
+            && self.bond_gsv_energy.len() == self.bond_rest_len.len()
+            && self.bond_shear_strain.len() == self.bond_rest_len.len()
             && self.face_strain.len() == self.faces.len()
             && self
                 .faces
@@ -112,7 +135,7 @@ impl Sheet3DResult {
     }
 }
 
-/// Relax `crystal` in `R^3` using rest bond lengths from `cell` (with optional `warm_z` seed per vertex).
+/// Relax `crystal` in `R^3` using exact GSV metric elasticity and dihedral hinge bending.
 pub fn relax_sheet_3d(
     crystal: &BuiltCrystal,
     cell: &Cell2D,
@@ -127,149 +150,111 @@ pub fn relax_sheet_3d(
         return empty_result();
     }
 
-    let kind_len = rest_lengths_from_cell(cell);
-    let mut edge_rest = vec![0.0_f64; crystal.edges.len()];
-    let mut springs = Vec::with_capacity(crystal.edges.len() * 2);
-    let mut len_sum = 0.0_f64;
-    let mut len_cnt = 0_usize;
-
-    for (e_idx, &(u, v)) in crystal.edges.iter().enumerate() {
-        let d_opt = crystal
-            .adj
-            .get(u)
-            .and_then(|row| row.iter().find(|d| d.to == v));
-        let l0 = match d_opt {
-            Some(d) if !d.across => kind_len
-                .get(&d.kind)
-                .copied()
-                .unwrap_or_else(|| norm2(d.vec))
-                .max(1e-6),
-            Some(d) => {
-                let vlen = norm2(d.vec);
-                if vlen > 1e-6 {
-                    vlen
-                } else {
-                    kind_len.get(&d.kind).copied().unwrap_or(1.0).max(1e-6)
-                }
-            }
-            None => kind_len.values().next().copied().unwrap_or(1.0).max(1e-6),
-        };
-        edge_rest[e_idx] = l0;
-        len_sum += l0;
-        len_cnt += 1;
-        springs.push(Spring {
-            u,
-            v,
-            l0,
-            weight: 1.0,
-            is_primary_bond: true,
-        });
-    }
-    let a0 = if len_cnt > 0 {
-        len_sum / (len_cnt as f64)
-    } else {
-        1.0
+    let model = match GsvModel::from_crystal(crystal, Some(cell)) {
+        Ok(m) => m,
+        Err(message) => return unavailable_result(message),
     };
+    let a0 = model.mean_bond_len;
     let kappa_eff = opts.kappa_b * a0 * a0;
-    if !a0.is_finite()
-        || !kappa_eff.is_finite()
-        || edge_rest.iter().any(|l| !l.is_finite() || *l <= 0.0)
-    {
+    if !a0.is_finite() || !kappa_eff.is_finite() {
         return unavailable_result("nonfinite physical rest lengths or bending scale".into());
     }
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = model.diagnostics.clone();
     let warm_z = warm_z.filter(|wz| wz.iter().any(|z| z.abs() > 1e-4));
-
-    let max_init_rel_strain = springs
-        .iter()
-        .map(|s| {
-            let d = (crystal.pos[s.u][0] - crystal.pos[s.v][0])
-                .hypot(crystal.pos[s.u][1] - crystal.pos[s.v][1]);
-            (d - s.l0).abs() / s.l0
-        })
-        .fold(0.0_f64, f64::max);
-
-    let has_valid_frames =
-        !crystal.is_non_orientable && crystal.wall_sigma.is_none() && check_frames(crystal) == 0;
-    // The drawing checker uses integer spatial bins. Do not send extreme finite coordinates through
-    // those bins; numerical overflow in the objective is diagnosed independently below.
-    let safe_chart_repair = crystal.pos.iter().flatten().all(|x| x.abs() < 1e12);
-    let chart_2d: Vec<[f64; 2]> =
-        if max_init_rel_strain < 1e-7 || crystal.is_non_orientable || !safe_chart_repair {
-            crystal.pos.clone()
-        } else {
-            prepare_planar_chart(crystal, has_valid_frames)
-        };
-    if chart_2d.iter().flatten().any(|x| !x.is_finite()) {
-        return unavailable_result("nonfinite planar chart".into());
-    }
-    let (faces, is_boundary) = if crystal.is_non_orientable {
-        diagnostics.push("Möbius face/hinge topology unsupported: spring-only preview retaining every seam bond, not a physical elastic sheet".into());
-        (Vec::new(), vec![true; n])
-    } else {
-        let (faces, boundary, notes) = extract_interior_faces(crystal, &chart_2d, has_valid_frames);
-        diagnostics.extend(notes);
-        (faces, boundary)
-    };
-    add_bulk_tile_chord_springs(crystal, &faces, has_valid_frames, &mut springs);
-    if springs.iter().any(|s| !s.l0.is_finite() || s.l0 <= 0.0) {
-        return unavailable_result("nonfinite tile rest geometry".into());
-    }
-    let hinges = build_hinges(&faces);
+    let hinges = build_hinges(&model.faces);
 
     let mut x_flat = vec![0.0_f64; 3 * n];
     for i in 0..n {
-        x_flat[3 * i] = chart_2d[i][0];
-        x_flat[3 * i + 1] = chart_2d[i][1];
+        x_flat[3 * i] = model.chart_2d[i][0];
+        x_flat[3 * i + 1] = model.chart_2d[i][1];
     }
-    let max_total_init_strain = springs
+    let max_total_init_strain = model
+        .stretches
         .iter()
         .map(|s| (dist3_at(&x_flat, s.u, s.v) - s.l0).abs() / s.l0)
         .fold(0.0_f64, f64::max);
 
     let mut x_2d = vec![0.0_f64; 2 * n];
-    for i in 0..n {
-        x_2d[2 * i] = chart_2d[i][0];
-        x_2d[2 * i + 1] = chart_2d[i][1];
+    if !crystal.is_non_orientable
+        && max_total_init_strain >= 1e-7
+        && let Ok(r2) = relax_elastic_2d_with_model(&model, &Elastic2DOptions::default())
+    {
+        for i in 0..n {
+            x_2d[2 * i] = r2.pos[i][0];
+            x_2d[2 * i + 1] = r2.pos[i][1];
+        }
+    } else {
+        for i in 0..n {
+            x_2d[2 * i] = model.chart_2d[i][0];
+            x_2d[2 * i + 1] = model.chart_2d[i][1];
+        }
     }
-    let _ = lbfgs_minimize(&mut x_2d, 120, 1e-6, |pos2, g2| {
-        eval_2d_stretch_fg(pos2, g2, &springs)
+    let _ = lbfgs_minimize(&mut x_2d, 200, 1e-10, |pos2, g2| {
+        let (es, eh) = eval_gsv_fg::<2>(pos2, g2, &model.stretches, &model.shears_3d);
+        es + eh
     });
-    let (planar_2d_bond_energy, planar_2d_stretch_energy) = eval_2d_energies(&x_2d, &springs);
     let mut g2 = vec![0.0; 2 * n];
-    eval_2d_stretch_fg(&x_2d, &mut g2, &springs);
+    let (es2, eh2) = eval_gsv_fg::<2>(&x_2d, &mut g2, &model.stretches, &model.shears_3d);
+    let planar_2d_stretch_energy = es2 + eh2;
+    let planar_2d_bond_energy: f64 = model
+        .stretches
+        .iter()
+        .map(|s| {
+            let diff = (x_2d[2 * s.u] - x_2d[2 * s.v]).hypot(x_2d[2 * s.u + 1] - x_2d[2 * s.v + 1]) - s.l0;
+            0.5 * diff * diff
+        })
+        .sum();
     let planar_2d_converged = gradient_rms(&g2) <= 1e-6;
     if !planar_2d_converged {
         diagnostics.push("planar reference not converged; strain comparison is provisional".into());
     }
 
     let mut x3 = vec![0.0_f64; 3 * n];
-    for i in 0..n {
-        x3[3 * i] = x_2d[2 * i];
-        x3[3 * i + 1] = x_2d[2 * i + 1];
-    }
-    if let Some(wz) = warm_z {
+    if crystal.is_non_orientable && warm_z.is_none() {
+        for (i, p) in seed_mobius_3d(crystal).into_iter().enumerate() {
+            x3[3 * i] = p[0];
+            x3[3 * i + 1] = p[1];
+            x3[3 * i + 2] = p[2];
+        }
+    } else if let Some(wz) = warm_z {
         for i in 0..n {
+            x3[3 * i] = x_2d[2 * i];
+            x3[3 * i + 1] = x_2d[2 * i + 1];
             x3[3 * i + 2] = wz[i];
         }
-    } else if max_total_init_strain >= 1e-7 {
-        seed_out_of_plane(
-            &mut x3,
-            crystal,
-            has_valid_frames,
-            a0,
-            max_total_init_strain,
-        );
+    } else {
+        let mut pts_2d: Vec<[f64; 2]> = x_2d.as_chunks::<2>().0.to_vec();
+        canonical_align_2d(&mut pts_2d);
+        for i in 0..n {
+            x3[3 * i] = pts_2d[i][0];
+            x3[3 * i + 1] = pts_2d[i][1];
+        }
+        if max_total_init_strain >= 1e-7 {
+            let frank_deg = if model.has_valid_frames {
+                total_frank(crystal)
+            } else if !crystal.is_non_orientable {
+                model
+                    .faces
+                    .iter()
+                    .map(|f| {
+                        let h = loop_charge(crystal, f).0;
+                        if h.det() > 0.0 { h.m[1][0].atan2(h.m[0][0]).to_degrees() } else { 0.0 }
+                    })
+                    .sum()
+            } else {
+                0.0
+            };
+            seed_out_of_plane(&mut x3, n, frank_deg, a0, max_total_init_strain);
+        }
     }
 
-    let mut centroids_buf = vec![[0.0_f64; 3]; faces.len()];
-    let mut centroid_grad = vec![[0.0_f64; 3]; faces.len()];
+    let mut centroids_buf = vec![[0.0_f64; 3]; model.faces.len()];
+    let mut centroid_grad = vec![[0.0_f64; 3]; model.faces.len()];
     let (_, iterations) = lbfgs_minimize(&mut x3, opts.max_iters, opts.grad_tol, |pos, grad| {
-        eval_sheet_fg(
+        eval_gsv_sheet_fg(
             pos,
             grad,
-            &faces,
-            &springs,
+            &model,
             &hinges,
             kappa_eff,
             &mut centroids_buf,
@@ -277,11 +262,10 @@ pub fn relax_sheet_3d(
         )
     });
     let mut g3 = vec![0.0; 3 * n];
-    let energy = eval_sheet_fg(
+    let energy = eval_gsv_sheet_fg(
         &x3,
         &mut g3,
-        &faces,
-        &springs,
+        &model,
         &hinges,
         kappa_eff,
         &mut centroids_buf,
@@ -309,25 +293,40 @@ pub fn relax_sheet_3d(
         x3[3 * i + 2] = xyz[i][2];
     }
 
-    let (bond_stretch_energy, stretch_energy, bend_energy) =
-        eval_energies(&x3, &faces, &springs, &hinges, kappa_eff);
-    let (bond_strain, face_strain) = compute_strains(&xyz, crystal, &edge_rest, &faces);
-    let vertex_omega = compute_vertex_omega(&xyz, &faces, &is_boundary);
+    let bond_stretch_energy = bond_stretch_energy_3d(&x3, &model.stretches);
+    let diag = compute_gsv_diagnostics::<3>(&x3, &model, &model.shears_3d);
+    let stretch_energy = diag.stretch_energy + diag.shear_energy;
+    let mut g_dummy = vec![0.0; 3 * n];
+    let bend_energy = eval_hinge_bending_fg(
+        &x3,
+        &mut g_dummy,
+        &model.faces,
+        &hinges,
+        kappa_eff,
+        &mut centroids_buf,
+        &mut centroid_grad,
+    );
+    let bend_energy = if bend_energy.is_finite() { bend_energy.max(0.0) } else { bend_energy };
+    let (bond_strain, face_strain) = compute_strains(&xyz, crystal, &model.edge_rest, &model.faces);
+    let vertex_omega = compute_vertex_omega(&xyz, &model.faces, &model.is_boundary);
 
     let result = Sheet3DResult {
         xyz,
-        faces,
+        faces: model.faces,
         bond_strain,
-        bond_rest_len: edge_rest,
+        bond_rest_len: model.edge_rest,
         face_strain,
         vertex_omega,
-        is_boundary,
+        is_boundary: model.is_boundary,
         mean_bond_len: a0,
         bond_stretch_energy,
         stretch_energy,
         bend_energy,
         planar_2d_bond_energy,
         planar_2d_stretch_energy,
+        site_gsv_energy: diag.site_gsv_energy,
+        bond_gsv_energy: diag.bond_gsv_energy,
+        bond_shear_strain: diag.bond_shear_strain,
         iterations,
         converged,
         planar_2d_converged,
@@ -355,6 +354,9 @@ fn empty_result() -> Sheet3DResult {
         bend_energy: 0.0,
         planar_2d_bond_energy: 0.0,
         planar_2d_stretch_energy: 0.0,
+        site_gsv_energy: Vec::new(),
+        bond_gsv_energy: Vec::new(),
+        bond_shear_strain: Vec::new(),
         iterations: 0,
         converged: true,
         planar_2d_converged: true,
@@ -378,25 +380,7 @@ fn gradient_rms(gradient: &[f64]) -> f64 {
     gradient.iter().fold(0.0_f64, |norm, &g| norm.hypot(g)) / (gradient.len().max(1) as f64).sqrt()
 }
 
-fn rest_lengths_from_cell(cell: &Cell2D) -> HashMap<usize, f64> {
-    let mut sums: HashMap<usize, (f64, usize)> = HashMap::new();
-    for b in &cell.bonds {
-        if let (Some(&pi), Some(&pj)) = (cell.basis.get(b.i), cell.basis.get(b.j)) {
-            let dx = f64::from(b.n1) * cell.a1[0] + f64::from(b.n2) * cell.a2[0] + pj[0] - pi[0];
-            let dy = f64::from(b.n1) * cell.a1[1] + f64::from(b.n2) * cell.a2[1] + pj[1] - pi[1];
-            let len = dx.hypot(dy);
-            if len > 1e-9 {
-                let ent = sums.entry(b.kind).or_insert((0.0, 0));
-                ent.0 += len;
-                ent.1 += 1;
-            }
-        }
-    }
-    sums.into_iter()
-        .map(|(k, (s, c))| (k, s / (c as f64)))
-        .collect()
-}
-
+#[cfg(test)]
 fn add_bulk_tile_chord_springs(
     crystal: &BuiltCrystal,
     faces: &[Vec<usize>],
@@ -459,24 +443,17 @@ fn add_bulk_tile_chord_springs(
 
 fn seed_out_of_plane(
     x3: &mut [f64],
-    crystal: &BuiltCrystal,
-    has_valid_frames: bool,
+    n: usize,
+    frank_deg: f64,
     a0: f64,
     max_strain: f64,
 ) {
-    let n = crystal.pos.len();
     let inv_n = 1.0 / (n as f64);
     let cx = (0..n).map(|i| x3[3 * i]).sum::<f64>() * inv_n;
     let cy = (0..n).map(|i| x3[3 * i + 1]).sum::<f64>() * inv_n;
     let r_max = (0..n)
         .map(|i| (x3[3 * i] - cx).hypot(x3[3 * i + 1] - cy))
         .fold(a0, f64::max);
-
-    let frank_deg = if has_valid_frames {
-        total_frank(crystal)
-    } else {
-        0.0
-    };
     let scale = (max_strain * 12.0).clamp(0.05, 1.0);
 
     for i in 0..n {
@@ -484,7 +461,7 @@ fn seed_out_of_plane(
         let dy = x3[3 * i + 1] - cy;
         let r = dx.hypot(dy);
         let theta = dy.atan2(dx);
-        let h = det_hash_unit(i as u64);
+        let h = (7.31 * (dx / a0) + 11.17 * (dy / a0)).sin();
         x3[3 * i + 2] = if frank_deg > 3.0 {
             let omega_frac = (frank_deg / 360.0).clamp(0.02, 0.45);
             let slope = (2.0 * omega_frac).sqrt().clamp(0.25, 0.95);
@@ -504,6 +481,7 @@ fn seed_out_of_plane(
     }
 }
 
+#[cfg(test)]
 #[inline]
 fn det_hash_unit(mut k: u64) -> f64 {
     k = k.wrapping_add(0x9e37_79b9_7f4a_7c15);

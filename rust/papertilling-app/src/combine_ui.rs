@@ -5,7 +5,7 @@ use papertilling_core::defect::surgery::DefectSpec;
 
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
-use crate::combine_tab::{CombineTabState, MANUAL_R_MAX, MANUAL_R_MIN, ToolMode};
+use crate::combine_tab::{CombineTabState, MANUAL_R_MAX, MANUAL_R_MIN, MotionMode, ToolMode};
 use crate::core_panel::show_core_panel;
 use crate::live_combine::{
     CombineDrawMode,
@@ -53,9 +53,15 @@ impl CombineTabState {
             ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDisclination, "Click to Place Disclination");
         });
         ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDislocation, "Click to Place Dislocation");
+        let has_half_walls = !self.half_wall.choices.is_empty();
+        ui.add_enabled_ui(has_half_walls, |ui| {
+            ui.radio_value(&mut self.tool_mode, ToolMode::PlaceHalfWall, "Click to Place Half-Wall (terminated)");
+        });
 
         if self.tool_mode == ToolMode::PlaceDisclination && has_centres {
             self.disclination_tool_ui(ui);
+        } else if self.tool_mode == ToolMode::PlaceHalfWall && has_half_walls {
+            self.half_wall.show_tool_selector(ui);
         } else if self.tool_mode == ToolMode::PlaceDislocation {
             ui.horizontal_wrapped(|ui| {
                 ui.small("Class:");
@@ -94,6 +100,9 @@ impl CombineTabState {
             if ui.button("Shortest Disloc").clicked() {
                 self.apply_preset_dislocation(gallery_item, backend, canvas);
             }
+            if ui.add_enabled(has_half_walls, egui::Button::new("Terminated Half-Wall")).clicked() {
+                self.apply_preset_half_wall(gallery_item, backend, canvas);
+            }
             if ui.button("Clear All").clicked() {
                 self.clear_defects(gallery_item, backend, canvas);
             }
@@ -110,20 +119,61 @@ impl CombineTabState {
             if has_coincident_same_kind_pins(&self.info, &self.specs)
                 && ui.small_button("Merge coincident pins").on_hover_text("Collapse superposed same-point pins permanently").clicked()
             {
+                self.push_undo();
                 merge_coincident_pins(&self.info, &mut self.specs);
                 dirty = true;
             }
         }
 
         ui.separator();
-        ui.strong("Patch & Scan Controls");
+        ui.strong("Motion Physics (ΔN = 0)");
+        let prev_mode = self.motion_mode;
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.motion_mode, MotionMode::Conserved, "Conserved (ΔN=0)")
+                .on_hover_text("Dislocations glide only along b; disclinations are locked unless Shift+dragged");
+            ui.selectable_value(&mut self.motion_mode, MotionMode::StepDisclinationEmit, "Step D (emit b)")
+                .on_hover_text("Dragging a disclination steps it by emitting a ΔN = 0 dislocation");
+            ui.selectable_value(&mut self.motion_mode, MotionMode::FreeSetup, "Free Setup")
+                .on_hover_text("Unconstrained repositioning / climb for preparing initial defects");
+        });
+        if self.motion_mode != prev_mode {
+            self.sync_to_canvas(gallery_item, canvas, false);
+        }
         ui.horizontal(|ui| {
+            if ui.checkbox(&mut self.show_glide_lines, "Show glide rails").changed() {
+                self.sync_to_canvas(gallery_item, canvas, false);
+            }
+            if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("↶ Undo").small()).clicked() {
+                self.undo_last(gallery_item);
+            }
+        });
+        if !self.kinematic_status.is_empty() {
+            egui::Frame::NONE
+                .fill(egui::Color32::from_rgb(233, 242, 251))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(156, 194, 232)))
+                .corner_radius(3.0)
+                .inner_margin(4.0)
+                .show(ui, |ui| {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(22, 68, 118),
+                        egui::RichText::new(&self.kinematic_status).size(11.0),
+                    );
+                });
+        }
+
+        ui.separator();
+        ui.strong("Patch & Scan Controls");
+        ui.horizontal_wrapped(|ui| {
             if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::FastRelaxed, "Fast Relaxed").clicked() {
                 self.opts.draw_mode = CombineDrawMode::FastRelaxed;
                 dirty = true;
             }
             if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::Raw, "Raw Surgery").clicked() {
                 self.opts.draw_mode = CombineDrawMode::Raw;
+                dirty = true;
+            }
+            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::ElasticAoMetric, "Elastic (AO metric)").clicked() {
+                self.opts.draw_mode = CombineDrawMode::ElasticAoMetric;
                 dirty = true;
             }
         });
@@ -178,6 +228,7 @@ impl CombineTabState {
 
         ui.separator();
         self.equivalence_ui(ui);
+        self.show_inspectors_ui(ui, gallery_item, canvas);
 
         ui.separator();
         ui.strong("Notebook 3 .json");
@@ -246,13 +297,16 @@ impl CombineTabState {
                         let kstr = spec_short_label(&self.info, sp);
                         let cut_opt = match *sp {
                             DefectSpec::Disclination { cut, .. } | DefectSpec::Dislocation { cut, .. } => cut,
+                            DefectSpec::HalfWall { .. } => None,
                         };
                         body.row(18.0, |mut row| {
                             row.col(|ui| { ui.strong(format!("#{}", idx + 1)); });
                             row.col(|ui| { ui.label(kstr); });
                             row.col(|ui| { ui.small(format!("({:+.2}, {:+.2})", pos[0], pos[1])); });
                             row.col(|ui| {
-                                if let Some(c) = cut_opt {
+                                if matches!(sp, DefectSpec::HalfWall { .. }) {
+                                    ui.small("ray");
+                                } else if let Some(c) = cut_opt {
                                     let mut deg = c[1].atan2(c[0]).to_degrees();
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -274,19 +328,29 @@ impl CombineTabState {
                     }
                 });
         });
+        let mut mutated = false;
         if let Some((i, ang_opt)) = cut_edit {
+            self.push_undo();
             set_pin_cut_angle(&mut self.specs[i], ang_opt);
+            mutated = true;
         }
         if let Some(i) = flip_idx {
+            self.push_undo();
             match &mut self.specs[i] {
                 DefectSpec::Disclination { angle_deg, .. } => *angle_deg = -*angle_deg,
                 DefectSpec::Dislocation { b, .. } => *b = [-b[0], -b[1]],
+                DefectSpec::HalfWall { direction, .. } => {
+                    if let Some(d) = direction { *d = [-d[0], -d[1]]; }
+                }
             }
+            mutated = true;
         }
         if let Some(i) = remove_idx {
+            self.push_undo();
             self.specs.remove(i);
+            mutated = true;
         }
-        flip_idx.is_some() || remove_idx.is_some() || cut_edit.is_some()
+        mutated
     }
 
     fn equivalence_ui(&self, ui: &mut egui::Ui) {
@@ -311,10 +375,22 @@ impl CombineTabState {
         let stale = self.compare_stale || self.is_comparing() || self.dragging;
         match &self.compare_result {
             Some(Ok(rep)) => {
-                let (bg, fg, tag) = if rep.equivalent {
-                    (egui::Color32::from_rgb(225, 244, 228), egui::Color32::from_rgb(34, 108, 42), "EQUIVALENT TO SINGLE")
-                } else {
-                    (egui::Color32::from_rgb(255, 241, 214), egui::Color32::from_rgb(168, 92, 10), "DISTINCT FROM SINGLE")
+                let (bg, fg, tag) = match (rep.equivalent, rep.match_tier.as_str()) {
+                    (true, "volterra" | "exact") => (
+                        egui::Color32::from_rgb(225, 244, 228),
+                        egui::Color32::from_rgb(34, 108, 42),
+                        "EQUIVALENT (VOLTERRA CORE)",
+                    ),
+                    (true, _) => (
+                        egui::Color32::from_rgb(224, 242, 246),
+                        egui::Color32::from_rgb(0, 105, 120),
+                        "EQUIVALENT (COMPLETION / HEALED CORE)",
+                    ),
+                    (false, _) => (
+                        egui::Color32::from_rgb(255, 241, 214),
+                        egui::Color32::from_rgb(168, 92, 10),
+                        "DISTINCT FROM SINGLE",
+                    ),
                 };
                 let (bg, fg) = if stale { (egui::Color32::from_gray(236), egui::Color32::from_gray(110)) } else { (bg, fg) };
                 egui::Frame::NONE.fill(bg).inner_margin(4.0).corner_radius(3.0).show(ui, |ui| {
@@ -361,7 +437,7 @@ impl CombineTabState {
                     if self.view_mode.uses_3d() {
                         let (kc, vc) = show_sheet3d_controls(ui, &mut self.sheet_opts, "comb_top_col");
                         if vc {
-                            self.view3d_dirty = true;
+                            self.on_combine_sheet_color_changed(ui.ctx());
                         }
                         if kc {
                             self.request_sheet3d_only(gallery_item);
@@ -419,7 +495,12 @@ impl CombineTabState {
         backend: &AppBackend,
         canvas: &mut Canvas2D,
     ) {
-        ui.strong("2D Pin Editor [drag pin: move/snap | drag empty: pan | scroll/pinch: zoom]");
+        let header = match self.motion_mode {
+            MotionMode::Conserved => "2D Pin Editor [Conserved ΔN=0: dislocations glide along b | Shift+drag disclination: emit b]",
+            MotionMode::StepDisclinationEmit => "2D Pin Editor [Step D: dragging disclination emits b | dislocations glide along b]",
+            MotionMode::FreeSetup => "2D Pin Editor [Free Setup: unconstrained drag | drag empty: pan | scroll/pinch: zoom]",
+        };
+        ui.strong(header);
         ui.add_space(2.0);
         let click_to_place = self.tool_mode != ToolMode::PanAndDrag && !self.is_initializing() && self.init_error.is_none();
         let preview_world = match (self.tool_mode, self.last_hover_world) {
@@ -427,21 +508,25 @@ impl CombineTabState {
                 let (cid, ang) = self.active_centre_and_angle();
                 Some(backend.snap_disclination(self.effective_item(gallery_item), &self.info, ang, cid, hw).0)
             }
-            (ToolMode::PlaceDislocation, Some(hw)) => Some(hw),
+            (ToolMode::PlaceDislocation, Some(hw)) | (ToolMode::PlaceHalfWall, Some(hw)) => Some(hw),
             _ => None,
         };
         let markers = self.build_markers();
         let inter = canvas.show_interactive(ui, &markers, click_to_place, preview_world);
         self.last_hover_world = inter.hovered_world;
         if let Some((pin_idx, world)) = inter.dragged_marker {
-            self.move_pin_to(pin_idx, world, gallery_item, backend, canvas);
+            self.move_pin_with_mods(pin_idx, world, inter.shift_held, gallery_item, backend, canvas);
         }
         let released_elsewhere = self.dragging && !ui.input(|i| i.pointer.any_down());
         if inter.drag_released || released_elsewhere {
-            self.finish_drag(gallery_item);
+            self.finish_drag_kinematics(gallery_item, Some(canvas));
         }
         if let Some(world) = inter.clicked_world {
             self.place_at_world(world, gallery_item, backend, canvas);
+        }
+        if let Some(v0) = inter.clicked_circuit_vertex {
+            self.inspectors.circuit.base_v0 = Some(v0);
+            self.on_combine_circuit_changed(gallery_item, canvas);
         }
         self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
         if self.view3d_dirty && self.view_mode.uses_3d() {

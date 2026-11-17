@@ -245,10 +245,15 @@ def _orbit_rep(lat: LatticeData, b) -> np.ndarray:
     return max(orb, key=lambda v: (round(float(v[0]), 5), round(float(v[1]), 5)))
 
 
-def classify_charge(lat: LatticeData, frank: float, H) -> dict:
+def classify_charge(lat: LatticeData, frank: float | None, H) -> dict:
     """Class in G~+ of a measured (total Frank angle, holonomy H)."""
     M, t = H
+    if float(np.linalg.det(M)) < 0.0:
+        return dict(angle=None, H=(M.copy(), t.copy()), orientation_preserving=False,
+                    kind="non_orientable", label="non-orientable loop (det H < 0)", single=None)
     rot_deg = math.degrees(math.atan2(M[1, 0], M[0, 0]))
+    if frank is None:
+        frank = rot_deg
     if abs(((frank - rot_deg) + 180.0) % 360.0 - 180.0) > 1e-3:
         raise ValueError(f"Frank angle {frank:.4f} disagrees with the holonomy rotation {rot_deg:.4f}")
     out = dict(angle=float(round(frank, 6)), H=(M.copy(), t.copy()))
@@ -262,6 +267,16 @@ def classify_charge(lat: LatticeData, frank: float, H) -> dict:
             if _norm(b) < 1e-6:
                 out.update(kind="vacuum", label="I (no defect)", single=None)
                 return out
+            if not out["lattice_vector"]:
+                out.update(
+                    kind="partial_dislocation",
+                    b=b.copy(),
+                    lattice_vector=False,
+                    single=None,
+                    length=_norm(b),
+                    label=f"partial dislocation b = {np.round(b, 4).tolist()} (|b| = {_norm(b):.4f}, fractional)",
+                )
+                return out
             rep = _orbit_rep(lat, b)
             out.update(kind="dislocation", b_rep=rep, length=_norm(b),
                        label=f"dislocation [b] = P+ orbit of {np.round(rep, 4).tolist()} (|b| = {_norm(b):.4f})",
@@ -272,9 +287,11 @@ def classify_charge(lat: LatticeData, frank: float, H) -> dict:
     c = np.linalg.solve(np.eye(2) - M, t)
     rec = lat.centre_class(c)
     w = rec["label"] if rec else "?"
+    allowed = (rec is not None and abs(frank) < 360 - 1e-6
+               and abs(frank * rec["order"] / 360.0 - round(frank * rec["order"] / 360.0)) < 1e-6)
     out.update(kind="disclination", centre=c, centre_class=w,
                label=f"disclination D({w}, {frank:+.0f} deg) about {np.round(c, 4).tolist()}",
-               single=dict(kind="disclination", angle=float(round(frank, 6)), at=c.copy()) if abs(frank) < 360 - 1e-6 else None)
+               single=dict(kind="disclination", angle=float(round(frank, 6)), at=c.copy()) if allowed else None)
     return out
 
 
@@ -331,10 +348,17 @@ def validate_specs(lat: LatticeData, specs, snap: bool = False) -> list[dict]:
             if not lat.L.is_symmetry(rotation_about(at, math.radians(ang)), probe=2.2):   # second route
                 raise ValueError(f"spec {idx + 1}: rotation by {ang:g} about {at.tolist()} is not a lattice symmetry")
             s["angle"], s["at"] = ang, at
+        elif kind == "half_wall":
+            from ._half_wall import resolve_half_wall_spec
+            s = resolve_half_wall_spec(lat, s)
         else:
-            raise ValueError(f"spec {idx + 1}: kind must be 'dislocation' or 'disclination', got {kind!r}")
+            raise ValueError(f"spec {idx + 1}: kind must be 'dislocation', 'disclination', or 'half_wall', got {kind!r}")
         out.append(s)
-    total = sum(s["angle"] for s in out if s["kind"] == "disclination")
+    hw_count = sum(1 for s in out if s["kind"] == "half_wall")
+    if hw_count > 1:
+        raise ValueError("at most one half_wall spec is supported per configuration")
+    total = sum((s["ending"]["frank_angle_deg"] or 0.0) if s["kind"] == "half_wall" else s["angle"]
+                for s in out if s["kind"] in ("disclination", "half_wall"))
     if total >= 360.0 - 1e-6:
         raise ValueError(f"total Frank angle {total:+g} deg >= 360 deg: an open patch cannot close into a cone")
     return out
@@ -343,13 +367,25 @@ def validate_specs(lat: LatticeData, specs, snap: bool = False) -> list[dict]:
 def _run(lat: LatticeData, specs, R=None, centre=None, check=True, fast=None):
     """Build with the cone-safe builder. Returns (Defect, check dict). check=False skips refusal on
     failed invariants (used by the stress tests, which check them independently)."""
-    eff = coalesce_coincident_specs(specs)
+    hw_specs = [s for s in specs if s["kind"] == "half_wall"]
+    pt_specs = [s for s in specs if s["kind"] != "half_wall"]
+    if hw_specs and not pt_specs:
+        from ._half_wall import build_half_wall_defect
+        return build_half_wall_defect(lat, hw_specs[0], R=R, centre=centre, check=check, fast=fast)
+    eff = coalesce_coincident_specs(pt_specs)
     pts = np.array([s["at"] for s in specs]).reshape(-1, 2)
     ctr = pts.mean(axis=0) if centre is None else np.asarray(centre, float)
     if R is None:
-        max_b = max((_norm(s["b"]) for s in specs if s["kind"] == "dislocation"), default=0.0)
+        max_b = max([_norm(s["b"]) for s in pt_specs if s["kind"] == "dislocation"]
+                    + [_norm(s["holonomy"][1]) for s in hw_specs], default=0.0)
         R = float(np.max(np.linalg.norm(pts - ctr, axis=1))) + max(12.5 * lat.lmax + max_b, 5.0 * lat.scale)
-    B = (_fast.builder_class() if _fast.enabled(fast) else _Builder)(lat.cell, lat.L, ctr, float(R))
+    b_cls = _fast.builder_class() if _fast.enabled(fast) else _Builder
+    if hw_specs:
+        from ._half_wall import build_half_wall_defect, seed_builder_from_defect
+        d_hw, _ = build_half_wall_defect(lat, hw_specs[0], R=float(R), centre=ctr, check=False, fast=fast)
+        B = seed_builder_from_defect(b_cls, lat, d_hw, ctr, float(R))
+    else:
+        B = b_cls(lat.cell, lat.L, ctr, float(R))
     for idx, d in enumerate(eff, 1):
         disloc = d["kind"] == "dislocation"
         cuts = [d["cut"]] if d.get("cut") is not None else candidate_cuts_360(d, [o for o in eff if o is not d], disloc)
@@ -370,7 +406,9 @@ def _run(lat: LatticeData, specs, R=None, centre=None, check=True, fast=None):
         if err is not None:
             raise ValueError(f"defect {idx} ({d['kind']}): {err}") from None
     d = B.finish()
-    expected = sum(s["angle"] for s in eff if s["kind"] == "disclination")
+    expected = sum(s["angle"] for s in eff if s["kind"] == "disclination") + sum(
+        (s["ending"]["frank_angle_deg"] or 0.0) for s in hw_specs
+    )
     rep = dict(R=float(R), centre=ctr, expected_frank=expected)
     if lat.planar:
         rep.update(frames_bad=_fast.check_frames(d, fast), euler=len(d.sites) - len(d.edges) + len(_fast.frame_faces(d, fast)),
@@ -394,8 +432,8 @@ def build(lattice, *specs, R=None, picture="relaxed", centre=None, snap=False, c
     "relaxed" = the spring relaxation (fast_relax); if that picture has crossing bonds or folded faces it is
     replaced by a planar one from draw.ensure_embedded (local Tutte repair or Tutte embedding, then the same
     relaxation kept planar); defect.info['drawing'] says which stage drew it."""
-    if picture not in ("relaxed", "raw"):
-        raise ValueError("picture must be 'relaxed' or 'raw'")
+    if picture not in ("relaxed", "raw", "elastic"):
+        raise ValueError("picture must be 'relaxed', 'raw', or 'elastic'")
     if len(specs) == 1 and isinstance(specs[0], (list, tuple)):
         specs = tuple(specs[0])
     if not specs:
@@ -408,6 +446,9 @@ def build(lattice, *specs, R=None, picture="relaxed", centre=None, snap=False, c
         if lat.planar:                       # a picture with crossing bonds or folded faces is redrawn
             from .draw import ensure_embedded
             ensure_embedded(d, overlaps=False)
+    elif picture == "elastic":
+        from .gsv_elastic import relax_elastic_2d
+        relax_elastic_2d(d, lattice=lat)
     else:
         ff.mark_long_bonds(d)
     return Configuration(d, sp, lat, rep)
@@ -481,9 +522,12 @@ class Configuration:
                 print(f"  core: {c['label']}; coordination of its sites {c['coordination']}")
         return out
 
-    def plot(self, ax=None, title=None):
+    def plot(self, ax=None, title=None, mode=None):
         """Draw the crystal and its cores. When defect.info['drawing'] records crossings, overlaps, crowded
         sites or folds left in the picture, a line saying how many is added to the title."""
+        if mode is not None:
+            from .gsv_elastic import plot_elastic
+            return plot_elastic(self, ax=ax, title=title, mode=mode)
         import matplotlib.pyplot as plt
 
         from .draw import drawing_note
@@ -501,6 +545,11 @@ class Configuration:
         title = title or self.total_charge()["label"]
         ax.set_title(f"{title}\n{note}" if note else title, fontsize=8.5)
         return ax
+
+    def relax_3d(self, kappa_b: float = 0.02, max_iter: int = 400):
+        """Relax this defect configuration in 3D under stretching and hinge bending."""
+        from ..surfaces.elastic import relax_configuration_3d
+        return relax_configuration_3d(self, kappa_b=kappa_b, max_iter=max_iter)
 
 
 def _fmt(s: dict) -> str:

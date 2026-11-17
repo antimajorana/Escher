@@ -2,7 +2,7 @@
 
 /// Two-loop L-BFGS minimization of `eval_fg(x, grad) -> energy`.
 /// Returns `(final_energy, iterations_used)`.
-pub(crate) fn lbfgs_minimize<F>(
+pub(super) fn lbfgs_minimize<F>(
     x: &mut [f64],
     max_iters: usize,
     grad_tol: f64,
@@ -17,7 +17,7 @@ where
         return (eval_fg(x, &mut g), 0);
     }
 
-    const M: usize = 8;
+    const M: usize = 32;
     let mut grad = vec![0.0; n];
     let mut f = eval_fg(x, &mut grad);
     if !f.is_finite() || grad.iter().any(|g| !g.is_finite()) {
@@ -94,15 +94,18 @@ where
         let mut step = 1.0_f64;
         let c1 = 1e-4;
         let mut accepted = false;
-        for _ls in 0..22 {
+        for _ls in 0..36 {
             for i in 0..n {
                 x_try[i] = x[i] + step * dir[i];
             }
             let f_try = eval_fg(&x_try, &mut g_try);
+            let near_floor = (-dg0) <= 1e-13 * (1.0 + f.abs())
+                && f_try <= f + 1e-14 * (1.0 + f.abs())
+                && rms_norm(&g_try) < rms_norm(&grad);
             if f_try.is_finite()
                 && g_try.iter().all(|g| g.is_finite())
                 && x_try.iter().all(|x| x.is_finite())
-                && f_try <= f + c1 * step * dg0
+                && (f_try <= f + c1 * step * dg0 || near_floor)
             {
                 f = f_try;
                 accepted = true;
@@ -149,7 +152,8 @@ where
             rho_hist.push(1.0 / sy);
         }
 
-        if step_max < 1e-11 {
+        let step_tol = (1e-3 * grad_tol).min(1e-13);
+        if step_max < step_tol && rms_norm(&grad) <= grad_tol {
             break;
         }
     }
@@ -256,7 +260,7 @@ pub(crate) fn center_and_align_horizontal(xyz: &mut [[f64; 3]], prefer_apex_up: 
 
 /// Exact cyclic Jacobi eigensolver for a 3x3 real symmetric matrix.
 /// Returns `(eigenvalues, eigenvectors_as_columns)`.
-fn jacobi_eigen_3x3(mut a: [[f64; 3]; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
+pub fn jacobi_eigen_3x3(mut a: [[f64; 3]; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
     let mut v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     for _ in 0..24 {
         let mut pq = (0usize, 1usize, a[0][1].abs());

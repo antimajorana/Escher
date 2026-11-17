@@ -14,6 +14,9 @@ impl CombineTabState {
             kind: rep.kind.clone(),
             equivalent: rep.equivalent,
             matches: rep.matches.clone(),
+            volterra_matches: rep.volterra_matches.clone(),
+            completion_matches: rep.completion_matches.clone(),
+            match_tier: Some(rep.match_tier.clone()),
             verdict: rep.verdict.clone(),
         });
         NotebookConfigJson {

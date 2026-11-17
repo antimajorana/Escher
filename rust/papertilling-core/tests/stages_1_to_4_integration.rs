@@ -127,17 +127,19 @@ fn end_to_end_stage3_unified_17x8_surface_table_and_3d_handlebody() {
                 other => panic!("{grp} {}: unexpected status {other}", r.surface),
             }
         }
-        // Frozen §9 check: p4g RP2 is single-class NOT FOUND; pmm and cmm RP2 succeed via retry schedule.
+        // Stage 1: alternating-centre p4g RP2 succeeds (V=6), zero NOT FOUND across all 136 cells.
         if grp == "p4g" {
             let rp2 = rows.iter().find(|r| r.surface == "projective plane").unwrap();
-            assert_eq!(rp2.status, "NOT FOUND");
+            assert_eq!(rp2.status, "OK");
+            assert_eq!(rp2.sites, Some(6));
         }
         if matches!(grp, "pmm" | "cmm") {
             let rp2 = rows.iter().find(|r| r.surface == "projective plane").unwrap();
             assert_eq!(rp2.status, "OK", "{grp} RP2 must succeed via (4,6) retry");
         }
     }
-    assert_eq!(ok_count + imp_count + nf_count, 136);
+    assert_eq!(nf_count, 0, "17x8 surface_table must have 0 NOT FOUND cells");
+    assert_eq!(ok_count + imp_count, 136);
     println!(
         "# time e2e stage3 unified 17x8 surface_table: {:.3} s (OK={ok_count}, IMP={imp_count}, NF={nf_count})",
         t0.elapsed().as_secs_f64()

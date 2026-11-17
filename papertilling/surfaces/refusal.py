@@ -6,18 +6,23 @@ refused at the settings tried; another size, centre or construction may work).
       SurfaceNotFound                   the construction refused at these settings; e.hint says what to try, e.tried
                                         lists what was tried
 
-THE TWO PROOFS USED (proved results, under the model of every surface in this package: the surface is the plane lattice,
+THE THREE PROOFS USED (proved results, under the model of every surface in this package: the surface is the plane lattice,
 glued by symmetries of the lattice, away from finitely many cone points (disclinations)). Carry the lattice along a closed
 loop that avoids the cones: it comes back moved by an isometry h of the plane (the holonomy), and h must map the lattice
 onto itself, so h is in the lattice's symmetry group G.
-  (a) A loop along which the surface's orientation reverses has an orientation-reversing h (a reflection or a glide). If
-      G has no mirror and no glide line (p1, p2, p3, p4, p6), no non-orientable surface carries the lattice: no Moebius
-      band, no Klein bottle, no projective plane.
-  (b) Around a cone point of total angle alpha, h is the rotation by alpha about that point, so alpha is a multiple of
-      360/n for an n-fold rotation centre of G (of 360 if the point is no rotation centre). If G has no rotation (p1, pm,
-      pg, cm), alpha is a positive multiple of 360 and the Frank angle 360 - alpha is <= 0. Gauss-Bonnet needs the Frank
-      angles to add up to 360 x chi: 720 on the sphere, 360 on the projective plane. So no sphere and no projective
+  (a) [scope="group"] A loop along which the surface's orientation reverses has an orientation-reversing h (a reflection or a
+      glide). If G has no mirror and no glide line (p1, p2, p3, p4, p6), no non-orientable surface carries the lattice: no
+      Moebius band, no Klein bottle, no projective plane.
+  (b) [scope="group"] Around a cone point of total angle alpha, h is the rotation by alpha about that point, so alpha is a
+      multiple of 360/n for an n-fold rotation centre of G (of 360 if the point is no rotation centre). If G has no rotation
+      (p1, pm, pg, cm), alpha is a positive multiple of 360 and the Frank angle 360 - alpha is <= 0. Gauss-Bonnet needs the
+      Frank angles to add up to 360 x chi: 720 on the sphere, 360 on the projective plane. So no sphere and no projective
       plane carry the lattice.
+  (c) [scope="lattice"] Local cone obstruction: on a closed surface with chi > 0, Gauss-Bonnet requires at least one cone
+      (c, alpha > 0) at a rotation centre c of order n >= 2 with alpha = k * 360/n (1 <= k < n). If EVERY rotation centre c
+      of the lattice fails local graph validity for every 1 <= k < n (bond midpoint/on a bond folds into a loop; face centre
+      leaves < 3 or non-integer sides; site forces degree < 2, non-integer degree, or a loop/double bond in its local 1-ring),
+      no sphere or projective plane carries the lattice.
 G here is the lattice's full symmetry group, found on the cell by symmetry_facts (every isometry that maps the
 lattice's sites onto sites and bonds onto bonds, modulo translations), not only the group's label.
 """
@@ -47,11 +52,15 @@ class SurfaceRefused(ValueError):
 
 
 class SurfaceImpossible(SurfaceRefused):
-    """Proved from the lattice's symmetry group: no surface of this kind carries the lattice (see the module notes)."""
+    """Proved from the lattice's symmetry group or local cone obstruction: no surface of this kind carries the
+    lattice (see the module notes). scope: 'group' (proofs a/b) or 'lattice' (proof c)."""
 
     status = "IMPOSSIBLE"
 
-    def __init__(self, reason, detail="", tried=None, hint=None, retry=False):
+    def __init__(self, reason, detail="", tried=None, hint=None, retry=False, scope="group"):
+        if scope not in ("group", "lattice"):
+            raise ValueError(f"invalid SurfaceImpossible scope {scope!r}: expected 'group' or 'lattice'")
+        self.scope = scope
         super().__init__(reason, detail, tried, hint, retry=False)
 
 

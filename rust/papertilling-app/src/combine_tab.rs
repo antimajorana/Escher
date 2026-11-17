@@ -3,22 +3,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use papertilling_core::defect::combine_types::EquivalentSingleReport;
+use papertilling_core::defect::kinematics::AbsorptionPreview;
 use papertilling_core::defect::surgery::DefectSpec;
 
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::{Canvas2D, CanvasCutRay, CanvasMarker, MarkerKind, Scene2D};
+use crate::combine_half_wall_ui::CombineHalfWallState;
 use crate::combine_worker::{
     BuildJob, BuildWorkerOutput, CombineSheet3dBundle, CompareJob, CompareOutput, LatestWorker,
     build_sheet_bundle_sync, empty_crystal, spawn_build_worker, spawn_compare_worker,
     spawn_lattice_worker,
 };
 use crate::core_panel::CorePanelState;
+use crate::defects_inspectors::DefectInspectors;
 use crate::live_combine::{
     CombineBuildOptions, CombineBuildOutput, CombineDrawMode, CombineLatticeInfo, build_combined_crystal,
     burgers_from_mn, cuts::build_cut_rays, preset_neighbour_pair, preset_shortest_dislocation,
     spec_short_label, spec_world_pos,
 };
-use crate::mesh3d::{DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d, sheet3d_caption};
+use crate::mesh3d::{
+    DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d_with_spectral, sheet3d_caption,
+};
 use crate::view3d::View3dState;
 
 /// Manual patch radius range (slider and `.json` import): covers Python's default radii.
@@ -30,6 +35,7 @@ pub enum ToolMode {
     PanAndDrag,
     PlaceDisclination,
     PlaceDislocation,
+    PlaceHalfWall,
 }
 
 /// Combine tab. Building the crystal and comparing it with the single defect run on two background
@@ -47,6 +53,13 @@ pub struct CombineTabState {
     pub auto_compare: bool,
     pub grid: usize,
     pub show_branch_cuts: bool,
+    pub show_glide_lines: bool,
+    pub motion_mode: MotionMode,
+    pub kinematic_status: String,
+    pub(crate) drag_anchor: Option<(usize, Vec<DefectSpec>)>,
+    pub(crate) pending_disc_step: Option<kinematics::PendingDiscStep>,
+    pub(crate) pending_absorb: Option<AbsorptionPreview>,
+    pub(crate) undo_stack: Vec<Vec<DefectSpec>>,
     pub view_mode: DefectViewMode,
     pub sheet_opts: Sheet3dViewOpts,
     pub(crate) last_build: CombineBuildOutput,
@@ -67,6 +80,8 @@ pub struct CombineTabState {
     pub json_status: String,
     pub(crate) init_error: Option<String>,
     pub core_panel: CorePanelState,
+    pub half_wall: CombineHalfWallState,
+    pub inspectors: DefectInspectors,
     builder: LatestWorker<BuildJob, BuildWorkerOutput>,
     comparer: LatestWorker<CompareJob, CompareOutput>,
     initializer: LatestWorker<CatalogueItemUi, Arc<CombineLatticeInfo>>,
@@ -99,6 +114,13 @@ impl CombineTabState {
             auto_compare: true,
             grid: 1,
             show_branch_cuts: false,
+            show_glide_lines: true,
+            motion_mode: MotionMode::Conserved,
+            kinematic_status: String::new(),
+            drag_anchor: None,
+            pending_disc_step: None,
+            pending_absorb: None,
+            undo_stack: Vec::new(),
             view_mode: DefectViewMode::Split2D3D,
             sheet_opts,
             last_build,
@@ -118,6 +140,8 @@ impl CombineTabState {
             json_status: String::new(),
             init_error: None,
             core_panel: CorePanelState::default(),
+            half_wall: CombineHalfWallState::from_item(gallery_item),
+            inspectors: DefectInspectors::new(),
             builder: spawn_build_worker(),
             comparer: spawn_compare_worker(),
             initializer: spawn_lattice_worker(),
@@ -150,6 +174,9 @@ impl CombineTabState {
     }
 
     fn reset_lattice_defaults(&mut self, gallery_item: &CatalogueItemUi, info: CombineLatticeInfo) {
+        self.clear_kinematic_drag_state(true);
+        self.inspectors.clear_for_switch();
+        self.half_wall.refresh(gallery_item);
         self.init_error = None;
         self.selected_angle_deg = info.allowed_angles.first().copied().unwrap_or(90);
         self.centre_filter_idx = 0;
@@ -167,6 +194,8 @@ impl CombineTabState {
     }
 
     pub fn reload_for_item(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, canvas: &mut Canvas2D, sync_canvas: bool) {
+        self.clear_kinematic_drag_state(true);
+        self.inspectors.clear_for_switch();
         self.override_item = None;
         self.init_error = None;
         self.builder.cancel();
@@ -270,7 +299,7 @@ impl CombineTabState {
     }
 
     /// Collect finished jobs (call every frame while the tab is shown); `ctx` lets workers wake the UI.
-    pub fn poll(&mut self, ctx: Option<&egui::Context>, gallery_item: &CatalogueItemUi, canvas: Option<&mut Canvas2D>) {
+    pub fn poll(&mut self, ctx: Option<&egui::Context>, gallery_item: &CatalogueItemUi, mut canvas: Option<&mut Canvas2D>) {
         if let Some(ctx) = ctx {
             self.initializer.set_repaint_ctx(ctx);
             self.builder.set_repaint_ctx(ctx);
@@ -279,7 +308,9 @@ impl CombineTabState {
         if let Some(result) = self.initializer.poll() { self.take_init(result, gallery_item); }
         if let Some(res) = self.builder.poll() {
             self.take_build(res);
+            self.on_combine_build_landed(gallery_item);
         }
+        self.poll_spectrum_inspector(ctx, gallery_item, canvas.as_deref_mut());
         if self.compare_after_build && !self.builder.is_busy() && !self.last_build.preview {
             self.compare_after_build = false;
             self.submit_compare(gallery_item);
@@ -308,6 +339,7 @@ impl CombineTabState {
             }
             if let Some(res) = self.builder.wait(Duration::from_secs(120)) {
                 self.take_build(res);
+                self.on_combine_build_landed(gallery_item);
             }
             self.poll(None, gallery_item, canvas.as_deref_mut());
             if let Some(res) = self.comparer.wait(Duration::from_secs(300)) {
@@ -364,7 +396,12 @@ impl CombineTabState {
         } else {
             (&self.last_build.crystal, &self.last_sheet3d.sheet)
         };
-        let gpu = mesh_from_sheet3d(c, s, &self.sheet_opts);
+        let gpu = mesh_from_sheet3d_with_spectral(
+            c,
+            s,
+            &self.sheet_opts,
+            self.inspectors.spectral_3d_for(self.sheet_opts.color_mode),
+        );
         let mut cap = sheet3d_caption(&title, s, &self.sheet_opts);
         if self.is_building() { cap.push_str(" | previous result — stale"); }
         view3d.set_mesh(gpu, cap);
@@ -434,22 +471,32 @@ impl CombineTabState {
         canvas.set_scene(Scene2D::CrystalPatch { crystal: self.last_build.crystal.clone(), title, note: self.last_build.note.clone() }, reset_view);
         canvas.set_export_markers(&self.build_markers());
         canvas.set_cut_rays(&self.current_cut_rays());
+        canvas.set_kinematic_overlay(self.current_kinematic_overlay());
+        self.sync_inspectors_to_canvas(gallery_item, canvas);
     }
 
     pub fn apply_preset_pair(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
         if self.lattice_unavailable() { return; }
+        self.push_undo();
+        self.clear_kinematic_drag_state(false);
         self.specs = preset_neighbour_pair(&self.info);
         self.request_build(gallery_item, false, self.auto_compare, true);
     }
 
     pub fn apply_preset_dislocation(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
         if self.lattice_unavailable() { return; }
+        self.push_undo();
+        self.clear_kinematic_drag_state(false);
         self.specs = preset_shortest_dislocation(&self.info);
         self.request_build(gallery_item, false, self.auto_compare, true);
     }
 
     pub fn clear_defects(&mut self, gallery_item: &CatalogueItemUi, _backend: &AppBackend, _canvas: &mut Canvas2D) {
         if self.lattice_unavailable() { return; }
+        if !self.specs.is_empty() {
+            self.push_undo();
+        }
+        self.clear_kinematic_drag_state(false);
         self.specs.clear();
         self.request_build(gallery_item, false, false, true);
     }
@@ -469,62 +516,48 @@ impl CombineTabState {
     }
 
     pub fn place_at_world(&mut self, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, _canvas: &mut Canvas2D) {
-        if self.lattice_unavailable() { return; }
-        let item = self.effective_item(gallery_item);
+        if self.lattice_unavailable() || self.tool_mode == ToolMode::PanAndDrag {
+            return;
+        }
         match self.tool_mode {
             ToolMode::PanAndDrag => return,
             ToolMode::PlaceDisclination => {
                 if self.info.centres.is_empty() {
                     return;
                 }
+                self.push_undo();
+                self.clear_kinematic_drag_state(false);
                 let (cid, ang) = self.active_centre_and_angle();
+                let item = self.effective_item(gallery_item);
                 let (snapped, _) = backend.snap_disclination(item, &self.info, ang, cid, world);
                 self.specs.push(DefectSpec::disclination(ang, snapped));
             }
             ToolMode::PlaceDislocation => {
+                self.push_undo();
+                self.clear_kinematic_drag_state(false);
                 if self.custom_mn == (0, 0) {
                     self.custom_mn = (1, 0);
                 }
                 let b = burgers_from_mn(&self.info, self.custom_mn.0, self.custom_mn.1);
                 self.specs.push(DefectSpec::dislocation(b, Some(world)));
             }
+            ToolMode::PlaceHalfWall => {
+                self.place_half_wall_at(world);
+            }
         }
         self.request_build(gallery_item, false, self.auto_compare, false);
     }
 
-    /// Move pin `idx` during a drag: cheap preview build; `finish_drag` does the full one.
-    pub fn move_pin_to(&mut self, idx: usize, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, _canvas: &mut Canvas2D) -> bool {
-        if self.lattice_unavailable() { return false; }
-        let item = self.effective_item(gallery_item);
-        let Some(old_pos) = self.specs.get(idx).map(|s| spec_world_pos(&self.info, idx, s)) else {
-            return false;
-        };
-        let new_spec = match self.specs[idx] {
-            DefectSpec::Disclination { angle_deg, cut, .. } => {
-                let (snapped, _) = backend.snap_disclination(item, &self.info, angle_deg, None, world);
-                if (snapped[0] - old_pos[0]).hypot(snapped[1] - old_pos[1]) < 1e-6 {
-                    return false;
-                }
-                DefectSpec::Disclination { angle_deg, at: snapped, cut }
-            }
-            DefectSpec::Dislocation { b, cut, .. } => {
-                if (world[0] - old_pos[0]).hypot(world[1] - old_pos[1]) < 1e-4 {
-                    return false;
-                }
-                DefectSpec::Dislocation { b, at: Some(world), cut }
-            }
-        };
-        self.specs[idx] = new_spec;
-        self.dragging = true;
-        self.request_build(gallery_item, true, false, false);
-        true
+    /// Move pin `idx` during a drag (respecting active `MotionMode` and `shift_held` overrides).
+    #[cfg(test)]
+    pub fn move_pin_to(&mut self, idx: usize, world: [f64; 2], gallery_item: &CatalogueItemUi, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
+        self.move_pin_with_mods(idx, world, false, gallery_item, backend, canvas)
     }
 
-    /// Drag released: full build, then compare when automatic comparison is on.
+    /// Drag released: apply kinematic transition / parallel transport, then full build + compare.
+    #[cfg(test)]
     pub fn finish_drag(&mut self, gallery_item: &CatalogueItemUi) {
-        if std::mem::take(&mut self.dragging) {
-            self.request_build(gallery_item, false, self.auto_compare, false);
-        }
+        self.finish_drag_kinematics(gallery_item, None);
     }
 
     /// A comparison result that matches the current defects (for the `.json` summary).
@@ -540,7 +573,7 @@ impl CombineTabState {
             kind: match *s {
                 DefectSpec::Disclination { angle_deg, .. } if angle_deg >= 0.0 => MarkerKind::DisclinationPlus,
                 DefectSpec::Disclination { .. } => MarkerKind::DisclinationMinus,
-                DefectSpec::Dislocation { .. } => MarkerKind::Dislocation,
+                DefectSpec::Dislocation { .. } | DefectSpec::HalfWall { .. } => MarkerKind::Dislocation,
             },
             label: spec_short_label(&self.info, s),
         }).collect()
@@ -549,6 +582,10 @@ impl CombineTabState {
 
 #[path = "combine_json.rs"]
 mod json;
+
+#[path = "combine_kinematics.rs"]
+mod kinematics;
+pub use kinematics::MotionMode;
 
 #[cfg(test)]
 #[path = "combine_tab_tests.rs"]

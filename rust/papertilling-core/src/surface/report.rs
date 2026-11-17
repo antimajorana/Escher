@@ -74,6 +74,7 @@ pub struct SurfaceTableRow {
     pub surface: String,
     pub status: String,
     pub reason: String,
+    pub scope: Option<String>,
     pub mesh: Option<SurfaceMesh>,
     pub sites: Option<usize>,
     pub cones: String,
@@ -84,15 +85,15 @@ pub struct SurfaceTableRow {
 impl SurfaceTableRow {
     fn ok(surface: &str, reason: String, mesh: SurfaceMesh, tried: Vec<String>) -> Self {
         let (sites, cones) = (mesh.sites.len(), cone_summary(&mesh));
-        Self { surface: surface.into(), status: "OK".into(), reason, mesh: Some(mesh), sites: Some(sites), cones, tried, hint: None }
+        Self { surface: surface.into(), status: "OK".into(), reason, scope: None, mesh: Some(mesh), sites: Some(sites), cones, tried, hint: None }
     }
 
-    fn impossible(surface: &str, reason: String, tried: Vec<String>) -> Self {
-        Self { surface: surface.into(), status: "IMPOSSIBLE".into(), reason, mesh: None, sites: None, cones: "-".into(), tried, hint: None }
+    fn impossible(surface: &str, reason: String, scope: &str, tried: Vec<String>) -> Self {
+        Self { surface: surface.into(), status: "IMPOSSIBLE".into(), reason, scope: Some(scope.into()), mesh: None, sites: None, cones: "-".into(), tried, hint: None }
     }
 
     fn not_found(surface: &str, reason: String, tried: Vec<String>, hint: Option<String>) -> Self {
-        Self { surface: surface.into(), status: "NOT FOUND".into(), reason, mesh: None, sites: None, cones: "-".into(), tried, hint }
+        Self { surface: surface.into(), status: "NOT FOUND".into(), reason, scope: None, mesh: None, sites: None, cones: "-".into(), tried, hint }
     }
 
     pub fn to_verdict(&self) -> SurfaceVerdict {
@@ -109,7 +110,7 @@ impl SurfaceTableRow {
                     .collect();
                 SurfaceVerdict::Ok { vertices: m.sites.len(), edges: m.bonds.len(), faces: m.faces.len(), orientable: m.orientable, cones }
             }
-            "IMPOSSIBLE" => SurfaceVerdict::Impossible { reason: self.reason.clone() },
+            "IMPOSSIBLE" => SurfaceVerdict::Impossible { reason: self.reason.clone(), scope: self.scope.clone().unwrap_or_else(|| "group".into()) },
             _ => SurfaceVerdict::NotFound { reason: self.reason.clone(), hint: self.hint.clone() },
         }
     }
@@ -182,7 +183,7 @@ pub fn try_poly_for_table_with_centre(group: &str, cell: &Cell2D, projective: bo
     let name = if projective { "projective plane" } else { "sphere" };
     let facts = symmetry_facts(group);
     if let Some(reason) = facts.impossible_reason(name) {
-        return SurfaceTableRow::impossible(name, reason, vec!["default".into()]);
+        return SurfaceTableRow::impossible(name, reason, "group", vec!["default".into()]);
     }
     let (mut tried, mut whys, mut last_err): (Vec<String>, Vec<String>, Option<SurfaceError>) = (Vec::new(), Vec::new(), None);
     for sz in polyhedron_attempts(name, facts.max_rotation_order()) {
@@ -198,7 +199,7 @@ pub fn try_poly_for_table_with_centre(group: &str, cell: &Cell2D, projective: bo
             Err(e) => {
                 tried.push(kw);
                 if matches!(e.kind, RefusalKind::Impossible) {
-                    return SurfaceTableRow::impossible(name, e.reason.clone(), tried);
+                    return SurfaceTableRow::impossible(name, e.reason.clone(), e.scope.unwrap_or("group"), tried);
                 }
                 let retry = matches!(e.kind, RefusalKind::NotFound { retry: true });
                 if !whys.contains(&e.reason) {
@@ -237,7 +238,7 @@ fn run_hook_row<A: std::fmt::Debug>(
     mut f: impl FnMut(&A) -> Result<SurfaceMesh, SurfaceError>,
 ) -> SurfaceTableRow {
     if let Some(reason) = facts.impossible_reason(surface) {
-        return SurfaceTableRow::impossible(surface, reason, vec!["default".into()]);
+        return SurfaceTableRow::impossible(surface, reason, "group", vec!["default".into()]);
     }
     let (mut tried, mut whys, mut last_hint) = (Vec::new(), Vec::new(), None);
     for att in attempts {
@@ -251,7 +252,7 @@ fn run_hook_row<A: std::fmt::Debug>(
             }
             Err(e) => {
                 if matches!(e.kind, RefusalKind::Impossible) {
-                    return SurfaceTableRow::impossible(surface, e.reason.clone(), tried);
+                    return SurfaceTableRow::impossible(surface, e.reason.clone(), e.scope.unwrap_or("group"), tried);
                 }
                 last_hint = e.hint.clone();
                 let retry = matches!(e.kind, RefusalKind::NotFound { retry: true });

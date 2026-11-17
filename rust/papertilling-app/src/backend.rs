@@ -246,9 +246,19 @@ impl VerdictKindUi {
 #[derive(Clone, Debug)]
 pub struct SurfaceCellVerdictUi {
     pub verdict: VerdictKindUi,
+    pub scope: Option<String>,
     pub sites: Option<usize>,
     pub cones_summary: String,
     pub reason: String,
+}
+
+impl SurfaceCellVerdictUi {
+    pub fn scoped_badge(&self) -> String {
+        match (self.verdict, self.scope.as_deref()) {
+            (VerdictKindUi::Impossible, Some(sc)) => format!("IMPOSSIBLE ({sc})"),
+            _ => self.verdict.badge().to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -310,6 +320,8 @@ pub struct WallEntryUi {
     pub direction_mn: (i32, i32),
     pub description: String,
     pub default_note: String,
+    pub can_end_orientable: bool,
+    pub ending_summary: String,
 }
 
 #[derive(Clone, Debug, Default)]

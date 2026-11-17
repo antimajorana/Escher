@@ -11,7 +11,8 @@ use crate::defect::core_graph::{
     sub2, total_frank,
 };
 use crate::defect::cone_geometry::{add2, cross2, dot2};
-use crate::types::{BuiltCrystal, Cell2D};
+use crate::defect::half_wall::{ResolvedHalfWall, build_half_wall_raw, resolve_half_wall_spec};
+use crate::types::{BuiltCrystal, Cell2D, Isometry2};
 
 /// Cut ray used for one effective defect during `build_point_defects_with_cuts`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +44,15 @@ pub enum DefectSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cut: Option<[f64; 2]>,
     },
+    HalfWall {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wall_id: Option<String>,
+        at: [f64; 2],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        direction: Option<[f64; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sigma: Option<([[f64; 2]; 2], [f64; 2])>,
+    },
 }
 
 impl DefectSpec {
@@ -52,6 +62,15 @@ impl DefectSpec {
 
     pub fn disclination(angle_deg: f64, at: [f64; 2]) -> Self {
         Self::Disclination { angle_deg, at, cut: None }
+    }
+
+    pub fn half_wall(
+        wall_id: Option<&str>,
+        at: [f64; 2],
+        direction: Option<[f64; 2]>,
+        sigma: Option<([[f64; 2]; 2], [f64; 2])>,
+    ) -> Self {
+        Self::HalfWall { wall_id: wall_id.map(str::to_string), at, direction, sigma }
     }
 }
 
@@ -64,29 +83,38 @@ struct NormSpec {
     cut: Option<[f64; 2]>,
 }
 
-fn validate_specs(lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> Result<Vec<NormSpec>, String> {
+fn validate_specs(
+    lat_info: &LatticeCoreInfo,
+    specs: &[DefectSpec],
+) -> Result<(Vec<NormSpec>, Option<ResolvedHalfWall>), String> {
     if specs.is_empty() {
         return Err("give at least one defect spec".to_string());
     }
     let lat = &lat_info.lat;
     let mut out = Vec::with_capacity(specs.len());
+    let mut hw: Option<ResolvedHalfWall> = None;
     let mut total_frank_req = 0.0;
     for (idx, s) in specs.iter().enumerate() {
-        let (point, cut, finite_charge) = match *s {
-            DefectSpec::Dislocation { b, at, cut } => (at, cut, b.iter().all(|x| x.is_finite())),
-            DefectSpec::Disclination { angle_deg, at, cut } => (Some(at), cut, angle_deg.is_finite()),
+        let (point, cut, finite_charge) = match s {
+            DefectSpec::Dislocation { b, at, cut } => (*at, *cut, b.iter().all(|x| x.is_finite())),
+            DefectSpec::Disclination { angle_deg, at, cut } => (Some(*at), *cut, angle_deg.is_finite()),
+            DefectSpec::HalfWall { at, direction, sigma, .. } => {
+                let dir_ok = direction.is_none_or(|d| d.iter().all(|x| x.is_finite()));
+                let sig_ok = sigma.is_none_or(|(m, t)| m.iter().flatten().chain(&t).all(|x| x.is_finite()));
+                (Some(*at), None, dir_ok && sig_ok)
+            }
         };
         if !finite_charge || point.is_some_and(|p| p.iter().any(|x| !x.is_finite()))
             || cut.is_some_and(|c| c.iter().any(|x| !x.is_finite()) || norm2(c) == 0.0) {
             return Err(format!("spec {}: charge, position and non-zero cut direction must be finite", idx + 1));
         }
-        match *s {
+        match s {
             DefectSpec::Dislocation { b, at, cut } => {
-                let f = mat2_vec(lat.a_inv, b);
+                let f = mat2_vec(lat.a_inv, *b);
                 if f.iter().any(|v| !v.is_finite() || v.abs() > (i32::MAX - 8) as f64) {
                     return Err(format!("spec {}: Burgers vector exceeds supported lattice indices", idx + 1));
                 }
-                if norm2(b) < 1e-9
+                if norm2(*b) < 1e-9
                     || (f[0] - f[0].round_ties_even()).abs() > 1e-6
                     || (f[1] - f[1].round_ties_even()).abs() > 1e-6
                 {
@@ -96,13 +124,13 @@ fn validate_specs(lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> Result<Ve
                     (0.371 + 3.0 * idx as f64) * lat.cell.a1[0] + 0.413 * lat.cell.a2[0],
                     (0.371 + 3.0 * idx as f64) * lat.cell.a1[1] + 0.413 * lat.cell.a2[1],
                 ];
-                out.push(NormSpec { is_disloc: true, b, angle_deg: 0.0, at: at.unwrap_or(def_at), cut });
+                out.push(NormSpec { is_disloc: true, b: *b, angle_deg: 0.0, at: at.unwrap_or(def_at), cut: *cut });
             }
             DefectSpec::Disclination { angle_deg, at, cut } => {
                 if angle_deg.abs() < 1e-9 || angle_deg.abs() >= 360.0 - 1e-9 {
                     return Err(format!("spec {}: disclination needs 0 < |angle| < 360", idx + 1));
                 }
-                if !lat.is_symmetry(&rotation_about(at, angle_deg.to_radians()), 2.2) {
+                if !lat.is_symmetry(&rotation_about(*at, angle_deg.to_radians()), 2.2) {
                     return Err(format!(
                         "spec {}: rotation by {} deg about {:?} is not a lattice symmetry",
                         idx + 1,
@@ -110,8 +138,17 @@ fn validate_specs(lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> Result<Ve
                         at
                     ));
                 }
-                total_frank_req += angle_deg;
-                out.push(NormSpec { is_disloc: false, b: [0.0, 0.0], angle_deg, at, cut });
+                total_frank_req += *angle_deg;
+                out.push(NormSpec { is_disloc: false, b: [0.0, 0.0], angle_deg: *angle_deg, at: *at, cut: *cut });
+            }
+            DefectSpec::HalfWall { wall_id, at, direction, sigma } => {
+                if hw.is_some() {
+                    return Err("at most one half_wall spec is supported per configuration".to_string());
+                }
+                let sig_iso = sigma.map(|(m, t)| Isometry2 { m, t });
+                let resolved = resolve_half_wall_spec(&lat.cell, wall_id.as_deref(), sig_iso, *at, *direction)?;
+                total_frank_req += resolved.ending.frank_angle_deg.unwrap_or(0.0);
+                hw = Some(resolved);
             }
         }
     }
@@ -120,7 +157,44 @@ fn validate_specs(lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> Result<Ve
             "total Frank angle {total_frank_req:+} deg >= 360 deg: an open patch cannot close into a cone"
         ));
     }
-    Ok(out)
+    Ok((out, hw))
+}
+
+fn centre_and_radius_from_validated(
+    lat_info: &LatticeCoreInfo,
+    norm: &[NormSpec],
+    hw: Option<&ResolvedHalfWall>,
+    r_opt: Option<f64>,
+    centre_opt: Option<[f64; 2]>,
+) -> Result<([f64; 2], f64), String> {
+    if let (true, Some(hw_res)) = (norm.is_empty(), hw) {
+        let ctr = centre_opt.unwrap_or(hw_res.at);
+        let rh = hw_res.holonomy.m;
+        let t_rel = add2(sub2(mat2_vec(rh, hw_res.at), hw_res.at), hw_res.holonomy.t);
+        let r = r_opt.unwrap_or_else(|| (8.5 * lat_info.lmax + norm2(t_rel)).max(4.0 * lat_info.scale));
+        return validate_extent(lat_info, ctr, r);
+    }
+    let pts: Vec<[f64; 2]> = norm.iter().map(|s| s.at).chain(hw.map(|h| h.at)).collect();
+    let n = pts.len() as f64;
+    let ctr = centre_opt.unwrap_or_else(|| [pts.iter().map(|p| p[0]).sum::<f64>() / n, pts.iter().map(|p| p[1]).sum::<f64>() / n]);
+    let r = r_opt.unwrap_or_else(|| {
+        let max_b = norm.iter().filter(|s| s.is_disloc).map(|s| norm2(s.b)).chain(hw.map(|h| norm2(h.holonomy.t))).fold(0.0_f64, f64::max);
+        let max_d = pts.iter().map(|&p| norm2(sub2(p, ctr))).fold(0.0_f64, f64::max);
+        max_d + (12.5 * lat_info.lmax + max_b).max(5.0 * lat_info.scale)
+    });
+    validate_extent(lat_info, ctr, r)
+}
+
+fn validate_extent(lat_info: &LatticeCoreInfo, ctr: [f64; 2], r: f64) -> Result<([f64; 2], f64), String> {
+    let fc = mat2_vec(lat_info.lat.a_inv, ctr);
+    let cell = &lat_info.lat.cell;
+    let h = (cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0]).abs()
+        / norm2(cell.a1).max(norm2(cell.a2)).max(1e-12);
+    let span = (r / h.max(1e-12)).ceil() + 2.0;
+    if !r.is_finite() || r <= 0.0 || fc.iter().any(|x| !x.is_finite() || x.abs() + span >= (i32::MAX - 4) as f64) {
+        return Err("patch extent exceeds supported finite lattice indices".to_string());
+    }
+    Ok((ctr, r))
 }
 
 /// Compute the patch `(centre, R)` chosen by `build_point_defects`.
@@ -134,28 +208,8 @@ pub fn patch_centre_and_radius(
         || centre_opt.is_some_and(|p| p.iter().any(|x| !x.is_finite())) {
         return Err("patch radius must be finite and positive; centre must be finite".to_string());
     }
-    let norm = validate_specs(lat_info, specs)?;
-    let n = norm.len() as f64;
-    let ctr = centre_opt.unwrap_or_else(|| {
-        [
-            norm.iter().map(|s| s.at[0]).sum::<f64>() / n,
-            norm.iter().map(|s| s.at[1]).sum::<f64>() / n,
-        ]
-    });
-    let r = r_opt.unwrap_or_else(|| {
-        let max_b = norm.iter().filter(|s| s.is_disloc).map(|s| norm2(s.b)).fold(0.0_f64, f64::max);
-        let max_d = norm.iter().map(|s| norm2(sub2(s.at, ctr))).fold(0.0_f64, f64::max);
-        max_d + (12.5 * lat_info.lmax + max_b).max(5.0 * lat_info.scale)
-    });
-    let fc = mat2_vec(lat_info.lat.a_inv, ctr);
-    let cell = &lat_info.lat.cell;
-    let h = (cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0]).abs()
-        / norm2(cell.a1).max(norm2(cell.a2)).max(1e-12);
-    let span = (r / h.max(1e-12)).ceil() + 2.0;
-    if !r.is_finite() || r <= 0.0 || fc.iter().any(|x| !x.is_finite() || x.abs() + span >= (i32::MAX - 4) as f64) {
-        return Err("patch extent exceeds supported finite lattice indices".to_string());
-    }
-    Ok((ctr, r))
+    let (norm, hw) = validate_specs(lat_info, specs)?;
+    centre_and_radius_from_validated(lat_info, &norm, hw.as_ref(), r_opt, centre_opt)
 }
 
 fn coalesce_coincident_specs(specs: &[NormSpec]) -> Result<Vec<NormSpec>, String> {
@@ -339,12 +393,30 @@ pub fn build_point_defects_with_cuts(
         || cell.bonds.iter().any(|b| b.i >= cell.basis.len() || b.j >= cell.basis.len()) {
         return Err("invalid lattice cell: finite independent vectors, sites and valid bonds are required".to_string());
     }
+    if r_opt.is_some_and(|r| !r.is_finite() || r <= 0.0)
+        || centre_opt.is_some_and(|p| p.iter().any(|x| !x.is_finite())) {
+        return Err("patch radius must be finite and positive; centre must be finite".to_string());
+    }
     let lat_info = LatticeCoreInfo::new(cell);
-    let norm = validate_specs(&lat_info, specs)?;
-    let (ctr, r_patch) = patch_centre_and_radius(&lat_info, specs, r_opt, centre_opt)?;
+    let (norm, hw) = validate_specs(&lat_info, specs)?;
+    let (ctr, r_patch) = centre_and_radius_from_validated(&lat_info, &norm, hw.as_ref(), r_opt, centre_opt)?;
+    if let (true, Some(hw_res)) = (norm.is_empty(), hw.as_ref()) {
+        let built = build_half_wall_raw(&lat_info, hw_res, Some(r_patch), Some(ctr), true)?;
+        return Ok((built.crystal, Vec::new(), 0));
+    }
     let eff = coalesce_coincident_specs(&norm)?;
+    let hw_frank = hw.as_ref().and_then(|h| h.ending.frank_angle_deg).unwrap_or(0.0);
+    let expected_frank: f64 = eff.iter().filter(|s| !s.is_disloc).map(|s| s.angle_deg).sum::<f64>() + hw_frank;
+    if expected_frank >= 360.0 - 1e-6 {
+        return Err(format!("total Frank angle {expected_frank:+} deg >= 360 deg: an open patch cannot close into a cone"));
+    }
     let coalesced = norm.len().saturating_sub(eff.len());
-    let mut builder = ConeBuilder::new(&lat_info, ctr, r_patch);
+    let mut builder = if let Some(ref hw_res) = hw {
+        let built = build_half_wall_raw(&lat_info, hw_res, Some(r_patch), Some(ctr), false)?;
+        ConeBuilder::from_half_wall(&lat_info, ctr, r_patch, built.sites, built.crystal)
+    } else {
+        ConeBuilder::new(&lat_info, ctr, r_patch)
+    };
     let mut applied_cuts = Vec::with_capacity(eff.len());
     for (idx, d) in eff.iter().enumerate() {
         let cuts = match d.cut {
@@ -394,7 +466,6 @@ pub fn build_point_defects_with_cuts(
         }
     }
     let crystal = builder.finish()?;
-    let expected_frank: f64 = eff.iter().filter(|s| !s.is_disloc).map(|s| s.angle_deg).sum();
     if lat_info.planar {
         let frames_bad = check_frames(&crystal);
         let faces = frame_faces(&crystal);

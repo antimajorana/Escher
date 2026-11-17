@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
+use crate::defect::gsv_model::{GsvModel, StretchTerm, eval_gsv_fg};
 use crate::types::BuiltCrystal;
 
 #[derive(Clone, Copy)]
@@ -18,6 +19,7 @@ pub(crate) struct Hinge {
     pub opp_a: HingePt,
     pub opp_b: HingePt,
     pub weight: f64,
+    pub sign: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -26,11 +28,14 @@ pub(crate) struct Spring {
     pub v: usize,
     pub l0: f64,
     pub weight: f64,
+    #[allow(dead_code)]
     pub is_primary_bond: bool,
 }
 
+type EdgeIncidence = Vec<(usize, HingePt, i32, usize, usize)>;
+
 pub(crate) fn build_hinges(faces: &[Vec<usize>]) -> Vec<Hinge> {
-    let mut edge_map: HashMap<(usize, usize), Vec<(usize, HingePt)>> = HashMap::new();
+    let mut edge_map: HashMap<(usize, usize), EdgeIncidence> = HashMap::new();
     let mut hinges = Vec::new();
 
     for (fi, f) in faces.iter().enumerate() {
@@ -43,10 +48,11 @@ pub(crate) fn build_hinges(faces: &[Vec<usize>]) -> Vec<Hinge> {
             } else {
                 HingePt::FaceCentroid(fi)
             };
+            let dir = if u < v { 1 } else { -1 };
             edge_map
                 .entry((u.min(v), u.max(v)))
                 .or_default()
-                .push((fi, opp));
+                .push((fi, opp, dir, u, v));
         }
         if k >= 4 {
             let c_pt = HingePt::FaceCentroid(fi);
@@ -60,6 +66,7 @@ pub(crate) fn build_hinges(faces: &[Vec<usize>]) -> Vec<Hinge> {
                     opp_a: HingePt::Vert(prev),
                     opp_b: HingePt::Vert(next),
                     weight: 0.5,
+                    sign: 1.0,
                 });
             }
         }
@@ -70,12 +77,15 @@ pub(crate) fn build_hinges(faces: &[Vec<usize>]) -> Vec<Hinge> {
     for (u, v) in keys {
         let inc = &edge_map[&(u, v)];
         if inc.len() == 2 && inc[0].0 != inc[1].0 {
+            let (_, opp_a, _, u0, v0) = inc[0];
+            let (_, opp_b, _, _, _) = inc[1];
             hinges.push(Hinge {
-                p: HingePt::Vert(u),
-                q: HingePt::Vert(v),
-                opp_a: inc[0].1,
-                opp_b: inc[1].1,
+                p: HingePt::Vert(u0),
+                q: HingePt::Vert(v0),
+                opp_a,
+                opp_b,
                 weight: 1.0,
+                sign: 1.0,
             });
         }
     }
@@ -90,72 +100,17 @@ pub(crate) fn dist3_at(x: &[f64], u: usize, v: usize) -> f64 {
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
-pub(crate) fn eval_2d_stretch_fg(pos2: &[f64], g2: &mut [f64], springs: &[Spring]) -> f64 {
-    g2.fill(0.0);
-    let mut e = 0.0;
-    for s in springs {
-        let dx = pos2[2 * s.u] - pos2[2 * s.v];
-        let dy = pos2[2 * s.u + 1] - pos2[2 * s.v + 1];
-        let len = (dx * dx + dy * dy + 1e-24).sqrt();
-        let diff = len - s.l0;
-        e += 0.5 * s.weight * diff * diff;
-        let coeff = s.weight * diff / len;
-        g2[2 * s.u] += coeff * dx;
-        g2[2 * s.u + 1] += coeff * dy;
-        g2[2 * s.v] -= coeff * dx;
-        g2[2 * s.v + 1] -= coeff * dy;
-    }
-    e
-}
-
-pub(crate) fn eval_2d_energies(pos2: &[f64], springs: &[Spring]) -> (f64, f64) {
-    let mut e_bond = 0.0;
-    let mut e_tot = 0.0;
-    for s in springs {
-        let dx = pos2[2 * s.u] - pos2[2 * s.v];
-        let dy = pos2[2 * s.u + 1] - pos2[2 * s.v + 1];
-        let diff = dx.hypot(dy) - s.l0;
-        let term = 0.5 * s.weight * diff * diff;
-        e_tot += term;
-        if s.is_primary_bond {
-            e_bond += term;
-        }
-    }
-    (e_bond, e_tot)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn eval_sheet_fg(
+pub(crate) fn eval_hinge_bending_fg(
     pos: &[f64],
     grad: &mut [f64],
     faces: &[Vec<usize>],
-    springs: &[Spring],
     hinges: &[Hinge],
     kappa_eff: f64,
     centroids: &mut [[f64; 3]],
     centroid_grad: &mut [[f64; 3]],
 ) -> f64 {
-    grad.fill(0.0);
-    let mut total_e = 0.0;
-
-    for s in springs {
-        let dx = pos[3 * s.u] - pos[3 * s.v];
-        let dy = pos[3 * s.u + 1] - pos[3 * s.v + 1];
-        let dz = pos[3 * s.u + 2] - pos[3 * s.v + 2];
-        let len = (dx * dx + dy * dy + dz * dz + 1e-24).sqrt();
-        let diff = len - s.l0;
-        total_e += 0.5 * s.weight * diff * diff;
-        let coeff = s.weight * diff / len;
-        grad[3 * s.u] += coeff * dx;
-        grad[3 * s.u + 1] += coeff * dy;
-        grad[3 * s.u + 2] += coeff * dz;
-        grad[3 * s.v] -= coeff * dx;
-        grad[3 * s.v + 1] -= coeff * dy;
-        grad[3 * s.v + 2] -= coeff * dz;
-    }
-
     if kappa_eff <= 0.0 || hinges.is_empty() {
-        return total_e;
+        return 0.0;
     }
 
     for (fi, f) in faces.iter().enumerate() {
@@ -191,6 +146,7 @@ pub(crate) fn eval_sheet_fg(
     };
 
     const EPS2: f64 = 1e-20;
+    let mut bend_e = 0.0;
     for h in hinges {
         let p = get_pt(h.p, pos, centroids);
         let q = get_pt(h.q, pos, centroids);
@@ -209,10 +165,10 @@ pub(crate) fn eval_sheet_fg(
 
         let w = 0.5 * kappa_eff * h.weight;
         let cos_align = dot3(na, nb);
-        total_e += w * (1.0 - cos_align);
+        bend_e += w * (1.0 - h.sign * cos_align);
 
-        let wa = scale3(nb, -w);
-        let wb = scale3(na, -w);
+        let wa = scale3(nb, -w * h.sign);
+        let wb = scale3(na, -w * h.sign);
         let ga = scale3(sub3(wa, scale3(na, dot3(wa, na))), 1.0 / la);
         let gb = scale3(sub3(wb, scale3(nb, dot3(wb, nb))), 1.0 / lb);
 
@@ -242,9 +198,87 @@ pub(crate) fn eval_sheet_fg(
         }
     }
 
-    total_e
+    bend_e
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn eval_gsv_sheet_fg(
+    pos: &[f64],
+    grad: &mut [f64],
+    model: &GsvModel,
+    hinges: &[Hinge],
+    kappa_eff: f64,
+    centroids: &mut [[f64; 3]],
+    centroid_grad: &mut [[f64; 3]],
+) -> f64 {
+    let (es, eh) = eval_gsv_fg::<3>(pos, grad, &model.stretches, &model.shears_3d);
+    let eb = eval_hinge_bending_fg(pos, grad, &model.faces, hinges, kappa_eff, centroids, centroid_grad);
+    es + eh + eb
+}
+
+#[allow(dead_code)]
+pub(crate) fn eval_2d_stretch_fg(pos2: &[f64], g2: &mut [f64], springs: &[Spring]) -> f64 {
+    g2.fill(0.0);
+    let mut e = 0.0;
+    for s in springs {
+        let dx = pos2[2 * s.u] - pos2[2 * s.v];
+        let dy = pos2[2 * s.u + 1] - pos2[2 * s.v + 1];
+        let len = (dx * dx + dy * dy + 1e-24).sqrt();
+        let diff = len - s.l0;
+        e += 0.5 * s.weight * diff * diff;
+        let coeff = s.weight * diff / len;
+        g2[2 * s.u] += coeff * dx;
+        g2[2 * s.u + 1] += coeff * dy;
+        g2[2 * s.v] -= coeff * dx;
+        g2[2 * s.v + 1] -= coeff * dy;
+    }
+    e
+}
+
+pub(crate) fn bond_stretch_energy_3d(pos: &[f64], stretches: &[StretchTerm]) -> f64 {
+    stretches
+        .iter()
+        .map(|s| {
+            let diff = dist3_at(pos, s.u, s.v) - s.l0;
+            0.5 * diff * diff
+        })
+        .sum()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn eval_sheet_fg(
+    pos: &[f64],
+    grad: &mut [f64],
+    faces: &[Vec<usize>],
+    springs: &[Spring],
+    hinges: &[Hinge],
+    kappa_eff: f64,
+    centroids: &mut [[f64; 3]],
+    centroid_grad: &mut [[f64; 3]],
+) -> f64 {
+    grad.fill(0.0);
+    let mut total_e = 0.0;
+
+    for s in springs {
+        let dx = pos[3 * s.u] - pos[3 * s.v];
+        let dy = pos[3 * s.u + 1] - pos[3 * s.v + 1];
+        let dz = pos[3 * s.u + 2] - pos[3 * s.v + 2];
+        let len = (dx * dx + dy * dy + dz * dz + 1e-24).sqrt();
+        let diff = len - s.l0;
+        total_e += 0.5 * s.weight * diff * diff;
+        let coeff = s.weight * diff / len;
+        grad[3 * s.u] += coeff * dx;
+        grad[3 * s.u + 1] += coeff * dy;
+        grad[3 * s.u + 2] += coeff * dz;
+        grad[3 * s.v] -= coeff * dx;
+        grad[3 * s.v + 1] -= coeff * dy;
+        grad[3 * s.v + 2] -= coeff * dz;
+    }
+
+    total_e + eval_hinge_bending_fg(pos, grad, faces, hinges, kappa_eff, centroids, centroid_grad)
+}
+
+#[allow(dead_code)]
 pub(crate) fn eval_energies(
     pos: &[f64],
     faces: &[Vec<usize>],
@@ -276,12 +310,7 @@ pub(crate) fn eval_energies(
         &mut cg_buf,
     );
     let bending = e_tot - e_stretch;
-    // f64::max would turn NaN into 0.0, hiding a failed numerical evaluation.
-    let bending = if bending.is_finite() {
-        bending.max(0.0)
-    } else {
-        bending
-    };
+    let bending = if bending.is_finite() { bending.max(0.0) } else { bending };
     (e_bond, e_stretch, bending)
 }
 

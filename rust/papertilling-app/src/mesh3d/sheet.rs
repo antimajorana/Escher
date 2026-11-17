@@ -9,6 +9,7 @@ use super::geom::{
     append_icosahedron, append_octahedron, blend_normal, compute_smooth_vertex_normals, cone_rgba,
     mean_chord_len, polygon_centroid_idx, push_wire, tri_normal,
 };
+use super::sheet_colors::{diverging_rgba, height_rgba, sequential_heat_rgba, strain_rgba};
 use super::{GpuMeshData, Vertex3d, face_size_rgba};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,18 +38,34 @@ impl DefectViewMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sheet3dColorMode {
     FaceRingSize,
+    ElasticEnergyGsv,
     BondStrain,
+    GaussianCurvature,
     HeightZ,
+    SpectralLdos,
+    SpectralCharge,
 }
 
 impl Sheet3dColorMode {
-    pub const ALL: [Self; 3] = [Self::FaceRingSize, Self::BondStrain, Self::HeightZ];
+    pub const ALL: [Self; 7] = [
+        Self::FaceRingSize,
+        Self::ElasticEnergyGsv,
+        Self::BondStrain,
+        Self::GaussianCurvature,
+        Self::HeightZ,
+        Self::SpectralLdos,
+        Self::SpectralCharge,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::FaceRingSize => "Face ring size",
-            Self::BondStrain => "Bond / face strain",
+            Self::ElasticEnergyGsv => "Elastic energy density (GSV)",
+            Self::BondStrain => "Signed bond strain",
+            Self::GaussianCurvature => "Gaussian curvature Ω_v",
             Self::HeightZ => "Height z",
+            Self::SpectralLdos => "LDOS |ψ|² (multiplet)",
+            Self::SpectralCharge => "Spectral charge δρ(μ)",
         }
     }
 }
@@ -75,10 +92,20 @@ impl Default for Sheet3dViewOpts {
 /// Convert a relaxed `Sheet3DResult` into `GpuMeshData` for `View3dState`.
 /// Maps sheet `(x, y, z)` to turntable `(x, z * z_exag, -y)` (right-handed SO(3) rotation) so the `z = 0`
 /// plane lies horizontally on the turntable and `+z` cones point upward.
+#[cfg(test)]
 pub fn mesh_from_sheet3d(
     crystal: &BuiltCrystal,
     sheet: &Sheet3DResult,
     opts: &Sheet3dViewOpts,
+) -> GpuMeshData {
+    mesh_from_sheet3d_with_spectral(crystal, sheet, opts, None)
+}
+
+pub fn mesh_from_sheet3d_with_spectral(
+    crystal: &BuiltCrystal,
+    sheet: &Sheet3DResult,
+    opts: &Sheet3dViewOpts,
+    spectral_scalar: Option<(&[f64], bool)>,
 ) -> GpuMeshData {
     let n = sheet.xyz.len();
     if n == 0 || !renderable(crystal, sheet, opts) {
@@ -131,22 +158,43 @@ pub fn mesh_from_sheet3d(
     let mut face_vertices = Vec::new();
     let mut wire_vertices = Vec::new();
 
+    let omega_span = sheet.vertex_omega.iter().map(|w| w.abs()).fold(0.0_f64, f64::max).max(0.25);
+    let gsv_site_max = sheet.site_gsv_energy.iter().copied().fold(0.0_f64, f64::max).max(1e-6);
+    let gsv_bond_max = sheet.bond_gsv_energy.iter().copied().fold(0.0_f64, f64::max).max(1e-6);
+    let spec_vmax = spectral_scalar
+        .map(|(v, _)| v.iter().map(|x| x.abs()).fold(0.0_f64, f64::max).max(1e-6))
+        .unwrap_or(1.0);
+    let site_vis_rgba = |u: usize, fallback: [f32; 4]| -> [f32; 4] {
+        match (opts.color_mode, spectral_scalar) {
+            (Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge, Some((vals, div))) => {
+                let x = vals.get(u).copied().unwrap_or(0.0);
+                if div { diverging_rgba(x, spec_vmax, fallback[3]) } else { sequential_heat_rgba(x.max(0.0), spec_vmax, fallback[3]) }
+            }
+            (Sheet3dColorMode::ElasticEnergyGsv, _) if !sheet.site_gsv_energy.is_empty() => {
+                let e = sheet.site_gsv_energy.get(u).copied().unwrap_or(0.0).max(0.0);
+                sequential_heat_rgba(e, gsv_site_max, fallback[3])
+            }
+            (Sheet3dColorMode::GaussianCurvature, _) => {
+                diverging_rgba(sheet.vertex_omega.get(u).copied().unwrap_or(0.0), omega_span, fallback[3])
+            }
+            _ => fallback,
+        }
+    };
+
     for (u, &pos) in pts.iter().enumerate() {
         let omega = sheet.vertex_omega.get(u).copied().unwrap_or(0.0);
-        if cone_set.contains(&u) || omega.abs() > 0.20 {
-            let deg = if omega.abs() > 0.05 {
-                omega.to_degrees()
-            } else {
-                60.0
-            };
+        if (cone_set.contains(&u) || omega.abs() > 0.20)
+            && !matches!(opts.color_mode, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge | Sheet3dColorMode::GaussianCurvature)
+        {
+            let deg = if omega.abs() > 0.05 { omega.to_degrees() } else { 60.0 };
             append_icosahedron(&mut face_vertices, pos, cone_r, cone_rgba(deg));
         } else {
-            let col = match crystal.side.get(u).copied().flatten() {
+            let def_col = match crystal.side.get(u).copied().flatten() {
                 Some('A') => [0.13, 0.42, 0.77, 1.0],
                 Some('B') => [0.10, 0.62, 0.45, 1.0],
                 _ => [0.20, 0.25, 0.33, 1.0],
             };
-            append_octahedron(&mut face_vertices, pos, site_r, col);
+            append_octahedron(&mut face_vertices, pos, site_r, site_vis_rgba(u, def_col));
         }
     }
     let opaque_vertex_count = face_vertices.len();
@@ -173,8 +221,27 @@ pub fn mesh_from_sheet3d(
 
         let face_col = match opts.color_mode {
             Sheet3dColorMode::FaceRingSize => face_size_rgba(face.len(), orientable),
+            Sheet3dColorMode::ElasticEnergyGsv if !sheet.site_gsv_energy.is_empty() => {
+                let mut mean_c = [0.0_f32; 4];
+                for &u in face {
+                    let cu = site_vis_rgba(u, face_size_rgba(face.len(), orientable));
+                    for ch in 0..4 { mean_c[ch] += cu[ch] / (face.len() as f32); }
+                }
+                mean_c[3] = alpha;
+                mean_c
+            }
+            Sheet3dColorMode::ElasticEnergyGsv => sequential_heat_rgba(f_strain * f_strain * 16.0, 0.15, alpha),
             Sheet3dColorMode::BondStrain => strain_rgba(f_strain, alpha),
             Sheet3dColorMode::HeightZ => height_rgba(cz_sheet, z_half_span, alpha),
+            Sheet3dColorMode::GaussianCurvature | Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge => {
+                let mut mean_c = [0.0_f32; 4];
+                for &u in face {
+                    let cu = site_vis_rgba(u, face_size_rgba(face.len(), orientable));
+                    for ch in 0..4 { mean_c[ch] += cu[ch] / (face.len() as f32); }
+                }
+                mean_c[3] = alpha;
+                mean_c
+            }
         };
 
         for m in 0..face.len() {
@@ -183,13 +250,22 @@ pub fn mesh_from_sheet3d(
             let fnrm = tri_normal(centroid, pts[u0], pts[u1]);
             let n0 = blend_normal(fnrm, smooth_normals[u0], 0.28);
             let n1 = blend_normal(fnrm, smooth_normals[u1], 0.28);
-            let (c0, c1) = if opts.color_mode == Sheet3dColorMode::HeightZ {
-                (
+            let (c0, c1) = match opts.color_mode {
+                Sheet3dColorMode::HeightZ => (
                     height_rgba(sheet.xyz[u0][2], z_half_span, alpha),
                     height_rgba(sheet.xyz[u1][2], z_half_span, alpha),
-                )
-            } else {
-                (face_col, face_col)
+                ),
+                Sheet3dColorMode::GaussianCurvature
+                | Sheet3dColorMode::SpectralLdos
+                | Sheet3dColorMode::SpectralCharge => (
+                    site_vis_rgba(u0, face_col),
+                    site_vis_rgba(u1, face_col),
+                ),
+                Sheet3dColorMode::ElasticEnergyGsv if !sheet.site_gsv_energy.is_empty() => (
+                    site_vis_rgba(u0, face_col),
+                    site_vis_rgba(u1, face_col),
+                ),
+                _ => (face_col, face_col),
             };
             face_vertices.push(Vertex3d {
                 position: centroid,
@@ -217,6 +293,9 @@ pub fn mesh_from_sheet3d(
         let wc = if opts.color_mode == Sheet3dColorMode::BondStrain {
             let eps = sheet.bond_strain.get(e_idx).copied().unwrap_or(0.0);
             strain_rgba(eps, 0.98)
+        } else if opts.color_mode == Sheet3dColorMode::ElasticEnergyGsv && !sheet.bond_gsv_energy.is_empty() {
+            let be = sheet.bond_gsv_energy.get(e_idx).copied().unwrap_or(0.0).max(0.0);
+            sequential_heat_rgba(be, gsv_bond_max, 0.98)
         } else if across {
             [0.95, 0.45, 0.14, 0.98]
         } else {
@@ -360,53 +439,6 @@ pub fn show_sheet3d_controls(
         }
     });
     (kappa_changed, visual_changed)
-}
-
-fn strain_rgba(eps: f64, alpha: f32) -> [f32; 4] {
-    let t = (eps / 0.08).clamp(-1.0, 1.0) as f32;
-    let mid = [0.85_f32, 0.88, 0.92];
-    if t >= 0.0 {
-        let hi = [0.89_f32, 0.22, 0.17];
-        [
-            mid[0] + t * (hi[0] - mid[0]),
-            mid[1] + t * (hi[1] - mid[1]),
-            mid[2] + t * (hi[2] - mid[2]),
-            alpha,
-        ]
-    } else {
-        let s = -t;
-        let lo = [0.14_f32, 0.42, 0.87];
-        [
-            mid[0] + s * (lo[0] - mid[0]),
-            mid[1] + s * (lo[1] - mid[1]),
-            mid[2] + s * (lo[2] - mid[2]),
-            alpha,
-        ]
-    }
-}
-
-fn height_rgba(z: f64, half_span: f64, alpha: f32) -> [f32; 4] {
-    let u = ((z / half_span).clamp(-1.0, 1.0) * 0.5 + 0.5) as f32;
-    let lo = [0.16_f32, 0.46, 0.78];
-    let mid = [0.46_f32, 0.75, 0.70];
-    let hi = [0.95_f32, 0.56, 0.20];
-    if u < 0.5 {
-        let t = u * 2.0;
-        [
-            lo[0] + t * (mid[0] - lo[0]),
-            lo[1] + t * (mid[1] - lo[1]),
-            lo[2] + t * (mid[2] - lo[2]),
-            alpha,
-        ]
-    } else {
-        let t = (u - 0.5) * 2.0;
-        [
-            mid[0] + t * (hi[0] - mid[0]),
-            mid[1] + t * (hi[1] - mid[1]),
-            mid[2] + t * (hi[2] - mid[2]),
-            alpha,
-        ]
-    }
 }
 
 #[cfg(test)]

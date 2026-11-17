@@ -6,20 +6,27 @@ mod backend;
 mod canvas2d;
 #[cfg(test)]
 mod combine_bench;
+mod combine_half_wall_ui;
 mod combine_tab;
 mod combine_ui;
 mod combine_worker;
 mod core_panel;
+mod defects_inspectors;
 mod defects_tab;
 mod defects_ui;
 mod export;
+mod export_obj;
 mod gallery_tab;
 mod live_combine;
 mod live_ops;
+mod live_ops_ao;
 mod live_plane;
 mod mesh3d;
 mod scene2d;
 mod scene_crystal;
+mod spectrum_ui;
+mod spectrum_worker;
+mod surfaces_elastic;
 mod surfaces_tab;
 mod view3d;
 #[cfg(test)]

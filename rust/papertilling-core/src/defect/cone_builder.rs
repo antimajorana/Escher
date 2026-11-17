@@ -18,6 +18,7 @@ pub(super) struct RawBond {
     pub(super) kind: usize,
     pub(super) seam: Option<Isometry2>,
     pub(super) ang: Option<f64>,
+    pub(super) across: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -68,7 +69,7 @@ impl<'a> ConeBuilder<'a> {
         for (i, &k) in keys.iter().enumerate() {
             for (k2, kind) in lat.nbrs(k) {
                 if let Some(&j) = index.get(&k2) {
-                    nb[i].insert(j, RawBond { vec: sub2(ref_pos[j], ref_pos[i]), kind, seam: None, ang: None });
+                    nb[i].insert(j, RawBond { vec: sub2(ref_pos[j], ref_pos[i]), kind, seam: None, ang: None, across: false });
                 }
             }
         }
@@ -84,6 +85,45 @@ impl<'a> ConeBuilder<'a> {
             ref_pos,
             alive: vec![true; n],
             nb,
+            layers,
+            cone_sites: HashSet::new(),
+            records: Vec::new(),
+            pad: None,
+        }
+    }
+
+    pub(crate) fn from_half_wall(
+        lat_info: &'a LatticeCoreInfo,
+        centre: [f64; 2],
+        r_patch: f64,
+        sites: Vec<(SiteKey, usize)>,
+        crystal: BuiltCrystal,
+    ) -> Self {
+        let n = sites.len();
+        let mut nb = vec![BTreeMap::new(); n];
+        for (u, adj_u) in crystal.adj.iter().enumerate() {
+            for e in adj_u {
+                nb[u].insert(
+                    e.to,
+                    RawBond { vec: e.vec, kind: e.kind, seam: e.seam, ang: e.ang, across: e.across },
+                );
+            }
+        }
+        let mut layers: HashMap<SiteKey, usize> = HashMap::new();
+        for &(k, _) in &sites {
+            *layers.entry(k).or_insert(0) += 1;
+        }
+        Self {
+            lat: &lat_info.lat,
+            centre,
+            r_patch,
+            lmax: lat_info.lmax,
+            scale: lat_info.scale,
+            label: sites,
+            ref_pos: crystal.ref_pos,
+            alive: vec![true; n],
+            nb,
+            x_pos: crystal.pos,
             layers,
             cone_sites: HashSet::new(),
             records: Vec::new(),
@@ -239,7 +279,7 @@ impl<'a> ConeBuilder<'a> {
         let g = d_map[&v].inverse().compose(&t_iso.compose(&du));
         let vec = mat2_vec([[du.m[0][0], du.m[1][0]], [du.m[0][1], du.m[1][1]]], vec_chart);
         let seam = (!same_iso(&g, &Isometry2::IDENTITY, 1e-6)).then_some(g);
-        self.nb[u].insert(v, RawBond { vec, kind, seam, ang });
+        self.nb[u].insert(v, RawBond { vec, kind, seam, ang, across: false });
         Ok(())
     }
 
@@ -360,7 +400,7 @@ impl<'a> ConeBuilder<'a> {
                     kind: e.kind,
                     seam: e.seam,
                     ang: e.ang,
-                    across: false,
+                    across: e.across,
                     ghost_stub: None,
                 });
             }

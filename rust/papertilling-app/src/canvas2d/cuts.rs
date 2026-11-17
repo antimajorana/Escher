@@ -1,6 +1,7 @@
-//! Overlay rendering for active Volterra branch-cut rays and dislocation strips on `Canvas2D`.
+//! Overlay rendering for active Volterra branch-cut rays, glide rails, immobile fracton rings,
+//! and live reaction arrows on `Canvas2D`.
 
-use crate::canvas2d::{Canvas2D, draw_dashed_egui};
+use crate::canvas2d::{Canvas2D, CanvasMarker, draw_dashed_egui};
 
 /// World-space Volterra branch-cut ray (from defect core out to patch rim) and optional strip segment.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -9,6 +10,23 @@ pub struct CanvasCutRay {
     pub end: [f64; 2],
     pub strip: Option<([f64; 2], [f64; 2])>,
     pub is_insertion: bool,
+}
+
+/// Live preview arrow showing a disclination step + emitted Burgers vector or dislocation absorption.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasReactionArrow {
+    pub from: [f64; 2],
+    pub to: [f64; 2],
+    pub label: String,
+    pub valid: bool,
+}
+
+/// Kinematic guides drawn over the crystal patch (`Combine` tab).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CanvasKinematicOverlay {
+    pub glide_lines: Vec<([f64; 2], [f64; 2], bool)>,
+    pub locked_pins: Vec<usize>,
+    pub reaction: Option<CanvasReactionArrow>,
 }
 
 /// Render Volterra branch-cut rays (`purple` for removal/disclination, `teal` for dislocation insertion).
@@ -47,6 +65,64 @@ pub(crate) fn draw_cut_rays(
             painter.line_segment([pa, pb], egui::Stroke::new(3.0, col));
             painter.circle_filled(pa, 2.8, col);
             painter.circle_filled(pb, 2.8, col);
+        }
+    }
+}
+
+/// Render 1D glide rails, immobile fracton lock rings, and live step/absorption reaction previews.
+pub(crate) fn draw_kinematic_overlay(
+    painter: &egui::Painter,
+    canvas: &Canvas2D,
+    rect: egui::Rect,
+    markers: &[CanvasMarker],
+    ov: &CanvasKinematicOverlay,
+) {
+    for &(a, b, active) in &ov.glide_lines {
+        let p0 = canvas.world_to_screen_at(rect, [a[0] as f32, a[1] as f32]);
+        let p1 = canvas.world_to_screen_at(rect, [b[0] as f32, b[1] as f32]);
+        let alpha = if active { 220 } else { 115 };
+        let width = if active { 2.4 } else { 1.3 };
+        let col = egui::Color32::from_rgba_unmultiplied(230, 145, 0, alpha);
+        draw_dashed_egui(painter, p0, p1, egui::Stroke::new(width, col), 8.0, 5.0);
+    }
+
+    if !ov.locked_pins.is_empty() {
+        let ring_col = egui::Color32::from_rgba_unmultiplied(55, 71, 79, 200);
+        for m in markers {
+            if ov.locked_pins.contains(&m.index) {
+                let sp = canvas.world_to_screen_at(rect, [m.pos[0] as f32, m.pos[1] as f32]);
+                painter.circle_stroke(sp, 12.5, egui::Stroke::new(1.6, ring_col));
+            }
+        }
+    }
+
+    if let Some(rx) = &ov.reaction {
+        let col = if rx.valid {
+            egui::Color32::from_rgb(38, 138, 60)
+        } else {
+            egui::Color32::from_rgb(198, 40, 40)
+        };
+        let p0 = canvas.world_to_screen_at(rect, [rx.from[0] as f32, rx.from[1] as f32]);
+        let p1 = canvas.world_to_screen_at(rect, [rx.to[0] as f32, rx.to[1] as f32]);
+        let st = egui::Stroke::new(2.6, col);
+        painter.line_segment([p0, p1], st);
+        painter.circle_stroke(p1, 10.5, st);
+        let d = p1 - p0;
+        let len = d.length();
+        if len >= 14.0 {
+            let u = d / len;
+            let n = egui::vec2(-u.y, u.x);
+            painter.line_segment([p1, p1 - u * 9.0 + n * 5.0], st);
+            painter.line_segment([p1, p1 - u * 9.0 - n * 5.0], st);
+        }
+        if !rx.label.is_empty() {
+            let mid = p0 + d * 0.5 + egui::vec2(0.0, -14.0);
+            let font = egui::FontId::proportional(11.0);
+            let galley = painter.layout_no_wrap(rx.label.clone(), font.clone(), col);
+            let box_rect = egui::Rect::from_center_size(mid, galley.size() + egui::vec2(10.0, 5.0));
+            painter.rect_filled(box_rect, 4.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 236));
+            painter.rect_stroke(box_rect, 4.0, egui::Stroke::new(1.0, col), egui::StrokeKind::Inside);
+            painter.text(mid, egui::Align2::CENTER_CENTER, &rx.label, font, col);
         }
     }
 }

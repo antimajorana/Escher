@@ -9,20 +9,35 @@ const MAX_SMOKE_FRAMES: u32 = 1800;
 impl PapertillingApp {
     fn smoke_stage_waiting(&self) -> bool {
         match self.active_tab {
+            NavTab::Surfaces => self.surfaces.elastic.is_busy() || self.surfaces.spectrum.is_busy(),
             NavTab::Defects => {
-                self.defects.is_busy() || self.defects.initializing || self.defects.view3d_dirty
+                self.defects.is_busy()
+                    || self.defects.initializing
+                    || self.defects.view3d_dirty
+                    || self.defects.inspectors.spectrum.is_busy()
             }
-            NavTab::Combine => self.combine.is_building() || self.combine.view3d_dirty,
+            NavTab::Combine => {
+                self.combine.is_building()
+                    || self.combine.view3d_dirty
+                    || self.combine.inspectors.spectrum.is_busy()
+            }
             _ => false,
         }
     }
 
     fn smoke_stage_error(&self) -> bool {
         match self.active_tab {
-            NavTab::Surfaces => self.surfaces.has_refusal(),
-            NavTab::Defects => self.defects.error.is_some(),
+            NavTab::Surfaces => {
+                self.surfaces.has_refusal() || self.surfaces.elastic.last_error.is_some()
+            }
+            NavTab::Defects => {
+                self.defects.error.is_some()
+                    || self.defects.inspectors.spectrum.last_error.is_some()
+            }
             NavTab::Combine => {
-                self.combine.init_error.is_some() || self.combine.last_build.refused.is_some()
+                self.combine.init_error.is_some()
+                    || self.combine.last_build.refused.is_some()
+                    || self.combine.inspectors.spectrum.last_error.is_some()
             }
             NavTab::Gallery => false,
         }
@@ -64,12 +79,12 @@ impl PapertillingApp {
             && !cap.contains("unavailable");
 
         if ready {
-            if self.last_smoke_stage == 6 {
+            if self.last_smoke_stage == 9 {
                 self.smoke_outcome.store(1, Ordering::Release);
                 if !self.smoke_reported {
                     self.smoke_reported = true;
                     println!(
-                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=7 (surfaces,defects-sheet,combine-sheet)",
+                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=10 (surfaces,defects-sheet,combine-sheet,fvk,ao-mobius,ldos)",
                         self.adapter_name, self.backend_name, self.view3d.counters.uploads()
                     );
                 }
@@ -87,6 +102,35 @@ impl PapertillingApp {
                 6 => {
                     self.combine.view_mode = DefectViewMode::Sheet3D;
                     self.switch_tab(NavTab::Combine);
+                }
+                7 => {
+                    self.surfaces.target = SurfaceTargetUi::Sphere;
+                    self.surfaces.show_cover = false;
+                    self.surfaces.elastic.shape_mode = crate::surfaces_elastic::SurfaceShapeMode::ElasticFvK;
+                    self.switch_tab(NavTab::Surfaces);
+                }
+                8 => {
+                    self.surfaces.elastic.shape_mode = crate::surfaces_elastic::SurfaceShapeMode::AnalyticRadial;
+                    let mob_idx = self.defects.catalogue.walls.iter()
+                        .position(|w| w.kind == crate::backend::WallKindUi::MobiusWc)
+                        .unwrap_or(0);
+                    self.defects.sub_tab = crate::defects_tab::DefectSubTab::Walls;
+                    self.defects.selected_wall = mob_idx;
+                    self.defects.wall_half = false;
+                    self.defects.draw_mode = crate::live_ops_ao::Defect2dMode::ElasticAoMetric;
+                    self.defects.relaxed = true;
+                    self.defects.view_mode = DefectViewMode::Sheet3D;
+                    self.switch_tab(NavTab::Defects);
+                }
+                9 => {
+                    self.defects.sheet_opts.color_mode = crate::mesh3d::Sheet3dColorMode::SpectralLdos;
+                    self.defects.inspectors.on_sheet_color_changed(crate::mesh3d::Sheet3dColorMode::SpectralLdos);
+                    self.defects.inspectors.spectrum.submit_crystal(
+                        &self.defects.last_crystal,
+                        Some(&self.defects.last_sheet),
+                        Some(ctx),
+                    );
+                    self.defects.view3d_dirty = true;
                 }
                 stage => {
                     let (target, cover) = match stage {
@@ -137,13 +181,13 @@ mod tests {
         let outcome = Arc::new(AtomicU8::new(0));
         let mut app = PapertillingApp::new(true, String::from("mock"), String::from("mock"))
             .with_smoke_outcome(Arc::clone(&outcome));
-        for _ in 0..80 {
+        for _ in 0..300 {
             if step_with_mock_paint(&mut app, &ctx, true) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(app.last_smoke_stage, 6);
+        assert_eq!(app.last_smoke_stage, 9);
         assert_eq!(outcome.load(Ordering::Acquire), 1);
     }
 

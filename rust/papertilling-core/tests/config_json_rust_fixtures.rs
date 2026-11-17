@@ -31,6 +31,9 @@ fn with_summary(mut cfg: NotebookConfigJson) -> NotebookConfigJson {
         kind: rep.kind.clone(),
         equivalent: rep.equivalent,
         matches: rep.matches.clone(),
+        volterra_matches: Vec::new(),
+        completion_matches: Vec::new(),
+        match_tier: None,
         verdict: rep.verdict.clone(),
     });
     cfg

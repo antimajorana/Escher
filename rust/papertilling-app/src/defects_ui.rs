@@ -5,6 +5,7 @@ use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
 use crate::defects_tab::{DefectSubTab, DefectsTabState};
+use crate::live_ops_ao::Defect2dMode;
 use crate::mesh3d::{DefectViewMode, show_sheet3d_controls};
 use crate::view3d::View3dState;
 
@@ -63,6 +64,25 @@ impl DefectsTabState {
                     self.selected_wall = idx;
                     dirty = true;
                 }
+                if let Some(w) = self.catalogue.walls.get(self.selected_wall) {
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Span:");
+                        if ui.selectable_label(!self.wall_half || !w.can_end_orientable, "Full wall").clicked() && self.wall_half {
+                            self.wall_half = false;
+                            dirty = true;
+                        }
+                        let hw = ui.add_enabled(
+                            w.can_end_orientable,
+                            egui::Button::selectable(w.can_end_orientable && self.wall_half, "Half-wall (terminated)"),
+                        ).on_hover_text(&w.ending_summary);
+                        if hw.clicked() && !self.wall_half {
+                            self.wall_half = true;
+                            dirty = true;
+                        }
+                    });
+                    ui.small(&w.ending_summary);
+                }
             }
         }
 
@@ -84,20 +104,22 @@ impl DefectsTabState {
                 reset_view = true;
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("2D Drawing:");
-            if ui.selectable_label(!self.relaxed, "Raw surgery").clicked() {
-                self.relaxed = false;
-                dirty = true;
-            }
-            if ui.selectable_label(self.relaxed, "Relaxed / Embedded").clicked() {
-                self.relaxed = true;
-                dirty = true;
+            for dm in Defect2dMode::ALL {
+                if ui.selectable_label(self.draw_mode == dm, dm.label()).clicked() && self.draw_mode != dm {
+                    self.draw_mode = dm;
+                    self.relaxed = dm != Defect2dMode::Raw;
+                    dirty = true;
+                }
             }
         });
 
         let (kappa_changed, vis_changed) = show_sheet3d_controls(ui, &mut self.sheet_opts, "def_side_col");
         if vis_changed {
+            if self.inspectors.on_sheet_color_changed(self.sheet_opts.color_mode) {
+                self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
+            }
             self.view3d_dirty = true;
         }
 
@@ -135,6 +157,18 @@ impl DefectsTabState {
                 format!("Note: {}", self.readout.note),
             );
         }
+
+        let (circ_dirty, ov_dirty, spec_recomp, spec_col) = self.inspectors.show_controls_ui(ui, "def_insp", 0, true);
+        if spec_col {
+            self.inspectors.sync_3d_from_spectrum(&mut self.sheet_opts);
+            self.view3d_dirty = true;
+        }
+        if circ_dirty || ov_dirty {
+            self.refresh_and_sync_inspectors(active_item, canvas);
+        }
+        if spec_recomp && !self.last_crystal.pos.is_empty() {
+            self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
+        }
     }
 
     pub fn show_central(
@@ -160,6 +194,9 @@ impl DefectsTabState {
         if self.view_mode.uses_3d() {
             let (kc, vc) = show_sheet3d_controls(ui, &mut self.sheet_opts, "def_top_col");
             if vc {
+                if self.inspectors.on_sheet_color_changed(self.sheet_opts.color_mode) {
+                    self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
+                }
                 self.view3d_dirty = true;
             }
             if kc {
@@ -175,7 +212,15 @@ impl DefectsTabState {
             DefectViewMode::Planar2D => {
                 ui.strong("2D Surgical Crystal Patch (irregular core rings, cones, A|B domains)");
                 ui.add_space(2.0);
-                canvas.show(ui);
+                if self.inspectors.circuit.enabled {
+                    let inter = canvas.show_interactive(ui, &[], false, None);
+                    if let Some(v0) = inter.clicked_circuit_vertex {
+                        self.inspectors.circuit.base_v0 = Some(v0);
+                        self.refresh_and_sync_inspectors(active_item, canvas);
+                    }
+                } else {
+                    canvas.show(ui);
+                }
             }
             DefectViewMode::Sheet3D => {
                 ui.strong("3D Elastic Sheet Geometry (buckling relieves in-plane defect strain)");
@@ -190,7 +235,15 @@ impl DefectsTabState {
                         strip.cell(|ui| {
                             ui.strong("2D Surgical Crystal Patch");
                             ui.add_space(2.0);
-                            canvas.show(ui);
+                            if self.inspectors.circuit.enabled {
+                                let inter = canvas.show_interactive(ui, &[], false, None);
+                                if let Some(v0) = inter.clicked_circuit_vertex {
+                                    self.inspectors.circuit.base_v0 = Some(v0);
+                                    self.refresh_and_sync_inspectors(active_item, canvas);
+                                }
+                            } else {
+                                canvas.show(ui);
+                            }
                         });
                         strip.cell(|ui| {
                             ui.strong("3D Elastic Sheet Geometry (orbit & zoom)");
@@ -315,11 +368,12 @@ impl DefectsTabState {
             TableBuilder::new(ui)
                 .striped(true)
                 .max_scroll_height(130.0)
-                .column(Column::exact(42.0))
-                .column(Column::exact(118.0))
+                .column(Column::exact(38.0))
+                .column(Column::exact(96.0))
+                .column(Column::exact(68.0))
                 .column(Column::remainder())
                 .header(18.0, |mut h| {
-                    for t in ["ID", "Kind", "Axis / Action"] {
+                    for t in ["ID", "Kind", "Ending", "Axis / Action"] {
                         h.col(|ui| { ui.strong(t); });
                     }
                 })
@@ -327,12 +381,20 @@ impl DefectsTabState {
                     for (idx, w) in self.catalogue.walls.iter().enumerate() {
                         body.row(18.0, |mut row| {
                             row.col(|ui| {
-                                let dir_tip = format!("dir = ({}, {})", w.direction_mn.0, w.direction_mn.1);
+                                let dir_tip = format!("dir = ({}, {})\n{}", w.direction_mn.0, w.direction_mn.1, w.ending_summary);
                                 if ui.selectable_label(self.selected_wall == idx, &w.id).on_hover_text(dir_tip).clicked() {
                                     picked = Some(idx);
                                 }
                             });
                             row.col(|ui| { ui.label(w.kind.label()); });
+                            row.col(|ui| {
+                                let (txt, col) = if w.can_end_orientable {
+                                    ("orientable", egui::Color32::from_rgb(34, 108, 42))
+                                } else {
+                                    ("non-orient.", egui::Color32::from_rgb(168, 92, 10))
+                                };
+                                ui.colored_label(col, egui::RichText::new(txt).size(11.0)).on_hover_text(&w.ending_summary);
+                            });
                             row.col(|ui| { ui.small(&w.description); });
                         });
                     }

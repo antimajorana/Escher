@@ -197,40 +197,91 @@ fn orbit_rep(grp: &LatticeGroup, b: [f64; 2]) -> [f64; 2] {
         .unwrap_or(b)
 }
 
-/// Classify the outer-boundary holonomy and unreduced Frank angle of `crystal` in `G~+`.
-pub fn classify_crystal_charge(
+/// Classify an arbitrary `(frank_deg, holonomy)` pair in `G~+` (or `"non_orientable"` when `det(H) < 0`).
+pub fn classify_holonomy_charge(
     group: &str,
     cell: &Cell2D,
     frame: Frame2D,
-    crystal: &BuiltCrystal,
+    frank_deg: Option<f64>,
+    holonomy: Isometry2,
+    loop_sum: [f64; 2],
 ) -> Result<ClassifiedCharge, String> {
-    let rep = total_charge(crystal)?;
-    let angle = if rep.frank_deg == 0.0 { 0.0 } else { rep.frank_deg };
-    if rep.kind != "disclination" {
+    if holonomy.det() < 0.0 {
+        return Ok(ClassifiedCharge {
+            kind: "non_orientable".to_string(),
+            angle: 0.0,
+            holonomy,
+            b: None,
+            lattice_vector: None,
+            b_rep: None,
+            length: None,
+            centre: None,
+            centre_class: None,
+            label: "non-orientable loop (det H < 0)".to_string(),
+            single: None,
+            loop_sum,
+        });
+    }
+    let rot_deg = holonomy.m[1][0].atan2(holonomy.m[0][0]).to_degrees();
+    let frank = frank_deg.unwrap_or(rot_deg);
+    if ((frank - rot_deg + 180.0).rem_euclid(360.0) - 180.0).abs() > 1e-3 {
+        return Err(format!("Frank angle {frank:.4} disagrees with the holonomy rotation {rot_deg:.4}"));
+    }
+    let angle_r = round_dec(frank, 6);
+    let angle = if angle_r == 0.0 { 0.0 } else { angle_r };
+    let is_trans = np_allclose_mat(holonomy.m, Isometry2::IDENTITY.m, 1e-5, 1e-6);
+    if is_trans {
         let grp = LatticeGroup::new(cell);
-        let b = rep.burgers.unwrap_or([0.0, 0.0]);
-        let f = mat2_vec(grp.ainv, b);
-        let lattice_vector =
-            Some((f[0] - round_even(f[0])).abs() < 1e-5 && (f[1] - round_even(f[1])).abs() < 1e-5);
-        if rep.kind == "vacuum" {
-            return Ok(ClassifiedCharge {
-                kind: "vacuum".to_string(),
-                angle,
-                holonomy: rep.holonomy,
-                b: Some(b),
-                lattice_vector,
-                b_rep: None,
-                length: None,
-                centre: None,
-                centre_class: None,
-                label: "I (no defect)".to_string(),
-                single: None,
-                loop_sum: rep.loop_sum,
-            });
+        let mut b = [-holonomy.t[0], -holonomy.t[1]];
+        for x in &mut b {
+            if x.abs() < 1e-9 {
+                *x = 0.0;
+            }
         }
-        if rep.kind == "dislocation" {
-            let brep = orbit_rep(&grp, b);
+        let f = mat2_vec(grp.ainv, b);
+        let is_lat =
+            (f[0] - round_even(f[0])).abs() < 1e-5 && (f[1] - round_even(f[1])).abs() < 1e-5;
+        let lattice_vector = Some(is_lat);
+        if frank.abs() < 1e-6 {
             let len = norm2(b);
+            if len < 1e-6 {
+                return Ok(ClassifiedCharge {
+                    kind: "vacuum".to_string(),
+                    angle,
+                    holonomy,
+                    b: Some(b),
+                    lattice_vector,
+                    b_rep: None,
+                    length: None,
+                    centre: None,
+                    centre_class: None,
+                    label: "I (no defect)".to_string(),
+                    single: None,
+                    loop_sum,
+                });
+            }
+            if !is_lat {
+                let label = format!(
+                    "partial dislocation b = {} (|b| = {:.4}, fractional)",
+                    fmt_vec2_round4(b),
+                    len
+                );
+                return Ok(ClassifiedCharge {
+                    kind: "partial_dislocation".to_string(),
+                    angle,
+                    holonomy,
+                    b: Some(b),
+                    lattice_vector: Some(false),
+                    b_rep: None,
+                    length: Some(len),
+                    centre: None,
+                    centre_class: None,
+                    label,
+                    single: None,
+                    loop_sum,
+                });
+            }
+            let brep = orbit_rep(&grp, b);
             let label = format!(
                 "dislocation [b] = P+ orbit of {} (|b| = {:.4})",
                 fmt_vec2_round4(brep),
@@ -239,7 +290,7 @@ pub fn classify_crystal_charge(
             return Ok(ClassifiedCharge {
                 kind: "dislocation".to_string(),
                 angle,
-                holonomy: rep.holonomy,
+                holonomy,
                 b: Some(b),
                 lattice_vector,
                 b_rep: Some(brep),
@@ -248,14 +299,14 @@ pub fn classify_crystal_charge(
                 centre_class: None,
                 label,
                 single: Some(DefectSpec::Dislocation { b, at: None, cut: None }),
-                loop_sum: rep.loop_sum,
+                loop_sum,
             });
         }
         let label = format!("whole-turn {:+.0} deg with b = {}", angle, fmt_vec2_round4(b));
         return Ok(ClassifiedCharge {
             kind: "whole_turn".to_string(),
             angle,
-            holonomy: rep.holonomy,
+            holonomy,
             b: Some(b),
             lattice_vector,
             b_rep: None,
@@ -264,20 +315,27 @@ pub fn classify_crystal_charge(
             centre_class: None,
             label,
             single: None,
-            loop_sum: rep.loop_sum,
+            loop_sum,
         });
     }
 
-    let c = rep.centre.expect("disclination report must carry centre");
+    let c = mat2_vec(
+        mat2_inv([[1.0 - holonomy.m[0][0], -holonomy.m[0][1]], [-holonomy.m[1][0], 1.0 - holonomy.m[1][1]]]),
+        holonomy.t,
+    );
     let cat = catalogue_for_centres(group, cell, frame);
-    let w = cat.centre_class_of(c).map_or("?", |r| r.label.as_str()).to_string();
+    let rec = cat.centre_class_of(c);
+    let w = rec.map_or("?", |r| r.label.as_str()).to_string();
     let label = format!("disclination D({w}, {:+.0} deg) about {}", angle, fmt_vec2_round4(c));
-    let single = (angle.abs() < 360.0 - 1e-6)
-        .then_some(DefectSpec::Disclination { angle_deg: angle, at: c, cut: None });
+    let allowed = rec.is_some_and(|r| {
+        let k = angle * (r.order as f64) / 360.0;
+        angle.abs() < 360.0 - 1e-6 && (k - round_even(k)).abs() < 1e-6
+    });
+    let single = allowed.then_some(DefectSpec::Disclination { angle_deg: angle, at: c, cut: None });
     Ok(ClassifiedCharge {
         kind: "disclination".to_string(),
         angle,
-        holonomy: rep.holonomy,
+        holonomy,
         b: None,
         lattice_vector: None,
         b_rep: None,
@@ -286,8 +344,19 @@ pub fn classify_crystal_charge(
         centre_class: Some(w),
         label,
         single,
-        loop_sum: rep.loop_sum,
+        loop_sum,
     })
+}
+
+/// Classify the outer-boundary holonomy and unreduced Frank angle of `crystal` in `G~+`.
+pub fn classify_crystal_charge(
+    group: &str,
+    cell: &Cell2D,
+    frame: Frame2D,
+    crystal: &BuiltCrystal,
+) -> Result<ClassifiedCharge, String> {
+    let rep = total_charge(crystal)?;
+    classify_holonomy_charge(group, cell, frame, Some(rep.frank_deg), rep.holonomy, rep.loop_sum)
 }
 
 pub(crate) fn same_charge_in_grp(

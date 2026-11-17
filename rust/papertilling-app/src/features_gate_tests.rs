@@ -12,7 +12,7 @@ use papertilling_core::types::Cell2D;
 use crate::aliases::AliasStore;
 use crate::backend::{AppBackend, CatalogueRuleUi};
 use crate::canvas2d::{Canvas2D, Scene2D};
-use crate::combine_tab::{CombineTabState, ToolMode};
+use crate::combine_tab::{CombineTabState, MotionMode, ToolMode};
 use crate::core_panel::{CorePanelState, show_core_panel};
 use crate::defects_tab::{DefectSubTab, DefectsTabState};
 use crate::gallery_tab::GalleryTabState;
@@ -206,6 +206,7 @@ fn defects_and_combine_live_3d_sheet_geometry_end_to_end() {
 
     // 2. Combine tab: Clear (0 defects) -> flat plane; +90 -> 3D cone; +90 + -90 -> screened dislocation buckle!
     let mut comb = CombineTabState::new(sq, &backend);
+    comb.motion_mode = MotionMode::FreeSetup;
     comb.clear_defects(sq, &backend, &mut canvas);
     comb.wait_idle(sq, Some(&mut canvas));
     let max_z_clear = comb.last_sheet3d.sheet.xyz.iter().map(|p| p[2].abs()).fold(0.0_f64, f64::max);

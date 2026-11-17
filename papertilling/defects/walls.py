@@ -36,6 +36,7 @@ import networkx as nx
 
 from ..legacy.lab_defects import (wall as _ld_wall, mobius_strip as _ld_mobius, interface as _ld_interface,
                                   reflection_across, describe, perfect_patch, is_orientable)
+from ._wall_endings import classify_wall_ending
 from .catalogue import DefectEntry, _orbits, _rot90, _canon_dir
 
 ITA_GENERIC_INDEX = {"p1": None, "p2": 4, "pm": None, "pg": None, "cm": None, "pmm": 4, "pmg": 4, "pgg": 4,
@@ -215,7 +216,8 @@ def domain_walls(cat):
                                kind="domain_wall", id=f"Wa{len(out) + 1}", coset=r["id"], type=r["kind"],
                                label=f"Wa{len(out) + 1} ({r['kind']}): {r['what']}", sigma=sig, what=r["what"],
                                centre_map=r["centre_map"], sites_to=r["sites_to"],
-                               complete=cat.normaliser["complete"], spec=spec))
+                               complete=cat.normaliser["complete"],
+                               ending=classify_wall_ending(cat, sig, wall_kind="domain_wall"), spec=spec))
     return out
 
 
@@ -381,7 +383,8 @@ def twin_walls(cat, r=4):
                                    spacing=D["dl"], interval=(kind, lo, hi), through_site=(kind == "site"),
                                    members=mem, class_size=len(mem), sigma=sig, sigma_in_G=in_g,
                                    network_invisible=(not bad), n_irregular=len(bad), visible=(not in_g and bool(bad)),
-                                   domain_coset=coset_of(cat, sig), spec=spec))
+                                   domain_coset=coset_of(cat, sig),
+                                   ending=classify_wall_ending(cat, sig, wall_kind="twin_wall"), spec=spec))
     return out
 
 
@@ -399,7 +402,8 @@ def mobius_seams(cat, strip_length=4):
         out.append(DefectEntry(lambda R=None, sig=sig, L=L, **kw: _ld_mobius(cat.cell, sig, length=L, width=w),
                                kind="mobius_seam", id=f"Wc{len(out) + 1}", line=ln["id"], line_kind=ln["kind"],
                                label=f"Wc{len(out) + 1}: Moebius seam on {ln['id']} ({ln['kind']})",
-                               sigma=sig, non_orientable=True, spec=spec))
+                               sigma=sig, non_orientable=True,
+                               ending=classify_wall_ending(cat, sig, wall_kind="mobius_seam"), spec=spec))
     return out
 
 
@@ -419,7 +423,8 @@ def glide_breaking(cat):
                                kind="glide_breaking", id=f"Wd{len(out) + 1}", line=ln["id"], line_kind=ln["kind"],
                                label=f"Wd{len(out) + 1}: {what} ({ln['id']}), slip {mis:.4g} along the wall",
                                sigma=sig, slip=mis, slip_over_period=mis / per, glide_of_line=ln["glide"],
-                               same_domains_as=coset_of(cat, sig), same_as_twin=tw, spec=spec))
+                               same_domains_as=coset_of(cat, sig), same_as_twin=tw,
+                               ending=classify_wall_ending(cat, sig, wall_kind="glide_breaking"), spec=spec))
     return out
 
 

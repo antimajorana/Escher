@@ -1,5 +1,6 @@
 //! PyO3 bindings (`papertilling_rs`) exposing `papertilling-core` Stages 0–5 to Python.
 
+mod insights_py;
 mod stage5_py;
 
 use std::collections::BTreeMap;
@@ -15,6 +16,11 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use serde::Serialize;
 
+pub use insights_py::{
+    auto_burgers_circuit_json, burgers_circuit_json, gauge_observables_json,
+    relax_defect_sheet_3d_json, relax_elastic_2d_json, relax_elastic_2d_patch_json,
+    relax_surface_3d_json, spectrum_json,
+};
 pub use stage5_py::{
     core_gallery_json, equivalent_single_json, isomorphic_cores, layer_signatures_irregular,
     nearest_allowed_centre_json,
@@ -275,6 +281,14 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(equivalent_single_json, m)?)?;
     m.add_function(wrap_pyfunction!(core_gallery_json, m)?)?;
     m.add_function(wrap_pyfunction!(nearest_allowed_centre_json, m)?)?;
+    m.add_function(wrap_pyfunction!(burgers_circuit_json, m)?)?;
+    m.add_function(wrap_pyfunction!(auto_burgers_circuit_json, m)?)?;
+    m.add_function(wrap_pyfunction!(gauge_observables_json, m)?)?;
+    m.add_function(wrap_pyfunction!(relax_elastic_2d_json, m)?)?;
+    m.add_function(wrap_pyfunction!(relax_elastic_2d_patch_json, m)?)?;
+    m.add_function(wrap_pyfunction!(relax_surface_3d_json, m)?)?;
+    m.add_function(wrap_pyfunction!(relax_defect_sheet_3d_json, m)?)?;
+    m.add_function(wrap_pyfunction!(spectrum_json, m)?)?;
     Ok(())
 }
 

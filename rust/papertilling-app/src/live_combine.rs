@@ -28,6 +28,7 @@ use crate::live_plane::{coordination_string, format_dsymbol_key, occupied_wyckof
 pub enum CombineDrawMode {
     FastRelaxed,
     Raw,
+    ElasticAoMetric,
 }
 
 #[derive(Clone, Debug)]
@@ -282,7 +283,7 @@ pub fn mn_from_burgers(info: &CombineLatticeInfo, b: [f64; 2]) -> Option<(i32, i
 pub fn spec_world_pos(info: &CombineLatticeInfo, idx: usize, spec: &DefectSpec) -> [f64; 2] {
     let (a1, a2) = (info.lat_info.lat.cell.a1, info.lat_info.lat.cell.a2);
     match *spec {
-        DefectSpec::Disclination { at, .. } => at,
+        DefectSpec::Disclination { at, .. } | DefectSpec::HalfWall { at, .. } => at,
         DefectSpec::Dislocation { at: Some(p), .. } => p,
         DefectSpec::Dislocation { at: None, .. } => [
             (0.371 + 3.0 * idx as f64) * a1[0] + 0.413 * a2[0],
@@ -296,13 +297,14 @@ pub fn centre_class_at(info: &CombineLatticeInfo, p: [f64; 2]) -> Option<&Combin
 }
 
 pub fn spec_short_label(info: &CombineLatticeInfo, spec: &DefectSpec) -> String {
-    match *spec {
-        DefectSpec::Disclination { angle_deg, at, .. } => match centre_class_at(info, at) {
+    match spec {
+        DefectSpec::Disclination { angle_deg, at, .. } => match centre_class_at(info, *at) {
             Some(c) => format!("D({}, {angle_deg:+.0}°)", c.label),
             None => format!("D({angle_deg:+.0}°)"),
         },
-        DefectSpec::Dislocation { b, .. } => mn_from_burgers(info, b)
+        DefectSpec::Dislocation { b, .. } => mn_from_burgers(info, *b)
             .map_or_else(|| format!("T({:.1},{:.1})", b[0], b[1]), |(m, n)| format!("T({m},{n})")),
+        DefectSpec::HalfWall { wall_id, .. } => format!("HW({})", wall_id.as_deref().unwrap_or("wall")),
     }
 }
 
@@ -338,7 +340,7 @@ pub fn build_combined_crystal(
         .iter()
         .filter_map(|s| match *s {
             DefectSpec::Dislocation { b, .. } => Some(b[0].hypot(b[1])),
-            DefectSpec::Disclination { .. } => None,
+            DefectSpec::Disclination { .. } | DefectSpec::HalfWall { .. } => None,
         })
         .fold(0.0_f64, f64::max);
 
@@ -421,6 +423,8 @@ pub fn build_combined_crystal(
                 notes.push(format!("fast relax has {bad} crossing/fold(s) — toggle Full Planar Repair"));
             }
         }
+    } else if opts.draw_mode == CombineDrawMode::ElasticAoMetric {
+        crate::live_ops_ao::apply_combine_ao_mode(&mut crystal, preview, &mut notes);
     }
 
     let (charge_label, charge_detail) = match classify_crystal_charge(&item.group, &info.cell, item.frame, &crystal) {

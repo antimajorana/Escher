@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::Sheet3DOptions;
+use crate::defect::sheet3d::Sheet3DOptions;
 use crate::defect::charge::{frame_faces, frank_angles};
 use crate::plane::draw::relax_preview;
 use crate::plane::planarity::{self, check_positions, component_roots, signed_area, split_frame_faces};

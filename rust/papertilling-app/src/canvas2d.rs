@@ -1,15 +1,21 @@
 use std::path::Path;
 
-use crate::export::export_scene_full;
+use crate::export::{export_scene_full, export_scene_with_overlays};
 pub use crate::scene2d::Scene2D;
 use crate::scene2d::{ScenePrimitives, compile_scene};
 
+pub mod circuit;
 mod cuts;
+mod draw_helpers;
+pub mod gauge_overlay;
 mod hit;
 #[cfg(test)]
 mod tests;
 
-pub use cuts::CanvasCutRay;
+pub use circuit::CanvasCircuitOverlay;
+pub use cuts::{CanvasCutRay, CanvasKinematicOverlay, CanvasReactionArrow};
+pub(crate) use draw_helpers::{draw_arrow_mid_egui, draw_dashed_egui, draw_overlays, marker_colors, to_color32};
+pub use gauge_overlay::CrystalOverlayData;
 pub use hit::{
     PIN_PICK_RADIUS_PX, ViewTransform, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP_FACTOR, ZoomKeyAction,
     input_zoom_factor, keyboard_zoom_action, pick_marker, zoom_by_factor_about,
@@ -38,9 +44,12 @@ pub struct CanvasInteraction {
     pub dragged_marker: Option<(usize, [f64; 2])>,
     pub drag_released: bool,
     pub hovered_world: Option<[f64; 2]>,
+    pub shift_held: bool,
     /// A click that landed on a pin (its `CanvasMarker::index`); `clicked_world` is then `None`, so a click
     /// on an existing pin never places a second defect on top of it.
     pub clicked_marker: Option<usize>,
+    /// A click that landed on a vertex of the active Burgers circuit loop.
+    pub clicked_circuit_vertex: Option<usize>,
 }
 
 pub struct Canvas2D {
@@ -54,6 +63,9 @@ pub struct Canvas2D {
     compiled: ScenePrimitives,
     export_markers: Vec<CanvasMarker>,
     cut_rays: Vec<CanvasCutRay>,
+    kinematic_overlay: CanvasKinematicOverlay,
+    circuit_overlay: Option<CanvasCircuitOverlay>,
+    gauge_overlay: Option<CrystalOverlayData>,
     export_title: Option<String>,
 }
 
@@ -73,6 +85,9 @@ impl Canvas2D {
             compiled,
             export_markers: Vec::new(),
             cut_rays: Vec::new(),
+            kinematic_overlay: CanvasKinematicOverlay::default(),
+            circuit_overlay: None,
+            gauge_overlay: None,
             export_title: None,
         }
     }
@@ -84,6 +99,9 @@ impl Canvas2D {
     pub fn set_scene_with_title(&mut self, scene: Scene2D, export_title: Option<String>, reset_view: bool) {
         self.export_markers.clear();
         self.cut_rays.clear();
+        self.kinematic_overlay = CanvasKinematicOverlay::default();
+        self.circuit_overlay = None;
+        self.gauge_overlay = None;
         self.export_title = export_title;
         self.compiled = compile_scene(&scene);
         self.scene = scene;
@@ -115,8 +133,30 @@ impl Canvas2D {
     pub(crate) fn scene(&self) -> &Scene2D { &self.scene }
 
     pub fn export_to_path(&self, path: &Path) -> Result<String, String> {
-        // SVG preserves arbitrary Unicode titles. PNG currently uses export_font's limited glyph set.
-        export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path)
+        if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() {
+            let mut prims = self.compiled.clone();
+            if let Some(ov) = &self.gauge_overlay {
+                gauge_overlay::apply_overlay_to_prims(&mut prims, ov);
+            }
+            if let Some(circ) = &self.circuit_overlay {
+                circuit::append_circuit_export_prims(&mut prims, circ);
+            }
+            export_scene_with_overlays(&prims, &self.export_markers, self.export_title.as_deref(), path)
+        } else {
+            export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path)
+        }
+    }
+
+    pub(crate) fn set_circuit_overlay(&mut self, circuit: Option<CanvasCircuitOverlay>) {
+        self.circuit_overlay = circuit;
+    }
+
+    pub(crate) fn set_gauge_overlay(&mut self, ov: Option<CrystalOverlayData>) {
+        self.gauge_overlay = ov;
+        self.compiled = compile_scene(&self.scene);
+        if let Some(data) = &self.gauge_overlay {
+            gauge_overlay::apply_overlay_to_prims(&mut self.compiled, data);
+        }
     }
 
     pub(crate) fn set_export_markers(&mut self, markers: &[CanvasMarker]) {
@@ -129,9 +169,18 @@ impl Canvas2D {
         self.cut_rays.extend_from_slice(rays);
     }
 
+    pub(crate) fn set_kinematic_overlay(&mut self, overlay: CanvasKinematicOverlay) {
+        self.kinematic_overlay = overlay;
+    }
+
     #[cfg(test)]
     pub(crate) fn cut_rays(&self) -> &[CanvasCutRay] {
         &self.cut_rays
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kinematic_overlay(&self) -> &CanvasKinematicOverlay {
+        &self.kinematic_overlay
     }
 
     /// The world <-> screen map of the current view inside `rect`.
@@ -171,7 +220,10 @@ impl Canvas2D {
         preview_world: Option<[f64; 2]>,
         interactive: bool,
     ) -> CanvasInteraction {
-        let mut out = CanvasInteraction::default();
+        let mut out = CanvasInteraction {
+            shift_held: ui.input(|i| i.modifiers.shift),
+            ..Default::default()
+        };
         let available = ui.available_size().max(egui::vec2(64.0, 64.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
 
@@ -251,8 +303,15 @@ impl Canvas2D {
         {
             match hit_pin_at(self, pos) {
                 Some(idx) => out.clicked_marker = Some(idx),
-                None if click_to_place => out.clicked_world = Some(self.screen_to_world_at(rect, pos)),
-                None => {}
+                None => {
+                    if let Some(circ) = &self.circuit_overlay
+                        && let Some(v) = circuit::pick_circuit_vertex(self, rect, circ, pos, 11.0)
+                    {
+                        out.clicked_circuit_vertex = Some(v);
+                    } else if click_to_place {
+                        out.clicked_world = Some(self.screen_to_world_at(rect, pos));
+                    }
+                }
             }
         }
 
@@ -267,8 +326,13 @@ impl Canvas2D {
             } else if let Some(pidx) = hit_pin_at(self, hpos) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 if let Some(m) = markers.iter().find(|m| m.index == pidx) {
+                    let hint = if self.kinematic_overlay.locked_pins.contains(&m.index) {
+                        "immobile fracton (ΔN=0) — Shift+drag to step & emit b"
+                    } else {
+                        "drag to move"
+                    };
                     response.clone().on_hover_text(format!(
-                        "#{} {} at ({:+.3}, {:+.3}) — drag to move",
+                        "#{} {} at ({:+.3}, {:+.3}) — {hint}",
                         m.index + 1,
                         m.label,
                         m.pos[0],
@@ -367,6 +431,18 @@ impl Canvas2D {
         if !self.cut_rays.is_empty() {
             cuts::draw_cut_rays(&painter, self, rect, &self.cut_rays);
         }
+        if let Some(ov) = &self.gauge_overlay {
+            gauge_overlay::draw_gauge_overlays(&painter, self, rect, ov);
+        }
+        if !self.kinematic_overlay.glide_lines.is_empty()
+            || !self.kinematic_overlay.locked_pins.is_empty()
+            || self.kinematic_overlay.reaction.is_some()
+        {
+            cuts::draw_kinematic_overlay(&painter, self, rect, markers, &self.kinematic_overlay);
+        }
+        if let Some(circ) = &self.circuit_overlay {
+            circuit::draw_circuit_overlay(&painter, self, rect, circ);
+        }
 
         for m in markers {
             let sp = to_screen([m.pos[0] as f32, m.pos[1] as f32]);
@@ -432,108 +508,4 @@ impl Canvas2D {
         }
         out
     }
-}
-
-fn marker_colors(kind: MarkerKind) -> (egui::Color32, egui::Color32) {
-    match kind {
-        MarkerKind::DisclinationPlus => (
-            egui::Color32::from_rgb(211, 47, 47),
-            egui::Color32::from_rgba_unmultiplied(211, 47, 47, 68),
-        ),
-        MarkerKind::DisclinationMinus => (
-            egui::Color32::from_rgb(25, 118, 210),
-            egui::Color32::from_rgba_unmultiplied(25, 118, 210, 68),
-        ),
-        MarkerKind::Dislocation => (
-            egui::Color32::from_rgb(237, 108, 2),
-            egui::Color32::from_rgba_unmultiplied(237, 108, 2, 68),
-        ),
-    }
-}
-
-fn draw_overlays(painter: &egui::Painter, rect: egui::Rect, title: &str, note: &str) {
-    if !title.is_empty() {
-        painter.text(
-            rect.left_top() + egui::vec2(8.0, 6.0),
-            egui::Align2::LEFT_TOP,
-            title,
-            egui::FontId::proportional(12.5),
-            egui::Color32::from_rgb(38, 48, 64),
-        );
-    }
-    if !note.is_empty() {
-        let banner_h = 24.0;
-        let top_y = if title.is_empty() { 6.0 } else { 24.0 };
-        let banner = egui::Rect::from_min_max(
-            rect.left_top() + egui::vec2(8.0, top_y),
-            egui::pos2(
-                rect.right() - 8.0,
-                (rect.top() + top_y + banner_h).min(rect.bottom() - 4.0),
-            ),
-        );
-        painter.rect_filled(
-            banner,
-            4.0,
-            egui::Color32::from_rgba_unmultiplied(255, 244, 214, 238),
-        );
-        painter.rect_stroke(
-            banner,
-            4.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(218, 160, 48)),
-            egui::StrokeKind::Inside,
-        );
-        painter.text(
-            banner.left_center() + egui::vec2(8.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            note,
-            egui::FontId::proportional(11.5),
-            egui::Color32::from_rgb(124, 68, 10),
-        );
-    }
-}
-
-pub(crate) fn to_color32(c: [u8; 4]) -> egui::Color32 {
-    egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3])
-}
-
-pub(crate) fn draw_dashed_egui(
-    painter: &egui::Painter,
-    p0: egui::Pos2,
-    p1: egui::Pos2,
-    stroke: egui::Stroke,
-    dash: f32,
-    gap: f32,
-) {
-    let delta = p1 - p0;
-    let total = delta.length();
-    if total < 1e-3 {
-        return;
-    }
-    let dir = delta / total;
-    let mut s = 0.0;
-    while s < total {
-        let e = (s + dash).min(total);
-        painter.line_segment([p0 + dir * s, p0 + dir * e], stroke);
-        s += dash + gap;
-    }
-}
-
-fn draw_arrow_mid_egui(
-    painter: &egui::Painter,
-    p0: egui::Pos2,
-    p1: egui::Pos2,
-    stroke: egui::Stroke,
-) {
-    let d = p1 - p0;
-    let len = d.length();
-    if len < 10.0 {
-        return;
-    }
-    let u = d / len;
-    let n = egui::vec2(-u.y, u.x);
-    let mid = p0 + d * 0.54;
-    let wing = 6.0;
-    let tip = mid + u * 3.5;
-    painter.line_segment([tip, tip - u * wing + n * (wing * 0.62)], stroke);
-    painter.line_segment([tip, tip - u * wing - n * (wing * 0.62)], stroke);
 }

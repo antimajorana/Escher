@@ -3,183 +3,23 @@ use std::collections::{BTreeMap, HashMap};
 use papertilling_core::defect::catalogue::DefectCatalogue;
 use papertilling_core::defect::charge::{frame_faces, total_charge};
 use papertilling_core::defect::core_graph::{LatticeCoreInfo, core_graph};
+use papertilling_core::defect::half_wall::build_half_wall;
 use papertilling_core::defect::sheet3d::{Sheet3DOptions, Sheet3DResult, relax_sheet_3d};
 use papertilling_core::defect::surgery::{DefectSpec, build_point_defects};
 use papertilling_core::plane::draw::{ensure_embedded, relax_picture};
-use papertilling_core::plane::family::LatticeFamily;
-use papertilling_core::plane::groups::WALLPAPER_GROUPS;
-use papertilling_core::surface::{
-    RefusalKind, SurfaceError, check_surface, cylinder, default_cylinder, default_genus_surface,
-    default_klein_bottle, default_mobius_band, default_torus, genus_surface_with_options,
-    klein_bottle, mobius_band, polyhedron, surface_table, symmetry_facts, torus,
-    try_poly_for_table_with_centre,
-};
-use papertilling_core::types::{
-    BuiltCrystal, Cell2D, DirectedBondData, SurfaceCheckReport, SurfaceMesh,
-};
+use papertilling_core::types::{BuiltCrystal, Cell2D, DirectedBondData};
 
 use crate::backend::{
-    CatalogueItemUi, CentreClassUi, CentreModeUi, DefectCatalogueUi, DefectReadoutUi,
-    DefectSelectionUi, DisclinationEntryUi, DislocationEntryUi, SurfaceBuildParamsUi,
-    SurfaceCellVerdictUi, SurfaceTargetUi, SurfaceVerdictRowUi, VerdictKindUi, WallEntryUi,
-    WallKindUi,
+    CatalogueItemUi, CentreClassUi, DefectCatalogueUi, DefectReadoutUi, DefectSelectionUi,
+    DisclinationEntryUi, DislocationEntryUi, WallEntryUi, WallKindUi,
 };
-use crate::live_plane::PlaneCatalogues;
+use crate::live_ops_ao::{Defect2dMode, relax_crystal_ao_2d};
 
-pub fn build_verdict_matrix(cats: &PlaneCatalogues) -> Vec<SurfaceVerdictRowUi> {
-    WALLPAPER_GROUPS
-        .iter()
-        .filter_map(|&grp| {
-            let group_cat = cats.points.get(grp)?;
-            let entry = group_cat.lattices.first().or_else(|| group_cat.all.first())?;
-            let cell = entry.family.cell();
-            let lattice_name = cats
-                .named
-                .named
-                .iter()
-                .find(|nl| nl.group == grp && nl.network_key == entry.network_key)
-                .map_or_else(|| format!("{grp} #1"), |nl| nl.name.clone());
-            Some(SurfaceVerdictRowUi { group: grp.to_string(), lattice_name, cells: verdict_cells(grp, &cell) })
-        })
-        .collect()
-}
-
-fn verdict_cells(group: &str, cell: &Cell2D) -> [SurfaceCellVerdictUi; 8] {
-    let mapped: Vec<SurfaceCellVerdictUi> = surface_table(group, cell)
-        .into_iter()
-        .map(|r| {
-            let verdict = match r.status.as_str() {
-                "OK" => VerdictKindUi::Ok,
-                "IMPOSSIBLE" => VerdictKindUi::Impossible,
-                _ => VerdictKindUi::NotFound,
-            };
-            let reason = match r.hint.as_deref() {
-                Some(h) if !h.is_empty() => format!("{} ({h})", r.reason),
-                _ => r.reason,
-            };
-            SurfaceCellVerdictUi { verdict, sites: r.sites, cones_summary: r.cones, reason }
-        })
-        .collect();
-    mapped.try_into().expect("8 SURFACES rows")
-}
-
-/// The 8 `surface_table` verdicts of one lattice (the row of the verdict matrix for the lattice on screen).
-pub fn build_verdict_cells(item: &CatalogueItemUi) -> Result<[SurfaceCellVerdictUi; 8], String> {
-    let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
-    Ok(verdict_cells(&item.group, &cell))
-}
-
-/// Python's `SURFACES` name of a target (the key of `surface_table` rows and of the IMPOSSIBLE proofs).
-pub fn surface_table_name(target: SurfaceTargetUi) -> &'static str {
-    match target {
-        SurfaceTargetUi::Torus => "torus",
-        SurfaceTargetUi::Cylinder => "cylinder",
-        SurfaceTargetUi::MobiusBand => "Moebius band",
-        SurfaceTargetUi::KleinBottle => "Klein bottle",
-        SurfaceTargetUi::Sphere => "sphere",
-        SurfaceTargetUi::ProjectivePlane => "projective plane",
-        SurfaceTargetUi::Genus2 => "genus 2",
-        SurfaceTargetUi::Genus3 => "genus 3",
-    }
-}
-
-fn centre_filter(mode: CentreModeUi) -> Option<&'static str> {
-    match mode {
-        CentreModeUi::Auto => None,
-        CentreModeUi::Face => Some("face centre"),
-        CentreModeUi::Site => Some("site"),
-    }
-}
-
-/// A refusal message that starts with its verdict (`IMPOSSIBLE: `, `NOT FOUND: ` or `invalid size: `).
-fn verdict_message(msg: String) -> String {
-    if msg.starts_with("IMPOSSIBLE") || msg.starts_with("NOT FOUND") || msg.starts_with("invalid size") {
-        msg
-    } else if msg.contains("must be") || msg.contains("must not") || msg.starts_with("invalid") || msg.contains("size (0, 0)") {
-        format!("invalid size: {msg}")
-    } else {
-        format!("NOT FOUND: {msg}")
-    }
-}
-
-fn surface_error_message(e: SurfaceError) -> String {
-    match e.kind {
-        RefusalKind::Impossible => format!("IMPOSSIBLE: {e}"),
-        RefusalKind::NotFound { .. } => format!("NOT FOUND: {e}"),
-        RefusalKind::InvalidArg => format!("invalid size: {e}"),
-    }
-}
-
-/// The lattice on `target` at exactly the size `(h, k)` of the controls (no silent fallback to another size):
-/// torus T1 = (h, 0), T2 = (0, k); cylinder wrap (0, k), h rows; Moebius band width h, along 2 k + 1 glide steps;
-/// Klein bottle across h, along 2 k + 1; sphere / projective plane size (h, k); genus g over the torus (h, 0) x (0, k).
-/// A refusal is returned as a message starting with its verdict (IMPOSSIBLE is proved from the symmetry only).
-pub fn build_surface_mesh(
-    item: &CatalogueItemUi,
-    target: SurfaceTargetUi,
-    params: &SurfaceBuildParamsUi,
-) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
-    let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
-    if let Some(reason) = symmetry_facts(&item.group).impossible_reason(surface_table_name(target)) {
-        return Err(format!("IMPOSSIBLE: {reason}"));
-    }
-    let (h, k) = (params.h, params.k);
-    let mesh = match target {
-        SurfaceTargetUi::Torus => torus(&cell, [h.max(1), 0], [0, k.max(1)]),
-        SurfaceTargetUi::Cylinder => cylinder(&cell, [0, k.max(1)], [h.max(1), 0]),
-        SurfaceTargetUi::MobiusBand => mobius_band(&cell, 0, 2 * k.max(1) + 1, h.max(1)),
-        SurfaceTargetUi::KleinBottle => klein_bottle(&cell, 0, 2 * k.max(1) + 1, h.max(1)),
-        SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane => {
-            let proj = target == SurfaceTargetUi::ProjectivePlane;
-            return polyhedron(&item.group, &cell, Some((h.max(0), k.max(0))), centre_filter(params.centre_mode), proj)
-                .map(|m| {
-                    let rep = check_surface(&m);
-                    (m, rep)
-                })
-                .map_err(surface_error_message);
-        }
-        SurfaceTargetUi::Genus2 | SurfaceTargetUi::Genus3 => {
-            let g = if target == SurfaceTargetUi::Genus2 { 2 } else { params.genus_g.max(3) as usize };
-            genus_surface_with_options(&cell, g, [h.max(1), 0], [0, k.max(1)], None)
-        }
-    }
-    .map_err(verdict_message)?;
-    let report = check_surface(&mesh);
-    Ok((mesh, report))
-}
-
-/// The lattice on `target` at the sizes `surface_table` uses (its default, then its retries): the surface behind
-/// the verdict-matrix cell. `centre_mode` restricts the sphere / projective-plane corners to one kind of centre.
-pub fn build_surface_mesh_auto(
-    item: &CatalogueItemUi,
-    target: SurfaceTargetUi,
-    centre_mode: CentreModeUi,
-    genus_g: u32,
-) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
-    let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
-    if let Some(reason) = symmetry_facts(&item.group).impossible_reason(surface_table_name(target)) {
-        return Err(format!("IMPOSSIBLE: {reason}"));
-    }
-    let mesh = match target {
-        SurfaceTargetUi::Torus => default_torus(&cell),
-        SurfaceTargetUi::Cylinder => default_cylinder(&cell),
-        SurfaceTargetUi::MobiusBand => default_mobius_band(&cell),
-        SurfaceTargetUi::KleinBottle => default_klein_bottle(&cell),
-        SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane => {
-            let proj = target == SurfaceTargetUi::ProjectivePlane;
-            let row = try_poly_for_table_with_centre(&item.group, &cell, proj, centre_filter(centre_mode));
-            match row.mesh {
-                Some(m) => Ok(m),
-                None => Err(format!("{}: {}", row.status, row.reason)),
-            }
-        }
-        SurfaceTargetUi::Genus2 => default_genus_surface(&cell, 2),
-        SurfaceTargetUi::Genus3 => default_genus_surface(&cell, genus_g.max(3) as usize),
-    }
-    .map_err(verdict_message)?;
-    let report = check_surface(&mesh);
-    Ok((mesh, report))
-}
+#[path = "live_ops_surfaces.rs"]
+mod live_ops_surfaces;
+pub use live_ops_surfaces::{
+    build_surface_mesh, build_surface_mesh_auto, build_verdict_cells, build_verdict_matrix,
+};
 
 #[path = "live_defects_cache.rs"]
 mod defect_cache;
@@ -201,7 +41,7 @@ fn line_direction_frac(cat: &DefectCatalogue, u: [f64; 2], line_id: &str) -> (i3
     }
 }
 
-fn collect_walls_ui(cat: &DefectCatalogue) -> Vec<WallEntryUi> {
+pub(crate) fn collect_walls_ui(cat: &DefectCatalogue) -> Vec<WallEntryUi> {
     let mut walls = Vec::new();
     for w in &cat.domain_walls {
         walls.push(WallEntryUi {
@@ -210,6 +50,8 @@ fn collect_walls_ui(cat: &DefectCatalogue) -> Vec<WallEntryUi> {
             direction_mn: (1, 0),
             description: format!("{} ({}; {})", w.coset, w.what, w.centre_map),
             default_note: if w.complete { String::new() } else { String::from("continuous normaliser sample") },
+            can_end_orientable: w.ending.can_end_orientable,
+            ending_summary: w.ending.summary.clone(),
         });
     }
     for w in &cat.twin_walls {
@@ -227,6 +69,8 @@ fn collect_walls_ui(cat: &DefectCatalogue) -> Vec<WallEntryUi> {
             direction_mn: (w.direction_frac[0], w.direction_frac[1]),
             description: format!("dir [{},{}] {pos_tag} ({vis_tag})", w.direction_frac[0], w.direction_frac[1]),
             default_note: if w.n_irregular > 0 { format!("{} irregular wall sites/period", w.n_irregular) } else { String::new() },
+            can_end_orientable: w.ending.can_end_orientable,
+            ending_summary: w.ending.summary.clone(),
         });
     }
     for w in &cat.mobius_seams {
@@ -236,6 +80,8 @@ fn collect_walls_ui(cat: &DefectCatalogue) -> Vec<WallEntryUi> {
             direction_mn: line_direction_frac(cat, w.direction, &w.line),
             description: format!("{} ({}), strip len={}", w.line, w.line_kind, w.length),
             default_note: String::from("non-orientable Möbius seam (stubs across seam)"),
+            can_end_orientable: w.ending.can_end_orientable,
+            ending_summary: w.ending.summary.clone(),
         });
     }
     for w in &cat.glide_breaking {
@@ -245,6 +91,8 @@ fn collect_walls_ui(cat: &DefectCatalogue) -> Vec<WallEntryUi> {
             direction_mn: line_direction_frac(cat, w.direction, &w.line),
             description: format!("{} ({}), slip/T={:.2}", w.line, w.line_kind, w.slip_over_period),
             default_note: w.same_as_twin.as_deref().map_or_else(String::new, |tw| format!("same geometry as {tw}")),
+            can_end_orientable: w.ending.can_end_orientable,
+            ending_summary: w.ending.summary.clone(),
         });
     }
     walls
@@ -391,6 +239,17 @@ pub fn build_defect_patch(
     radius: f64,
     relaxed: bool,
 ) -> (BuiltCrystal, DefectReadoutUi) {
+    let mode = if relaxed { Defect2dMode::RelaxedDrawing } else { Defect2dMode::Raw };
+    build_defect_patch_mode(item, selection, radius, mode, false)
+}
+
+pub fn build_defect_patch_mode(
+    item: &CatalogueItemUi,
+    selection: &DefectSelectionUi,
+    radius: f64,
+    draw_mode: Defect2dMode,
+    wall_half: bool,
+) -> (BuiltCrystal, DefectReadoutUi) {
     let ctx = match defect_context(item) {
         Ok(ctx) => ctx,
         Err(err) => return no_lattice_patch(item, err),
@@ -404,7 +263,7 @@ pub fn build_defect_patch(
             };
             let spec = [DefectSpec::Dislocation { b: entry.b, at: Some(entry.at), cut: None }];
             let title = format!("{} — Dislocation {} b=({}, {})", item.label, entry.id, entry.b_frac[0], entry.b_frac[1]);
-            build_and_finish_point_defect(cell, lat_info, &spec, radius, relaxed, title)
+            build_and_finish_point_defect(cell, lat_info, &spec, radius, draw_mode, title)
         }
         DefectSelectionUi::Disclination(idx) => {
             let Some(entry) = cat.disclinations.get(idx).or_else(|| cat.disclinations.first()) else {
@@ -413,21 +272,68 @@ pub fn build_defect_patch(
             };
             let spec = [DefectSpec::Disclination { angle_deg: entry.angle, at: entry.point, cut: None }];
             let title = format!("{} — Disclination {} ({:+.0}° at {})", item.label, entry.id, entry.angle, entry.wyckoff);
-            build_and_finish_point_defect(cell, lat_info, &spec, radius, relaxed, title)
+            build_and_finish_point_defect(cell, lat_info, &spec, radius, draw_mode, title)
         }
         DefectSelectionUi::Wall(idx) => {
             let walls = collect_walls_ui(cat);
             let Some(w_ui) = walls.get(idx).or_else(|| walls.first()) else {
                 return fallback_patch(lat_info, radius, format!("{} — no walls", item.label), "No Wa-Wd walls", String::new());
             };
-            let built = if relaxed {
+            let relax_draw = draw_mode == Defect2dMode::RelaxedDrawing;
+            if wall_half && w_ui.can_end_orientable {
+                let mut hw_notes = Vec::new();
+                let res = build_half_wall(cell, Some(&w_ui.id), None, [0.0, 0.0], None, Some(radius), relax_draw).or_else(|_| {
+                    hw_notes.push(String::from("expanded to minimum safe surgical radius"));
+                    build_half_wall(cell, Some(&w_ui.id), None, [0.0, 0.0], None, None, relax_draw)
+                });
+                return match res {
+                    Ok((resolved, mut crystal)) => {
+                        if draw_mode == Defect2dMode::ElasticAoMetric {
+                            match relax_crystal_ao_2d(&mut crystal) {
+                                Ok(r) => hw_notes.push(format!("AO GSV E={:.4} (shear={:.4})", r.total_energy, r.shear_energy)),
+                                Err(e) => hw_notes.push(format!("AO elastic fallback: {e}")),
+                            }
+                        }
+                        let (charge_summary, holonomy_detail) = match total_charge(&crystal) {
+                            Ok(ch) => {
+                                let b = ch.burgers.unwrap_or([0.0, 0.0]);
+                                (
+                                    format!("Half-wall ({}) | {} | Frank={:+.1}°, b=({:+.3}, {:+.3})", w_ui.id, ch.kind, ch.frank_deg, b[0], b[1]),
+                                    resolved.ending.summary.clone(),
+                                )
+                            }
+                            Err(e) => (format!("Half-wall ({}) | {}", w_ui.id, resolved.ending.summary), format!("total_charge: {e}")),
+                        };
+                        let readout = DefectReadoutUi {
+                            title: format!("{} — Terminated {} ({})", item.label, w_ui.id, w_ui.kind.label()),
+                            charge_summary,
+                            holonomy_detail,
+                            core_rings: summarize_rings_and_core(&crystal, lat_info),
+                            note: hw_notes.join("; "),
+                        };
+                        (crystal, readout)
+                    }
+                    Err(err) => fallback_patch(lat_info, radius, format!("{} — Terminated {}", item.label, w_ui.id), "Half-wall unavailable", err),
+                };
+            }
+            let built = if relax_draw {
                 cat.wall_picture(&w_ui.id, Some(radius)).map(|(c, inf)| {
                     let draw_note = inf.map(|i| i.note).unwrap_or_default();
                     let n = [w_ui.default_note.as_str(), draw_note.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join("; ");
                     (c, n)
                 })
             } else {
-                cat.build_wall(&w_ui.id, Some(radius)).map(|c| (c, w_ui.default_note.clone()))
+                cat.build_wall(&w_ui.id, Some(radius)).map(|mut c| {
+                    let mut n = w_ui.default_note.clone();
+                    if draw_mode == Defect2dMode::ElasticAoMetric {
+                        let ao_note = match relax_crystal_ao_2d(&mut c) {
+                            Ok(r) => format!("AO GSV E={:.4} (shear={:.4})", r.total_energy, r.shear_energy),
+                            Err(e) => format!("AO elastic fallback: {e}"),
+                        };
+                        n = [n.as_str(), ao_note.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join("; ");
+                    }
+                    (c, n)
+                })
             };
             let Some((crystal, note)) = built else {
                 return fallback_patch(lat_info, radius, format!("{} — {}", item.label, w_ui.id), "Wall unavailable", String::new());
@@ -451,7 +357,7 @@ fn build_and_finish_point_defect(
     lat_info: &LatticeCoreInfo,
     specs: &[DefectSpec],
     radius: f64,
-    relaxed: bool,
+    draw_mode: Defect2dMode,
     title: String,
 ) -> (BuiltCrystal, DefectReadoutUi) {
     let mut notes = Vec::new();
@@ -465,11 +371,20 @@ fn build_and_finish_point_defect(
             Err(err) => return fallback_patch(lat_info, radius, title, "Surgery refused", err),
         },
     };
-    if relaxed {
-        relax_picture(&mut crystal);
-        let info = ensure_embedded(&mut crystal, false);
-        if !info.note.is_empty() {
-            notes.push(info.note);
+    match draw_mode {
+        Defect2dMode::Raw => {}
+        Defect2dMode::RelaxedDrawing => {
+            relax_picture(&mut crystal);
+            let info = ensure_embedded(&mut crystal, false);
+            if !info.note.is_empty() {
+                notes.push(info.note);
+            }
+        }
+        Defect2dMode::ElasticAoMetric => {
+            match relax_crystal_ao_2d(&mut crystal) {
+                Ok(r) => notes.push(format!("AO GSV E={:.4} (shear={:.4})", r.total_energy, r.shear_energy)),
+                Err(e) => notes.push(format!("AO elastic fallback: {e}")),
+            }
         }
     }
     let (charge_summary, holonomy_detail) = match total_charge(&crystal) {

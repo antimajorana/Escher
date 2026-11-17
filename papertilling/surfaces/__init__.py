@@ -13,6 +13,7 @@ surface; no rotation -> no sphere, no projective plane) or SurfaceNotFound (this
 e.hint says what to try). surface_table(L) tries every surface and prints OK / IMPOSSIBLE / NOT FOUND with the reason.
 """
 from .base import Surface  # noqa: F401
+from .elastic import ElasticResult, relax_surface_3d, relax_configuration_3d  # noqa: F401
 from .flat import torus, cylinder, klein_bottle, mobius_band, glides  # noqa: F401
 from .genus import genus_surface, GenusSurface  # noqa: F401
 from .polyhedra import sphere, projective_plane, solid_net, frame_control  # noqa: F401

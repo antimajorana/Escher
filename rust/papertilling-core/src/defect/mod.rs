@@ -3,6 +3,8 @@
 
 pub mod catalogue;
 pub mod charge;
+pub mod circuit;
+mod circuit_auto;
 pub mod combine_api;
 pub mod combine_types;
 pub mod cone_builder;
@@ -10,9 +12,18 @@ pub mod cone_geometry;
 pub mod core_gallery;
 pub mod core_graph;
 pub mod equivalence;
+pub mod gauge;
+mod gauge_holonomy;
+pub mod gsv_elastic;
+pub mod gsv_mobius;
+mod gsv_model;
+pub mod half_wall;
+mod half_wall_cuts;
+pub mod kinematics;
 pub mod sheet3d;
 mod sheet3d_energy;
 mod sheet3d_opt;
+pub(crate) mod sheet3d_topology;
 pub mod single_cache;
 #[cfg(test)]
 mod stage5_gate_tests;
@@ -21,6 +32,7 @@ mod sym_helper;
 pub mod volterra_patch;
 pub mod volterra_scan;
 pub mod wall_build;
+pub mod wall_endings;
 pub mod walls;
 
 use petgraph::algo::is_isomorphic_matching;
@@ -28,7 +40,19 @@ use petgraph::graph::UnGraph;
 use serde::{Deserialize, Serialize};
 
 pub use catalogue::{CentreClassEntry, DefectCatalogue, DisclinationEntry, DislocationEntry};
+pub use circuit::{CircuitResult, auto_burgers_circuit, burgers_circuit, shift_circuit_basepoint};
+pub use gauge::{
+    FusionChannel, PlaquetteHolonomy, SpaceGroupElement, SpaceGroupExtension, WyckoffRotocentre,
+    apply_gauge_transform, fusion_channels, plaquette_holonomies, ribbon_faces, twisted_coboundary,
+    verify_d_r_squared, wyckoff_rotocentres,
+};
+pub use gsv_elastic::{
+    Elastic2DOptions, Elastic2DResult, gsv_diagnostics_2d, gsv_eval_2d, gsv_hessian_2d,
+    relax_elastic_2d, relax_elastic_2d_with_opts,
+};
+pub use half_wall::{ResolvedHalfWall, build_half_wall, resolve_half_wall_spec};
 pub use wall_build::{build_interface, build_mobius_seam, build_wall};
+pub use wall_endings::{WallEndingInfo, classify_wall_ending, nearest_ending_holonomy};
 pub use walls::{
     DomainWallEntry, GlideBreakingEntry, MirrorLineEntry, MobiusSeamEntry, NormaliserCoset,
     NormaliserInfo, TwinWallEntry,

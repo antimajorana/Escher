@@ -30,6 +30,10 @@ fn default_radius() -> usize {
     2
 }
 
+fn default_match_tier() -> String {
+    "none".to_string()
+}
+
 /// Topological charge classified in the lifted proper wallpaper group `G~+`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClassifiedCharge {
@@ -119,6 +123,12 @@ pub struct EquivalentSingleReport {
     pub single: Option<DefectSpec>,
     pub candidates: Vec<CoreCandidateInfo>,
     pub matches: Vec<String>,
+    #[serde(default)]
+    pub volterra_matches: Vec<String>,
+    #[serde(default)]
+    pub completion_matches: Vec<String>,
+    #[serde(default = "default_match_tier")]
+    pub match_tier: String,
     pub equivalent: bool,
     pub verdict: String,
     pub scan: Option<DislocationScanInfo>,
@@ -171,6 +181,12 @@ pub struct ConfigSummaryJson {
     pub kind: String,
     pub equivalent: bool,
     pub matches: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volterra_matches: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completion_matches: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_tier: Option<String>,
     pub verdict: String,
 }
 

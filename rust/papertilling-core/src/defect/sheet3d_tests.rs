@@ -425,12 +425,29 @@ fn analytic_gradient_matches_finite_differences_and_mobius_wall_is_safe() {
     let res_wc = relax_sheet_3d(&wc1, &s_cell, &Sheet3DOptions::default(), None);
     assert_eq!(res_wc.xyz.len(), wc1.pos.len());
     assert!(res_wc.xyz.iter().flatten().all(|v| v.is_finite()));
-    assert!(res_wc.bend_energy.is_finite() && res_wc.stretch_energy.is_finite());
+    assert!(!res_wc.faces.is_empty());
+    assert!(res_wc.bend_energy.is_finite() && res_wc.bend_energy > 0.0);
+    assert!(res_wc.stretch_energy.is_finite());
     assert!(
-        res_wc
-            .diagnostics
-            .iter()
-            .any(|s| s.contains("Möbius") && s.contains("not a physical"))
+        crate::defect::gsv_mobius::min_twisted_hinge_alignment(&res_wc.xyz, &res_wc.faces)
+            .is_some_and(|a| a.is_finite() && a > -0.65)
+    );
+    let long_wc = crate::defect::wall_build::build_mobius_seam(
+        &s_cell,
+        s_cat.mobius_seams[0].sigma,
+        28,
+        1.0,
+    );
+    let res_long = relax_sheet_3d(
+        &long_wc,
+        &s_cell,
+        &Sheet3DOptions { max_iters: 800, ..Default::default() },
+        None,
+    );
+    assert!(
+        crate::defect::gsv_mobius::min_twisted_hinge_alignment(&res_long.xyz, &res_long.faces)
+            .expect("smooth mobius hinges")
+            > 0.85
     );
 }
 

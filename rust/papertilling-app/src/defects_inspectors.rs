@@ -1,0 +1,304 @@
+//! Shared interactive Burgers circuit, 2D overlay selector, and Spectrum controls for `Defects` and `Combine`.
+
+use papertilling_core::defect::circuit::{
+    CircuitResult, auto_burgers_circuit, burgers_circuit, shift_circuit_basepoint,
+};
+use papertilling_core::types::{BuiltCrystal, Cell2D, Frame2D};
+
+use crate::canvas2d::Canvas2D;
+use crate::canvas2d::circuit::{CanvasCircuitOverlay, CircuitTargetMode, CircuitUiState};
+use crate::canvas2d::gauge_overlay::{
+    CrystalOverlayData, CrystalOverlayMode, SeamConnectionMark, color_sites_scalar,
+};
+use crate::mesh3d::{Sheet3dColorMode, Sheet3dViewOpts};
+use crate::spectrum_ui::show_spectrum_panel;
+use crate::spectrum_worker::{SpectrumColorOverlay, SpectrumPanelState};
+
+/// Interactive inspection state shared by `DefectsTabState` and `CombineTabState`.
+pub struct DefectInspectors {
+    pub circuit: CircuitUiState,
+    pub overlay_mode: CrystalOverlayMode,
+    pub spectrum: SpectrumPanelState,
+}
+
+impl Default for DefectInspectors {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DefectInspectors {
+    pub fn new() -> Self {
+        Self {
+            circuit: CircuitUiState::default(),
+            overlay_mode: CrystalOverlayMode::Standard,
+            spectrum: SpectrumPanelState::new(),
+        }
+    }
+
+    pub fn clear_for_switch(&mut self) {
+        self.circuit.overlay = None;
+        self.circuit.error = None;
+        self.circuit.base_v0 = None;
+        self.circuit.step_k = 0;
+        self.spectrum.clear_for_switch();
+    }
+
+    /// Recompute the active Burgers circuit overlay cleanly against `crystal` and `cell`.
+    pub fn refresh_circuit(
+        &mut self,
+        group: &str,
+        cell: &Cell2D,
+        frame: Frame2D,
+        crystal: &BuiltCrystal,
+        pin_centers: &[[f64; 2]],
+    ) {
+        if !self.circuit.enabled || crystal.pos.is_empty() {
+            self.circuit.overlay = None;
+            self.circuit.error = None;
+            return;
+        }
+        let target: Option<Vec<[f64; 2]>> = match self.circuit.target_mode {
+            CircuitTargetMode::SelectedPin if !pin_centers.is_empty() => {
+                let idx = self.circuit.pin_idx.min(pin_centers.len() - 1);
+                Some(vec![pin_centers[idx]])
+            }
+            _ => None,
+        };
+        let mut res: Result<CircuitResult, String> = auto_burgers_circuit(
+            crystal,
+            Some((group, cell, frame)),
+            target.as_deref().unwrap_or(&[]),
+            &[],
+            2,
+            &[],
+        );
+        if let Ok(mut cr) = res {
+            if let Some(v0) = self.circuit.base_v0
+                && cr.path.contains(&v0)
+                && let Ok(rot) = shift_circuit_basepoint(&cr.path, v0)
+                && let Ok(shifted) = burgers_circuit(crystal, &rot, Some((group, cell, frame)))
+            {
+                cr = shifted;
+            } else {
+                self.circuit.base_v0 = cr.path.first().copied();
+            }
+            res = Ok(cr);
+        }
+        match res {
+            Ok(cr) => {
+                let world_pts = cr.path.iter().filter_map(|&v| crystal.pos.get(v).copied()).collect::<Vec<_>>();
+                let mut across_steps = Vec::with_capacity(cr.path.len().saturating_sub(1));
+                for w in cr.path.windows(2) {
+                    let across = crystal.adj.get(w[0]).is_some_and(|r| r.iter().any(|e| e.to == w[1] && e.across));
+                    across_steps.push(across);
+                }
+                let k_max = cr.ref_path.len().saturating_sub(1);
+                self.circuit.step_k = self.circuit.step_k.min(k_max);
+                self.circuit.overlay = Some(CanvasCircuitOverlay {
+                    path: cr.path.clone(),
+                    world_pts,
+                    across_steps,
+                    result: cr,
+                    step_k: self.circuit.step_k,
+                });
+                self.circuit.error = None;
+            }
+            Err(err) => {
+                self.circuit.overlay = None;
+                self.circuit.error = Some(err);
+            }
+        }
+    }
+
+    pub fn build_crystal_overlay(
+        &self,
+        crystal: &BuiltCrystal,
+        ao_override: Option<CrystalOverlayData>,
+    ) -> Option<CrystalOverlayData> {
+        match self.overlay_mode {
+            CrystalOverlayMode::Standard => None,
+            CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge => {
+                let (vals, div) = self.spectrum.active_scalar_overlay()?;
+                Some(CrystalOverlayData { site_rgba: Some(color_sites_scalar(&vals, div)), ..Default::default() })
+            }
+            CrystalOverlayMode::SeamConnections => {
+                let mut seams = Vec::new();
+                for &(u, v) in &crystal.edges {
+                    if let Some(e) = crystal.adj.get(u).and_then(|r| r.iter().find(|b| b.to == v))
+                        && (e.seam.is_some() || e.across)
+                    {
+                        let (det_neg, lbl) = if let Some(g) = e.seam {
+                            let ang = g.m[1][0].atan2(g.m[0][0]).to_degrees().round() as i32;
+                            if g.det() < 0.0 {
+                                (true, String::from("det=-1"))
+                            } else if ang != 0 {
+                                (false, format!("{ang:+}°"))
+                            } else {
+                                (false, format!("t=({:.1},{:.1})", g.t[0], g.t[1]))
+                            }
+                        } else {
+                            (false, String::from("wall"))
+                        };
+                        seams.push(SeamConnectionMark { a: crystal.pos[u], b: crystal.pos[v], label: lbl, det_neg });
+                    }
+                }
+                Some(CrystalOverlayData { seams, ..Default::default() })
+            }
+            CrystalOverlayMode::GsvEnergyShear | CrystalOverlayMode::PlaquetteFlux => ao_override,
+        }
+    }
+
+    pub fn sync_to_canvas(&self, canvas: &mut Canvas2D, crystal: &BuiltCrystal, ao_override: Option<CrystalOverlayData>) {
+        canvas.set_circuit_overlay(if self.circuit.enabled { self.circuit.overlay.clone() } else { None });
+        canvas.set_gauge_overlay(self.build_crystal_overlay(crystal, ao_override));
+    }
+
+    pub fn spectral_3d_for(&self, color_mode: Sheet3dColorMode) -> Option<(&[f64], bool)> {
+        let res = self.spectrum.result.as_ref()?;
+        match color_mode {
+            Sheet3dColorMode::SpectralLdos if !res.ldos.is_empty() => Some((&res.ldos, false)),
+            Sheet3dColorMode::SpectralCharge if !res.delta_rho.is_empty() => Some((&res.delta_rho, true)),
+            _ => None,
+        }
+    }
+
+    pub fn sync_3d_from_spectrum(&self, sheet_opts: &mut Sheet3dViewOpts) {
+        match self.spectrum.color_overlay {
+            SpectrumColorOverlay::LdosMultiplet => sheet_opts.color_mode = Sheet3dColorMode::SpectralLdos,
+            SpectrumColorOverlay::SpectralCharge => sheet_opts.color_mode = Sheet3dColorMode::SpectralCharge,
+            SpectrumColorOverlay::None => {
+                if matches!(sheet_opts.color_mode, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge) {
+                    sheet_opts.color_mode = Sheet3dColorMode::FaceRingSize;
+                }
+            }
+        }
+    }
+
+    pub fn on_sheet_color_changed(&mut self, color_mode: Sheet3dColorMode) -> bool {
+        match color_mode {
+            Sheet3dColorMode::SpectralLdos => {
+                self.spectrum.color_overlay = SpectrumColorOverlay::LdosMultiplet;
+                self.overlay_mode = CrystalOverlayMode::SpectralLdos;
+                self.spectrum.result.is_none()
+            }
+            Sheet3dColorMode::SpectralCharge => {
+                self.spectrum.color_overlay = SpectrumColorOverlay::SpectralCharge;
+                self.overlay_mode = CrystalOverlayMode::SpectralCharge;
+                self.spectrum.result.is_none()
+            }
+            _ => false,
+        }
+    }
+
+    /// Render the circuit controls, 2D overlay dropdown, and collapsible Spectrum panel.
+    /// Returns `(circuit_changed, overlay_changed, spectrum_recompute, spectrum_colors_changed)`.
+    pub fn show_controls_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        id_prefix: &str,
+        num_pins: usize,
+        allow_seam_sign: bool,
+    ) -> (bool, bool, bool, bool) {
+        let mut circ_dirty = false;
+        let mut ov_dirty = false;
+
+        ui.separator();
+        ui.strong("Burgers Circuit & Parallel Transport");
+        ui.horizontal_wrapped(|ui| {
+            if ui.checkbox(&mut self.circuit.enabled, "Burgers Circuit").changed() {
+                circ_dirty = true;
+            }
+            if self.circuit.enabled && num_pins > 1 {
+                if ui.selectable_label(self.circuit.target_mode == CircuitTargetMode::AllDefects, "All").clicked()
+                    && self.circuit.target_mode != CircuitTargetMode::AllDefects
+                {
+                    self.circuit.target_mode = CircuitTargetMode::AllDefects;
+                    self.circuit.base_v0 = None;
+                    circ_dirty = true;
+                }
+                if ui.selectable_label(self.circuit.target_mode == CircuitTargetMode::SelectedPin, "Pin").clicked()
+                    && self.circuit.target_mode != CircuitTargetMode::SelectedPin
+                {
+                    self.circuit.target_mode = CircuitTargetMode::SelectedPin;
+                    self.circuit.base_v0 = None;
+                    circ_dirty = true;
+                }
+                if self.circuit.target_mode == CircuitTargetMode::SelectedPin {
+                    for k in 0..num_pins {
+                        if ui.selectable_label(self.circuit.pin_idx == k, format!("#{}", k + 1)).clicked() {
+                            self.circuit.pin_idx = k;
+                            self.circuit.base_v0 = None;
+                            circ_dirty = true;
+                        }
+                    }
+                }
+            }
+        });
+        if self.circuit.enabled {
+            let mut next_k = None;
+            if let Some(ov) = &self.circuit.overlay {
+                let k_max = ov.result.ref_path.len().saturating_sub(1);
+                ui.horizontal(|ui| {
+                    ui.small("Step:");
+                    if ui.add(egui::Slider::new(&mut self.circuit.step_k, 0..=k_max)).changed() {
+                        next_k = Some(self.circuit.step_k.min(k_max));
+                        ov_dirty = true;
+                    }
+                    if let Some(v0) = self.circuit.base_v0 {
+                        ui.small(format!("v0={v0}"));
+                    }
+                });
+                let cum_a = ov.result.cum_angle_deg.get(self.circuit.step_k).copied().unwrap_or(0.0);
+                ui.small(format!(
+                    "Circuit ({} edges): orientable={}, cum={cum_a:+.1}°, |b|={:.3} (click loop site to shift v0)",
+                    k_max, ov.result.orientation_preserving, ov.result.burgers_norm
+                ));
+            } else if let Some(err) = &self.circuit.error {
+                ui.small(format!("Circuit unavailable: {err}"));
+            }
+            if let (Some(k), Some(ov)) = (next_k, &mut self.circuit.overlay) {
+                ov.step_k = k;
+            }
+        }
+
+        ui.horizontal(|ui| {
+            ui.small("2D Overlay:");
+            let prev = self.overlay_mode;
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_2d_ov"))
+                .selected_text(self.overlay_mode.label())
+                .show_ui(ui, |ui| {
+                    for m in CrystalOverlayMode::ALL {
+                        ui.selectable_value(&mut self.overlay_mode, m, m.label());
+                    }
+                });
+            if self.overlay_mode != prev {
+                ov_dirty = true;
+                match self.overlay_mode {
+                    CrystalOverlayMode::SpectralLdos => self.spectrum.color_overlay = SpectrumColorOverlay::LdosMultiplet,
+                    CrystalOverlayMode::SpectralCharge => self.spectrum.color_overlay = SpectrumColorOverlay::SpectralCharge,
+                    _ => {}
+                }
+            }
+        });
+
+        let sp_ev = show_spectrum_panel(ui, &mut self.spectrum, &format!("{id_prefix}_spec"), true, allow_seam_sign);
+        let mut spec_recomp = sp_ev.recompute;
+        if ov_dirty && matches!(self.overlay_mode, CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge) && self.spectrum.result.is_none() {
+            spec_recomp = true;
+        }
+        if sp_ev.redraw_colors {
+            match self.spectrum.color_overlay {
+                SpectrumColorOverlay::LdosMultiplet => self.overlay_mode = CrystalOverlayMode::SpectralLdos,
+                SpectrumColorOverlay::SpectralCharge => self.overlay_mode = CrystalOverlayMode::SpectralCharge,
+                SpectrumColorOverlay::None => {
+                    if matches!(self.overlay_mode, CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge) {
+                        self.overlay_mode = CrystalOverlayMode::Standard;
+                    }
+                }
+            }
+            ov_dirty = true;
+        }
+        (circ_dirty, ov_dirty, spec_recomp, sp_ev.redraw_colors)
+    }
+}

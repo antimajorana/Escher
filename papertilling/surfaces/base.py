@@ -342,6 +342,11 @@ class Surface:
         fig.subplots_adjust(left=0.01, right=0.99, bottom=0.13, top=0.9, wspace=0.02)
         return fig
 
+    def relax_3d(self, kappa_b: float = 0.02, max_iter: int = 400):
+        """Relax the surface in 3D under spring stretching and hinge bending."""
+        from .elastic import relax_surface_3d
+        return relax_surface_3d(self, kappa_b=kappa_b, max_iter=max_iter)
+
 
 def show(S, **kw):
     """The flat piece and the 3D shape of a Surface side by side (S.show())."""

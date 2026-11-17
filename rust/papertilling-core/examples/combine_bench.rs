@@ -37,7 +37,7 @@ fn auto_radius(cell: &Cell2D, info: &LatticeCoreInfo, specs: &[DefectSpec], scal
     let pts: Vec<[f64; 2]> = specs
         .iter()
         .map(|s| match *s {
-            DefectSpec::Disclination { at, .. } => at,
+            DefectSpec::Disclination { at, .. } | DefectSpec::HalfWall { at, .. } => at,
             DefectSpec::Dislocation { at, .. } => at.unwrap_or([0.0, 0.0]),
         })
         .collect();
@@ -48,7 +48,7 @@ fn auto_radius(cell: &Cell2D, info: &LatticeCoreInfo, specs: &[DefectSpec], scal
         .iter()
         .filter_map(|s| match *s {
             DefectSpec::Dislocation { b, .. } => Some(b[0].hypot(b[1])),
-            DefectSpec::Disclination { .. } => None,
+            DefectSpec::Disclination { .. } | DefectSpec::HalfWall { .. } => None,
         })
         .fold(0.0_f64, f64::max);
     base.max(max_d + (5.8 * info.lmax + max_b).max(3.6 * info.scale))

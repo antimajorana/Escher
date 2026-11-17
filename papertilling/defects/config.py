@@ -143,10 +143,21 @@ def equivalent_single(config: Configuration, radius: int = 2, grid: int = 3, sho
     them, at most 30 panels, when nothing matches); a charge with Volterra cores only shows those only."""
     lat = config.lattice
     q = config.total_charge()
-    H = config.core_graph(radius)
-    res = dict(charge=q["label"], kind=q["kind"], single=q["single"], candidates=[], matches=[], equivalent=False,
-               gallery=[])
-    if q["kind"] == "dislocation":
+    res = dict(charge=q["label"], kind=q["kind"], single=q["single"], candidates=[], matches=[],
+               volterra_matches=[], completion_matches=[], match_tier="none", equivalent=False, gallery=[])
+    if q["kind"] in ("dislocation", "vacuum") or (q["kind"] == "disclination" and q["single"] is not None):
+        try:
+            H = config.core_graph(radius)
+        except ValueError:
+            if any(s.get("kind") == "half_wall" for s in config.specs):
+                H = None
+            else:
+                raise
+    else:
+        H = None
+    if H is None:
+        pass
+    elif q["kind"] == "dislocation":
         cands, info = dislocation_core_list(lat, q["b"], radius=radius, grid=grid, fast=fast)
         from .cores import core_gallery
         res["gallery"] = core_gallery(lat, q["b"], radius=radius, grid=grid, draw=False, fast=fast)
@@ -156,14 +167,21 @@ def equivalent_single(config: Configuration, radius: int = 2, grid: int = 3, sho
         if not res["matches"] and len(config.specs) == 1 and config.specs[0].get("kind") == "dislocation":
             # one dislocation IS a single defect; its cut end is simply not one of the scanned positions
             res["matches"] = ["its own core (the configuration is one dislocation; its cut end is not among the scanned ones)"]
+        vol_set = {c["name"] for c in cands if c.get("volterra")}
+        comp_set = {c["name"] for c in cands if not c.get("volterra")}
+        res["volterra_matches"] = [m for m in res["matches"] if m in vol_set or m.startswith("its own core")]
+        res["completion_matches"] = [m for m in res["matches"] if m in comp_set]
+        res["match_tier"] = "volterra" if res["volterra_matches"] else ("completion" if res["completion_matches"] else "none")
     elif q["kind"] == "disclination" and q["single"] is not None:
         s = q["single"]
         single = build(lat, dict(kind="disclination", angle=s["angle"], at=s["at"]), picture="raw", fast=fast)
         ok = _iso_cores(H, single.core_graph(radius), fast)
         res["candidates"] = [dict(name=f"single {s['angle']:+g} deg at {np.round(s['at'], 4).tolist()}")]
         res["matches"] = [res["candidates"][0]["name"]] if ok else []
+        res["match_tier"] = "exact" if res["matches"] else "none"
     elif q["kind"] == "vacuum":
         res["matches"] = ["perfect lattice"] if H.number_of_nodes() == 0 else []
+        res["match_tier"] = "exact" if res["matches"] else "none"
     res["equivalent"] = bool(res["matches"])
     if res["equivalent"]:
         res["verdict"] = f"equivalent to the single defect (core: {', '.join(res['matches'])})"
@@ -292,6 +310,15 @@ def _serialize_spec(s: dict) -> dict:
         out: dict = {"kind": "dislocation", "b": [float(x) for x in s["b"]]}
         if s.get("at") is not None:
             out["at"] = [float(x) for x in s["at"]]
+    elif s["kind"] == "half_wall":
+        out = {"kind": "half_wall", "at": [float(x) for x in s["at"]]}
+        if s.get("wall_id") is not None:
+            out["wall_id"] = str(s["wall_id"])
+        if s.get("direction") is not None:
+            out["direction"] = [float(x) for x in s["direction"]]
+        if s.get("sigma") is not None:
+            out["sigma"] = [np.asarray(s["sigma"][0], float).tolist(), np.asarray(s["sigma"][1], float).tolist()]
+        return out
     else:
         out = {"kind": "disclination", "angle": float(s["angle"]), "at": [float(x) for x in s["at"]]}
     if s.get("cut") is not None:
@@ -338,6 +365,9 @@ def config_to_dict(config: Configuration, *, lattice=None, label: str = "", grid
             "kind": str(eq["kind"]),
             "equivalent": bool(eq["equivalent"]),
             "matches": [str(m) for m in eq["matches"]],
+            "volterra_matches": [str(m) for m in eq["volterra_matches"]],
+            "completion_matches": [str(m) for m in eq["completion_matches"]],
+            "match_tier": str(eq["match_tier"]),
             "verdict": str(eq["verdict"]),
         }
     return out

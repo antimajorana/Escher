@@ -31,6 +31,8 @@ import math
 
 import numpy as np
 
+from ._alt_polyhedra import alternating_matches_centre, build_alternating_rp2, find_split_order4_pair
+from ._obstruction import check_local_cone_obstruction
 from .pieces import ConeRefused, LatticeData, glue, pairing_test, _rot
 from .refusal import (SurfaceImpossible, SurfaceNotFound, no_reversing_reason, no_rotation_reason,  # noqa: F401
                       symmetry_facts)
@@ -122,7 +124,7 @@ def _centre_hint(recs):
     return "try centre=None (every usable class), or centre=" + " or ".join(repr(x) for x in ok)
 
 
-def _candidates(cat, n, centre):
+def _candidates(cat, n, centre, projective=False):
     """Rotation-centre classes of order n to try, in order: given one, or face centres then sites (default)."""
     recs = [r for r in cat.centre_classes if r["order"] == n]
     if centre is None:
@@ -131,6 +133,8 @@ def _candidates(cat, n, centre):
             [r for r in recs if r["location"] not in order]
     if isinstance(centre, str):
         hit = [r for r in recs if centre in (r["id"], r["label"], r["location"], r.get("gclass"))]
+        if not hit and projective and n == 4 and alternating_matches_centre(find_split_order4_pair(cat), centre):
+            return [], []
     else:
         rec = cat.centre_class_of(np.asarray(centre, float))
         hit = [] if rec is None else [dict(rec, point=np.asarray(centre, float))]
@@ -333,6 +337,17 @@ def _pillow_net(lat, c0, h, k, projective):
     return pieces, pairs, None, None
 
 
+def _failed_checks(S, projective):
+    ch = S.checks(show=False)
+    keys = ("no_loops", "no_double_bonds", "faces_at_least_3", "plane_coordination", "euler", "gauss_bonnet", "net_euler")
+    bad = [k for k in keys if not ch[k]]
+    if projective and S.orientable:
+        bad.append("non_orientable")
+    if S.chi != (1 if projective else 2):
+        bad.append("chi")
+    return bad
+
+
 def _build(lattice, size, centre, projective):
     lat = lattice if isinstance(lattice, LatticeData) else LatticeData(lattice)
     cat = _catalogue(lat.L)
@@ -349,11 +364,14 @@ def _build(lattice, size, centre, projective):
     if n == 1:
         raise SurfaceNotFound(f"the catalogue lists no rotation centre for {lat.L.group}, but the lattice has a rotation of "
                               f"order {facts['rotation_orders']} on the cell: please report this lattice", retry=False)
+    if centre is None:
+        check_local_cone_obstruction(lat, cat, what)
     solid = SOLIDS[n]
     if size is None:
         size = (1, 1) if (projective or n == 2) else (1, 0)
-    cands, skipped = _candidates(cat, n, centre)
-    if not cands:
+    cands, skipped = _candidates(cat, n, centre, projective=projective)
+    can_alt = projective and solid == "cube" and alternating_matches_centre(find_split_order4_pair(cat), centre)
+    if not cands and not can_alt:
         raise SurfaceNotFound(f"{what} not found for {lat.L.group}: every order-{n} centre is at a bond midpoint (a cone "
                               f"there folds the bond into a loop), so the {'hemi-' if projective else ''}{solid} construction has no corner to use at any "
                               "size", tried=[f"centres {', '.join(r['label'] for r in skipped)} (bond midpoints)"],
@@ -371,14 +389,12 @@ def _build(lattice, size, centre, projective):
         except SurfaceNotFound as e:
             errors.append((rec["label"], str(e)))
             continue
+        bad = _failed_checks(S, projective)
+        if bad:
+            ch = S.checks(show=False)
+            errors.append((rec["label"], f"checks failed ({', '.join(bad)}: V {ch['V']}, E {ch['E']}, F {ch['F']}, chi {S.chi})"))
+            continue
         S.params["refused"] = errors
-        if projective and S.orientable:
-            raise RuntimeError("the projective plane came out orientable")
-        ch = S.checks(show=False)
-        bad = [k for k in ("euler", "plane_coordination", "gauss_bonnet", "net_euler") if not ch[k]]
-        if bad or S.chi != (1 if projective else 2):
-            raise RuntimeError(f"{kind} of {lat.L.group}: internal check(s) {bad} failed (V {ch['V']}, E {ch['E']}, "
-                               f"F {ch['F']}, chi {S.chi}): please report this case")
         if projective and solid == "pillow":
             _hemi_pillow_xyz(S, pieces)
         else:
@@ -389,6 +405,10 @@ def _build(lattice, size, centre, projective):
         else:
             S.xyz_note = f"faces of the {solid} pushed onto the unit sphere (bonds near the cones shortened)"
         return S
+    if can_alt:
+        alt = build_alternating_rp2(lat, cat, size, centre, errors, skipped, _failed_checks)
+        if alt is not None:
+            return alt
     ladder = [(1, 1), (1, 2), (2, 1), (2, 2)] if solid == "pillow" else [(1, 0), (1, 1), (2, 0), (2, 1)]
     other = [z for z in ladder if z != tuple(size)][:2]
     err = SurfaceNotFound(f"{what} of {lat.L.group} not found: the {'hemi-' if projective else ''}{solid} construction at "

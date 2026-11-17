@@ -117,7 +117,8 @@ def _why(msg):
 def _one(name, L, facts, attempts, budget):
     t0 = time.perf_counter()
     ctor = _constructor(name)
-    row = dict(surface=name, status="NOT FOUND", reason="", S=None, sites=None, cones="-", seconds=0.0, tried=[], hint=None)
+    row = dict(surface=name, status="NOT FOUND", reason="", S=None, sites=None, cones="-", seconds=0.0, tried=[], hint=None,
+               scope=None)
     whys, centres, last, folds = [], [], None, []
     from .refusal import SurfaceImpossible, SurfaceNotFound
     for k, kw in enumerate(attempts):
@@ -128,7 +129,8 @@ def _one(name, L, facts, attempts, budget):
             S = ctor(L, **kw)
             ch = S.checks(show=False)
         except SurfaceImpossible as e:
-            row.update(status="IMPOSSIBLE", reason=e.reason, tried=row["tried"] + [_kw(kw)])
+            row.update(status="IMPOSSIBLE", reason=e.reason, tried=row["tried"] + [_kw(kw)],
+                       scope=getattr(e, "scope", "group"))
             break
         except SurfaceNotFound as e:
             last = e

@@ -18,8 +18,14 @@ _EXPORTS = {
     "wyckoff_table": "groups", "wyckoff_markdown": "groups",
     "network_key": "dsymbol",
     "explore": "widgets",
+    "spectrum": "spectrum",
     "DefectCatalogue": "defects.catalogue", "build": "defects.build",
     "equivalent_single": "defects.config", "compare": "defects.config", "classify": "defects.config",
+    "space_group_extension": "defects.gauge", "wyckoff_rotocentres": "defects.gauge",
+    "fusion_channels": "defects.gauge", "ribbon_faces": "defects.gauge",
+    "plaquette_holonomies": "defects.gauge", "twisted_coboundary": "defects.gauge",
+    "relax_elastic_2d": "defects.gsv_elastic", "eval_gsv_energy": "defects.gsv_elastic",
+    "gsv_hessian_2d": "defects.gsv_elastic", "gsv_pairs": "defects.gsv_elastic",
 }
 __all__ = sorted(_EXPORTS) + ["__version__"]
 

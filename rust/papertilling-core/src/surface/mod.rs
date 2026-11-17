@@ -3,9 +3,12 @@
 
 #[cfg(test)]
 mod audit_tests;
+pub mod alt_polyhedra;
 pub mod checks;
+pub mod elastic3d;
 pub mod flat;
 pub mod genus;
+pub mod obstruction;
 pub mod pieces;
 pub mod pieces_glue;
 pub mod polyhedra;
@@ -21,6 +24,10 @@ use serde::{Deserialize, Serialize};
 use crate::types::Cell2D;
 
 pub use checks::{check_surface, face_histogram};
+pub use elastic3d::{
+    SurfaceElasticResult, canonical_gauge, cyclic_polygon_radii, estimate_planar_frank_deg,
+    face_spoke_lengths, relax_indexed_elastic, relax_surface_3d,
+};
 pub use flat::{
     GlideAxis, cylinder, default_cylinder, default_klein_bottle, default_mobius_band,
     default_torus, glides, klein_bottle, mobius_band, torus,
@@ -83,6 +90,7 @@ pub struct SurfaceErrorData {
     pub hint: Option<String>,
     pub centres: Vec<String>,
     pub causes: Vec<String>,
+    pub scope: Option<&'static str>,
 }
 
 /// Structured refusal returned when a surface construction is impossible or refused at given settings.
@@ -112,10 +120,18 @@ impl SurfaceError {
             hint: None,
             centres: Vec::new(),
             causes: Vec::new(),
+            scope: None,
         }))
     }
     pub fn impossible(reason: impl Into<String>) -> Self {
-        Self::base(RefusalKind::Impossible, reason, String::new())
+        let mut e = Self::base(RefusalKind::Impossible, reason, String::new());
+        e.scope = Some("group");
+        e
+    }
+    pub fn impossible_lattice(reason: impl Into<String>) -> Self {
+        let mut e = Self::base(RefusalKind::Impossible, reason, String::new());
+        e.scope = Some("lattice");
+        e
     }
     pub fn not_found(reason: impl Into<String>, detail: impl Into<String>, retry: bool) -> Self {
         Self::base(RefusalKind::NotFound { retry }, reason, detail)
@@ -330,7 +346,7 @@ pub enum SurfaceVerdict {
         orientable: bool,
         cones: Vec<ConeDefect>,
     },
-    Impossible { reason: String },
+    Impossible { reason: String, scope: String },
     NotFound { reason: String, hint: Option<String> },
 }
 

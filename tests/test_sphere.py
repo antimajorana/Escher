@@ -36,7 +36,9 @@ import pytest
 import papertilling
 
 from papertilling.surfaces import sphere, projective_plane, solid_net, frame_control
-from papertilling.surfaces.pieces import ConeRefused, pairing_test
+from papertilling.surfaces.pieces import ConeRefused, LatticeData, pairing_test
+from papertilling.surfaces.refusal import SurfaceImpossible, SurfaceNotFound
+from papertilling.surfaces._obstruction import _site_cone_usable
 
 
 class pt:                                    # each named lattice built once per test run (only read afterwards)
@@ -195,3 +197,56 @@ def test_explicit_face_centre_with_too_few_sides_refused():
     """Oblique (p2): a cone of 180 deg at the centre of a 4-sided face leaves it 4 x (1 - 1/2) = 2 sides (a double bond)."""
     with pytest.raises(ConeRefused, match="faces_at_least_3"):
         sphere(pt.named("oblique"), (1, 1), centre="face centre")
+    with pytest.raises(SurfaceNotFound):
+        sphere(pt.named("oblique"), (1, 1), centre="face centre")
+
+
+# ----------------------------------------------------------------------------------------------------------------
+# Stage 1 controls: alternating p4g RP2 and Proof (c) local cone obstruction
+# ----------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("getter", [lambda: papertilling.load_catalogue()["p4g"].lattices[0], lambda: pt.named("shastry_sutherland")])
+def test_p4g_alternating_rp2(getter):
+    L = getter()
+    for cf in (None, "2a", "2a(i)+2a(ii)", "face centre"):
+        P1 = projective_plane(L, (1, 1), centre=cf)
+        v, e, f, _, c = counts(P1)
+        assert (v, e, f) == (6, 15, 10) and c["ok"] and P1.chi == 1 and not P1.orientable
+        assert P1.params["centre"] == "2a(i)+2a(ii)"
+        assert sorted(k["label"] for k in P1.cones) == ["2a(i)", "2a(i)", "2a(ii)", "2a(ii)"]
+        assert all(abs(k["angle"] - 90) < 1e-9 for k in P1.cones)
+        assert P1.cover is not None and len(P1.cover.sites) == 12
+        assert np.allclose(P1.cover.xyz[:6], -P1.cover.xyz[6:])
+    P2 = projective_plane(L, (2, 2))
+    v2, e2, f2, _, c2 = counts(P2)
+    h = 2
+    assert (v2, e2, f2) == (6 * (2 * h - 1) ** 2, 15 * (2 * h - 1) ** 2, 1 + 9 * (2 * h - 1) ** 2) and c2["ok"]
+    with pytest.raises(SurfaceNotFound):
+        projective_plane(L, (2, 1))
+    with pytest.raises(SurfaceNotFound):
+        projective_plane(L, (1, 1), centre="2a(i)")
+
+
+def test_local_cone_obstruction_proof_c():
+    cat = papertilling.load_catalogue()
+    for L in (cat["pmg"].lattices[0], cat["pgg"].lattices[0], cat["p3"].lattices[0],
+              cat["p31m"].lattices[0], pt.named("zigzag"), pt.named("elongated_triangular"),
+              pt.named("straight"), pt.named("shastrys_ladder"), pt.named("sutherlands_brick")):
+        with pytest.raises(SurfaceImpossible, match="proved for this lattice") as e:
+            sphere(L)
+        assert e.value.scope == "lattice"
+    # Usable site / mixed-face lattices remain constructible (not refused by Proof c)
+    assert sphere(cat["cmm"].lattices[0]).status == "OK"
+    assert sphere(cat["p3m1"].lattices[0]).status == "OK"
+    assert sphere(pt.named("oblique"), (1, 1)).status == "OK"
+    assert _site_cone_usable(LatticeData(cat["cmm"].lattices[0]), np.array([0.0, 0.0]), 2, 1)[0]
+    assert _site_cone_usable(LatticeData(pt.named("oblique")), np.array([0.0, 0.0]), 2, 1)[0]
+    # Negative control: d=3 triangle vertex with order-3 cone (120 deg -> d_surv=2 triangles -> double bond)
+    tri_deg3 = papertilling.Lattice.from_recipe({
+        "group": "p3",
+        "a": 1.0,
+        "sites": [[0.0, 0.0], [1 / 3, 2 / 3]],
+        "bonds": [[[0.0, 0.0], [1.0, 0.0]], [[0.0, 0.0], [1 / 3, 2 / 3]]],
+    })
+    lat_tri3 = LatticeData(tri_deg3)
+    assert not _site_cone_usable(lat_tri3, lat_tri3.pos((1, 0, 0)), 3, 1)[0]
+    assert not _site_cone_usable(lat_tri3, lat_tri3.pos((1, 0, 0)), 3, 2)[0]

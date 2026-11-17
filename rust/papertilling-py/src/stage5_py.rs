@@ -336,6 +336,9 @@ mod tests {
         let eq_v: serde_json::Value = serde_json::from_str(&eq_s).unwrap();
         assert_eq!(eq_v["equivalent"], serde_json::Value::Bool(true));
         assert_eq!(eq_v["matches"], serde_json::json!(["Volterra core 1"]));
+        assert_eq!(eq_v["volterra_matches"], serde_json::json!(["Volterra core 1"]));
+        assert_eq!(eq_v["completion_matches"], serde_json::json!([]));
+        assert_eq!(eq_v["match_tier"], serde_json::json!("volterra"));
 
         let gal_s = pure_core_gallery("p4m", sq_cell, [1.0, 0.0], 2, 1, None, false).unwrap();
         let gal_v: serde_json::Value = serde_json::from_str(&gal_s).unwrap();

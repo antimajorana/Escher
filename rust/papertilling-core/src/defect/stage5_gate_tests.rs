@@ -217,6 +217,9 @@ fn stage5_notebook_config_json_roundtrip() {
             kind: "disclination".to_string(),
             equivalent: false,
             matches: Vec::new(),
+            volterra_matches: Vec::new(),
+            completion_matches: Vec::new(),
+            match_tier: None,
             verdict: "not equivalent to the single defect".to_string(),
         }),
     };

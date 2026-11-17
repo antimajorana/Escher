@@ -54,11 +54,12 @@ pub fn default_cut_angle_deg(
     };
     if let Some(c) = match *spec {
         DefectSpec::Disclination { cut, .. } | DefectSpec::Dislocation { cut, .. } => cut,
+        DefectSpec::HalfWall { .. } => None,
     } {
         return c[1].atan2(c[0]).to_degrees();
     }
     let anchor = match *spec {
-        DefectSpec::Disclination { at, .. } => at,
+        DefectSpec::Disclination { at, .. } | DefectSpec::HalfWall { at, .. } => at,
         DefectSpec::Dislocation { b, .. } => {
             let at = spec_world_pos(info, idx, spec);
             [at[0] + 0.5 * b[0], at[1] + 0.5 * b[1]]
@@ -81,7 +82,7 @@ pub fn default_cut_angle_deg(
             let lb = b[0].hypot(b[1]).max(1e-12);
             (b[0] / lb).atan2(-b[1] / lb).to_degrees()
         }
-        DefectSpec::Disclination { .. } => 0.123_f64.to_degrees(),
+        DefectSpec::Disclination { .. } | DefectSpec::HalfWall { .. } => 0.123_f64.to_degrees(),
     }
 }
 
@@ -92,6 +93,7 @@ pub fn set_pin_cut_angle(spec: &mut DefectSpec, angle_deg: Option<f64>) {
     });
     match spec {
         DefectSpec::Disclination { cut, .. } | DefectSpec::Dislocation { cut, .. } => *cut = vec,
+        DefectSpec::HalfWall { direction, .. } => *direction = vec,
     }
 }
 
@@ -163,6 +165,7 @@ pub fn merge_coincident_pins(info: &CombineLatticeInfo, specs: &mut Vec<DefectSp
                     merged.push(DefectSpec::Dislocation { b: sum, at: Some(gpos), cut: cut0 });
                 }
             }
+            DefectSpec::HalfWall { .. } => merged.extend(grp),
         }
     }
     *specs = merged;

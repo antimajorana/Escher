@@ -5,7 +5,9 @@ use papertilling_core::types::{SurfaceCover3D, SurfaceMesh};
 mod geom;
 mod rp2;
 pub mod sheet;
+pub mod sheet_colors;
 mod sort;
+mod surface_elastic;
 #[cfg(test)]
 mod tests;
 
@@ -14,13 +16,12 @@ use geom::{
     cone_rgba, dist3, mat4_mul, mean_chord_len, polygon_centroid_idx, polygon_centroid_pts, push_wire, sph_arc, tint_towards,
     tri_normal,
 };
-#[cfg(test)]
-pub use sheet::Sheet3dColorMode;
 pub use sheet::{
-    DefectViewMode, Sheet3dViewOpts, mesh_from_sheet3d, sheet3d_caption,
-    show_sheet3d_controls,
+    DefectViewMode, Sheet3dColorMode, Sheet3dViewOpts, mesh_from_sheet3d_with_spectral,
+    sheet3d_caption, show_sheet3d_controls,
 };
 pub use sort::back_to_front_indices;
+pub use surface_elastic::{SurfaceColor3d, elastic_surface_gpu_mesh};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -70,7 +71,7 @@ pub fn mesh_from_surface(surf: &SurfaceMesh, show_cover: bool) -> GpuMeshData {
     quotient_mesh(surf)
 }
 
-fn normalise(raw: &[[f64; 3]], extra: &[Vec<[f64; 3]>]) -> ([f64; 3], f64) {
+pub(crate) fn normalise(raw: &[[f64; 3]], extra: &[Vec<[f64; 3]>]) -> ([f64; 3], f64) {
     let mut min_p = [f64::INFINITY; 3];
     let mut max_p = [f64::NEG_INFINITY; 3];
     let finite = || raw.iter().chain(extra.iter().flatten()).filter(|p| p.iter().all(|v| v.is_finite()));

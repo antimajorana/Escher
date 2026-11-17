@@ -12,6 +12,7 @@ use super::sym_helper::{
     round_even,
 };
 use super::wall_build::{build_wall, count_network_irregular, perfect_wl_sigs};
+use super::wall_endings::{WallEndingInfo, classify_wall_ending_in_grp};
 
 /// `[N_E(G) : G]` for a generic metric, as `ITA_GENERIC_INDEX` in `walls.py` (e.g. p3: N = p6m, 12/3 x 3 = 12).
 pub(crate) fn ita_generic_index(group: &str) -> Option<usize> {
@@ -80,6 +81,7 @@ pub struct DomainWallEntry {
     pub complete: bool,
     pub point: [f64; 2],
     pub direction: [f64; 2],
+    pub ending: WallEndingInfo,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -99,6 +101,7 @@ pub struct TwinWallEntry {
     pub spacing: f64,
     pub class_size: usize,
     pub sigma: Isometry2,
+    pub ending: WallEndingInfo,
     pub(crate) members: Vec<(usize, i32, usize)>,
 }
 
@@ -112,6 +115,7 @@ pub struct MobiusSeamEntry {
     pub direction: [f64; 2],
     pub length: usize,
     pub width: f64,
+    pub ending: WallEndingInfo,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -127,6 +131,7 @@ pub struct GlideBreakingEntry {
     pub point: [f64; 2],
     pub direction: [f64; 2],
     pub sigma: Isometry2,
+    pub ending: WallEndingInfo,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -327,6 +332,7 @@ pub(crate) fn compute_domain_walls(grp: &LatticeGroup, norm_info: &NormaliserInf
             complete: norm_info.complete,
             point: pt,
             direction: dir,
+            ending: classify_wall_ending_in_grp(grp, r.sigma, "domain_wall"),
         })
         .collect()
 }
@@ -491,6 +497,7 @@ pub(crate) fn compute_twin_walls(
                 spacing: d.dl,
                 class_size: mem.len(),
                 sigma: sig,
+                ending: classify_wall_ending_in_grp(grp, sig, "twin_wall"),
                 members: mem,
             });
         }
@@ -521,6 +528,7 @@ pub(crate) fn compute_mobius_seams(grp: &LatticeGroup, mirrors: &[MirrorLineEntr
             direction: ln.direction,
             length: if ln.kind == "mirror" { strip_length } else { strip_length.saturating_sub(1).max(1) },
             width: w,
+            ending: classify_wall_ending_in_grp(grp, ln.sigma, "mobius_seam"),
         })
         .collect()
 }
@@ -552,6 +560,7 @@ pub(crate) fn compute_glide_breaking(
                 point: ln.point,
                 direction: ln.direction,
                 sigma: sig,
+                ending: classify_wall_ending_in_grp(grp, sig, "glide_breaking"),
             }
         })
         .collect()

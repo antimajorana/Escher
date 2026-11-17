@@ -6,11 +6,12 @@ use std::f64::consts::PI;
 
 use crate::defect::charge::{frame_faces, infer_patch_disk};
 use crate::defect::combine_types::{CoreGalleryEntry, DislocationScanInfo, EquivalentSingleReport};
-use crate::defect::cone_geometry::{add2, norm2, sub2};
+use crate::defect::cone_geometry::{add2, mat2_vec, norm2, sub2};
 use crate::defect::core_graph::{
     LatticeCoreInfo, TWO_PI, core_graph_with_rim, isomorphic_cores, layer_signature, patch_rim,
 };
 use crate::defect::equivalence::inspect_crystal_cores;
+use crate::defect::half_wall::resolve_half_wall_spec;
 use crate::defect::single_cache::{SingleDefectCache, equivalent_single_cached};
 use crate::defect::surgery::{DefectSpec, patch_centre_and_radius};
 use crate::defect::volterra_patch::{
@@ -20,7 +21,7 @@ use crate::defect::volterra_scan::{
     ScanBundle, ScannedCoreBuild, crystal_with_dummy_chords, scan_dislocation_cores,
 };
 use crate::plane::draw::{ensure_embedded, relax_picture};
-use crate::types::{BuiltCrystal, Cell2D, DirectedBondData, Frame2D};
+use crate::types::{BuiltCrystal, Cell2D, DirectedBondData, Frame2D, Isometry2};
 
 const TURNS_DEG: [f64; 5] = [0.0, 15.0, -15.0, 30.0, -30.0];
 const WORDS: [&str; 6] = ["one", "two", "three", "four", "five", "six"];
@@ -424,7 +425,16 @@ pub fn config_core_entry(
 pub(crate) fn resolve_patch_rim(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo, specs: &[DefectSpec]) -> HashSet<usize> {
     if !specs.is_empty() && let Ok((ctr, r_def)) = patch_centre_and_radius(lat_info, specs, None, None) {
         let max_r = crystal.ref_pos.iter().map(|&p| norm2(sub2(p, ctr))).fold(0.0_f64, f64::max);
-        if (max_r - r_def).abs() <= 1.2 * lat_info.lmax + 1e-5 { return patch_rim(crystal, lat_info, ctr, r_def); }
+        let extra = specs.iter().find_map(|s| match s {
+            DefectSpec::HalfWall { wall_id, at, direction, sigma } => {
+                let sig_iso = sigma.map(|(m, t)| Isometry2 { m, t });
+                resolve_half_wall_spec(&lat_info.lat.cell, wall_id.as_deref(), sig_iso, *at, *direction)
+                    .ok()
+                    .map(|hw| norm2(add2(sub2(mat2_vec(hw.holonomy.m, hw.at), hw.at), hw.holonomy.t)))
+            }
+            _ => None,
+        }).unwrap_or(0.0);
+        if (max_r - r_def).abs() <= 1.2 * lat_info.lmax + extra + 1e-5 { return patch_rim(crystal, lat_info, ctr, r_def); }
     }
     let (ctr, r_inf) = infer_patch_disk(crystal);
     patch_rim(crystal, lat_info, ctr, r_inf)

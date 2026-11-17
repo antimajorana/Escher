@@ -8,9 +8,14 @@ use crate::backend::{
     AppBackend, CatalogueItemUi, CentreModeUi, SurfaceBuildParamsUi, SurfaceCellVerdictUi, SurfaceTargetUi,
     VerdictKindUi,
 };
+use crate::canvas2d::gauge_overlay::{CrystalOverlayData, color_sites_scalar};
 use crate::canvas2d::{Canvas2D, Scene2D};
+use crate::export_obj::export_surface_obj;
 use crate::live_ops;
-use crate::mesh3d::{GpuMeshData, mesh_from_surface};
+use crate::mesh3d::{GpuMeshData, SurfaceColor3d};
+use crate::spectrum_ui::show_spectrum_panel;
+use crate::spectrum_worker::{SpectrumColorOverlay, SpectrumPanelState};
+use crate::surfaces_elastic::{SurfaceElasticState, SurfaceShapeMode};
 use crate::view3d::View3dState;
 
 #[cfg(test)]
@@ -78,6 +83,10 @@ pub struct SurfacesTabState {
     pub show_cover: bool,
     /// Sizes as in `surface_table` (the surface behind the verdict cell) instead of the (h, k) controls.
     pub auto_size: bool,
+    pub elastic: SurfaceElasticState,
+    pub spectrum: SpectrumPanelState,
+    pub(crate) active_disp: String,
+    active_lattice_key: Option<(String, Recipe, Frame2D)>,
     current_mesh: Option<SurfaceMesh>,
     current_report: Option<SurfaceCheckReport>,
     refusal_msg: Option<String>,
@@ -93,6 +102,10 @@ impl SurfacesTabState {
             params: SurfaceBuildParamsUi::default(),
             show_cover: false,
             auto_size: true,
+            elastic: SurfaceElasticState::new(),
+            spectrum: SpectrumPanelState::new(),
+            active_disp: String::new(),
+            active_lattice_key: None,
             current_mesh: None,
             current_report: None,
             refusal_msg: None,
@@ -124,6 +137,13 @@ impl SurfacesTabState {
         view3d: &mut View3dState,
     ) {
         self.clamp_params(item);
+        let lkey = (item.group.clone(), item.recipe.clone(), item.frame);
+        let target_changed = self.active_lattice_key.as_ref() != Some(&lkey);
+        self.active_lattice_key = Some(lkey);
+        self.active_disp = item.display_with_orig();
+        self.elastic.clear_for_switch();
+        self.spectrum.clear_for_switch();
+        let _ = target_changed;
         let built = if self.auto_size {
             live_ops::build_surface_mesh_auto(item, self.target, self.params.centre_mode, self.params.genus_g)
         } else {
@@ -131,39 +151,89 @@ impl SurfacesTabState {
         };
         match built {
             Ok((mesh, report)) => {
-                let use_cov = self.show_cover && mesh.cover.is_some();
-                let gpu = mesh_from_surface(&mesh, use_cov);
-                let disp = item.display_with_orig();
-                let caption = format!(
-                    "{} on {}{} | V={} E={} F={} χ={} (R={:.2}, c=[{:.1},{:.1},{:.1}])",
-                    disp,
-                    mesh.name,
-                    if use_cov { " [S² double cover]" } else { "" },
-                    gpu.vertex_count,
-                    gpu.edge_count,
-                    gpu.face_count,
-                    if use_cov { 2 } else { mesh.chi },
-                    gpu.radius,
-                    gpu.center[0],
-                    gpu.center[1],
-                    gpu.center[2],
-                );
-                let net_title = format!("{} ({}) — {} — 2D net", disp, item.group, mesh.name);
-                view3d.set_mesh(gpu, caption);
+                let net_title = format!("{} ({}) — {} — 2D net", self.active_disp, item.group, mesh.name);
                 canvas.set_scene_with_title(Scene2D::SurfaceNet { mesh: mesh.clone() }, Some(net_title), true);
+                if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK {
+                    self.elastic.request_relax(mesh.clone(), None);
+                }
+                if self.spectrum.expanded {
+                    self.spectrum.submit_surface(&mesh, None);
+                }
                 self.current_mesh = Some(mesh);
                 self.current_report = Some(report);
                 self.refusal_msg = None;
+                self.sync_view3d_and_colors(canvas, view3d);
             }
             Err(reason) => {
-                let disp = item.display_with_orig();
-                view3d.set_mesh(GpuMeshData::default(), format!("{} on {}: {reason}", disp, self.target.label()));
+                view3d.set_mesh(GpuMeshData::default(), format!("{} on {}: {reason}", self.active_disp, self.target.label()));
                 canvas.set_scene(Scene2D::SurfaceNet { mesh: empty_net(self.target.label()) }, true);
                 self.current_mesh = None;
                 self.current_report = None;
                 self.refusal_msg = Some(reason);
             }
         }
+    }
+
+    pub fn sync_view3d_and_colors(&self, canvas: &mut Canvas2D, view3d: &mut View3dState) {
+        let Some(mesh) = &self.current_mesh else { return };
+        let use_cov = self.show_cover && mesh.cover.is_some();
+        let spec_pair = self.spectrum.active_scalar_overlay();
+        let spec_ref = spec_pair.as_ref().map(|(v, d)| (v.as_slice(), *d));
+        let (gpu, fvk_note) = self.elastic.build_gpu_mesh(mesh, self.show_cover, spec_ref);
+        let disp = if self.active_disp.is_empty() { mesh.name.as_str() } else { self.active_disp.as_str() };
+        let caption = format!(
+            "{} on {}{} | V={} E={} F={} χ={} (R={:.2}, c=[{:.1},{:.1},{:.1}]){fvk_note}",
+            disp,
+            mesh.name,
+            if use_cov { " [S² double cover]" } else { "" },
+            gpu.vertex_count,
+            gpu.edge_count,
+            gpu.face_count,
+            if use_cov { 2 } else { mesh.chi },
+            gpu.radius,
+            gpu.center[0],
+            gpu.center[1],
+            gpu.center[2],
+        );
+        view3d.set_mesh(gpu, caption);
+        if let Some((vals, div)) = spec_ref {
+            let ov = CrystalOverlayData {
+                site_rgba: Some(color_sites_scalar(vals, div)),
+                ..Default::default()
+            };
+            canvas.set_gauge_overlay(Some(ov));
+        } else {
+            canvas.set_gauge_overlay(None);
+        }
+    }
+
+    pub fn poll_background(&mut self, ctx: &egui::Context, canvas: &mut Canvas2D, view3d: &mut View3dState) {
+        let e_hit = self.elastic.poll(ctx);
+        let s_hit = self.spectrum.poll(ctx);
+        if e_hit || s_hit {
+            if let Some(el) = &self.elastic.last_result && self.spectrum.expanded && self.spectrum.opts.beta.abs() > 1e-12 && e_hit && let Some(mesh) = &self.current_mesh {
+                let mut m3 = mesh.clone();
+                m3.xyz = el.xyz.clone();
+                if let (Some(c), Some(cx)) = (m3.cover.as_deref_mut(), el.cover_xyz.as_ref()) { c.xyz = cx.clone(); }
+                self.spectrum.submit_surface(&m3, Some(ctx));
+            }
+            self.sync_view3d_and_colors(canvas, view3d);
+        }
+    }
+
+    pub fn export_active_obj(&self, path: &std::path::Path) -> Result<String, String> {
+        let Some(mesh) = &self.current_mesh else {
+            return Err(String::from("No valid 3D surface is built to export."));
+        };
+        if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK && let Some(res) = &self.elastic.last_result {
+            let mut m = mesh.clone();
+            m.xyz = res.xyz.clone();
+            if let (Some(cov), Some(cxyz)) = (m.cover.as_deref_mut(), res.cover_xyz.as_ref()) {
+                cov.xyz = cxyz.clone();
+            }
+            return export_surface_obj(&m, self.show_cover && m.cover.is_some(), path);
+        }
+        export_surface_obj(mesh, self.show_cover && mesh.cover.is_some(), path)
     }
 
     /// The 8 verdicts of `surface_table` on the active lattice itself (cached per lattice).
@@ -272,10 +342,36 @@ impl SurfacesTabState {
         canvas: &mut Canvas2D,
         view3d: &mut View3dState,
     ) -> Option<String> {
+        self.poll_background(ui.ctx(), canvas, view3d);
         ui.strong(format!("Active lattice: {} ({})", active_item.display_with_orig(), active_item.group));
         ui.add_space(3.0);
         if self.show_controls(ui, active_item) {
             self.activate_and_sync(active_item, backend, canvas, view3d);
+        }
+        let (need_fvk, need_resync) = self.elastic.show_controls(ui);
+        if need_fvk && let Some(mesh) = &self.current_mesh {
+            self.elastic.request_relax(mesh.clone(), Some(ui.ctx()));
+        }
+        let sp_ev = show_spectrum_panel(ui, &mut self.spectrum, "surf_spec", false, false);
+        if sp_ev.recompute && let Some(mesh) = &self.current_mesh {
+            let mut m = mesh.clone();
+            if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK && let Some(res) = &self.elastic.last_result {
+                m.xyz = res.xyz.clone();
+                if let (Some(c), Some(cx)) = (m.cover.as_deref_mut(), res.cover_xyz.as_ref()) { c.xyz = cx.clone(); }
+            }
+            self.spectrum.submit_surface(&m, Some(ui.ctx()));
+        }
+        let mut resync_3d = need_resync || sp_ev.redraw_colors;
+        if sp_ev.redraw_colors {
+            self.elastic.color_mode = match self.spectrum.color_overlay {
+                SpectrumColorOverlay::LdosMultiplet => SurfaceColor3d::SpectralLdos,
+                SpectrumColorOverlay::SpectralCharge => SurfaceColor3d::SpectralCharge,
+                SpectrumColorOverlay::None => SurfaceColor3d::FaceRingSize,
+            };
+            resync_3d = true;
+        }
+        if resync_3d {
+            self.sync_view3d_and_colors(canvas, view3d);
         }
         ui.separator();
         self.show_check_readout(ui);
@@ -372,7 +468,7 @@ fn cell_tooltip(t: SurfaceTargetUi, cell: &SurfaceCellVerdictUi) -> String {
     format!(
         "{} — {}\nSites: {} | Cones: {}\n{}",
         t.label(),
-        cell.verdict.badge(),
+        cell.scoped_badge(),
         cell.sites.map_or(String::from("-"), |s| s.to_string()),
         cell.cones_summary,
         cell.reason

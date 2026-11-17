@@ -52,6 +52,10 @@ fn python_written_configs_load_with_identical_fields() {
                     assert_eq!(r["kind"], "dislocation");
                     assert_eq!((b, at, cut), (v2(&r["b"]), r.get("at").map(v2), cut_raw));
                 }
+                DefectSpec::HalfWall { at, .. } => {
+                    assert_eq!(r["kind"], "half_wall");
+                    assert_eq!(at, v2(&r["at"]));
+                }
             }
         }
         let o = &raw["options"];
@@ -86,7 +90,7 @@ fn python_written_configs_rebuild_to_python_summary() {
         // markers sit where the defects are
         for (i, d) in cfg.defects.iter().enumerate() {
             let at = match *d {
-                DefectSpec::Disclination { at, .. } => at,
+                DefectSpec::Disclination { at, .. } | DefectSpec::HalfWall { at, .. } => at,
                 DefectSpec::Dislocation { at, .. } => at.expect("Python always writes at"),
             };
             assert_eq!(spec_world_pos(&info, i, d), at);

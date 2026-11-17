@@ -201,7 +201,11 @@ def test_show_false_unchanged(square_gallery):
     pair = build(sq, dict(kind="disclination", angle=90, at=(0, 0)), dict(kind="disclination", angle=-90, at=(0.5, 0.5)),
                  picture="raw")
     res = equivalent_single(pair, grid=1)
-    assert set(res) == {"charge", "kind", "single", "candidates", "matches", "equivalent", "scan", "verdict", "gallery"}
+    assert set(res) == {
+        "charge", "kind", "single", "candidates", "matches",
+        "volterra_matches", "completion_matches", "match_tier",
+        "equivalent", "scan", "verdict", "gallery",
+    }
     assert all("defect" not in c and "graph" not in c for c in res["candidates"])
     assert [e["name"] for e in res["gallery"]] == [e["name"] for e in square_gallery[1]]
     fig = plot_core_gallery(res["gallery"], highlight=res["matches"])
