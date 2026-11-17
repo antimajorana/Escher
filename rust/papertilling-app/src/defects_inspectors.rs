@@ -58,21 +58,36 @@ impl DefectInspectors {
             self.circuit.error = None;
             return;
         }
-        let target: Option<Vec<[f64; 2]>> = match self.circuit.target_mode {
+        if self.circuit.pin_mask.len() != pin_centers.len() {
+            self.circuit.pin_mask = vec![true; pin_centers.len()];
+        }
+        let (target, exclude): (Vec<[f64; 2]>, Vec<[f64; 2]>) = match self.circuit.target_mode {
             CircuitTargetMode::SelectedPin if !pin_centers.is_empty() => {
                 let idx = self.circuit.pin_idx.min(pin_centers.len() - 1);
-                Some(vec![pin_centers[idx]])
+                let ex = pin_centers.iter().enumerate().filter(|&(i, _)| i != idx).map(|(_, &p)| p).collect();
+                (vec![pin_centers[idx]], ex)
             }
-            _ => None,
+            CircuitTargetMode::PinSubset if !pin_centers.is_empty() => {
+                let mut tgt = Vec::new();
+                let mut ex = Vec::new();
+                for (i, &p) in pin_centers.iter().enumerate() {
+                    if self.circuit.pin_mask.get(i).copied().unwrap_or(false) { tgt.push(p); } else { ex.push(p); }
+                }
+                (tgt, ex)
+            }
+            _ => (Vec::new(), Vec::new()),
         };
         let mut res: Result<CircuitResult, String> = auto_burgers_circuit(
             crystal,
             Some((group, cell, frame)),
-            target.as_deref().unwrap_or(&[]),
-            &[],
+            &target,
+            &exclude,
             2,
             &[],
         );
+        if res.is_err() && !exclude.is_empty() {
+            res = auto_burgers_circuit(crystal, Some((group, cell, frame)), &target, &[], 2, &[]);
+        }
         if let Ok(mut cr) = res {
             if let Some(v0) = self.circuit.base_v0
                 && cr.path.contains(&v0)
@@ -145,7 +160,10 @@ impl DefectInspectors {
                 }
                 Some(CrystalOverlayData { seams, ..Default::default() })
             }
-            CrystalOverlayMode::GsvEnergyShear | CrystalOverlayMode::PlaquetteFlux => ao_override,
+            CrystalOverlayMode::GsvEnergyShear
+            | CrystalOverlayMode::BondStretchStrain
+            | CrystalOverlayMode::VertexAngleShear
+            | CrystalOverlayMode::PlaquetteFlux => ao_override,
         }
     }
 
@@ -224,10 +242,32 @@ impl DefectInspectors {
                     self.circuit.base_v0 = None;
                     circ_dirty = true;
                 }
+                if ui.selectable_label(self.circuit.target_mode == CircuitTargetMode::PinSubset, "Subset").clicked()
+                    && self.circuit.target_mode != CircuitTargetMode::PinSubset
+                {
+                    self.circuit.target_mode = CircuitTargetMode::PinSubset;
+                    if self.circuit.pin_mask.len() != num_pins {
+                        self.circuit.pin_mask = vec![true; num_pins];
+                    }
+                    self.circuit.base_v0 = None;
+                    circ_dirty = true;
+                }
                 if self.circuit.target_mode == CircuitTargetMode::SelectedPin {
                     for k in 0..num_pins {
                         if ui.selectable_label(self.circuit.pin_idx == k, format!("#{}", k + 1)).clicked() {
                             self.circuit.pin_idx = k;
+                            self.circuit.base_v0 = None;
+                            circ_dirty = true;
+                        }
+                    }
+                } else if self.circuit.target_mode == CircuitTargetMode::PinSubset {
+                    if self.circuit.pin_mask.len() != num_pins {
+                        self.circuit.pin_mask = vec![true; num_pins];
+                    }
+                    for k in 0..num_pins {
+                        let on = self.circuit.pin_mask[k];
+                        if ui.selectable_label(on, format!("#{}", k + 1)).clicked() {
+                            self.circuit.pin_mask[k] = !on;
                             self.circuit.base_v0 = None;
                             circ_dirty = true;
                         }
@@ -250,8 +290,14 @@ impl DefectInspectors {
                     }
                 });
                 let cum_a = ov.result.cum_angle_deg.get(self.circuit.step_k).copied().unwrap_or(0.0);
+                let ch_str = ov
+                    .result
+                    .charge
+                    .as_ref()
+                    .map(|c| format!(" | Class: {} (b=({:+.2},{:+.2}))", c.label, ov.result.closure_vector[0], ov.result.closure_vector[1]))
+                    .unwrap_or_default();
                 ui.small(format!(
-                    "Circuit ({} edges): orientable={}, cum={cum_a:+.1}°, |b|={:.3} (click loop site to shift v0)",
+                    "Circuit ({} edges): orientable={}, cum={cum_a:+.1}°, |b|={:.3}{ch_str} (click loop site to shift v0)",
                     k_max, ov.result.orientation_preserving, ov.result.burgers_norm
                 ));
             } else if let Some(err) = &self.circuit.error {

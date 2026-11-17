@@ -246,7 +246,7 @@ impl DefectsTabState {
         if self.inspectors.spectrum.poll(ctx) {
             let item = self.last_item.clone();
             let ao = defect_context(&item).ok().and_then(|c| {
-                build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &c.cell)
+                build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &c.cell, item.frame)
             });
             self.inspectors.sync_to_canvas(canvas, &self.last_crystal, ao);
             self.view3d_dirty = true;
@@ -262,7 +262,7 @@ impl DefectsTabState {
             self.inspectors.refresh_circuit(&item.group, &ctx.cell, item.frame, &self.last_crystal, &[]);
         }
         let ao = ctx_ok.and_then(|ctx| {
-            build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &ctx.cell)
+            build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &ctx.cell, item.frame)
         });
         self.inspectors.sync_to_canvas(canvas, &self.last_crystal, ao);
     }

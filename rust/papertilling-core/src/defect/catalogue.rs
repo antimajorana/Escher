@@ -531,6 +531,18 @@ impl DefectCatalogue {
         None
     }
 
+    /// Interactive wall builder that also scales Möbius `Wc` ribbon length/width with `radius`.
+    pub fn build_wall_scaled(&self, id: &str, radius: f64) -> Option<BuiltCrystal> {
+        if let Some(idx) = id.strip_prefix("Wc").or_else(|| id.strip_prefix('M')).and_then(|s| s.parse::<usize>().ok()) {
+            let w = self.mobius_seams.get(idx.checked_sub(1)?)?;
+            let period = norm(w.sigma.t).max(0.5 * self.grp.scale).max(1e-6);
+            let len = ((2.2 * radius / period).round() as usize).clamp(w.length, 24);
+            let wid = (0.85 * radius).max(w.width);
+            return Some(build_mobius_seam(&self.cell, w.sigma, len, wid));
+        }
+        self.build_wall(id, Some(radius))
+    }
+
     /// Build a wall crystal and produce its planar picture (`DefectEntry.picture(R)` in Python:
     /// Möbius seams keep stubs with `None` info; glide-breaking `Wd` walls allow local repair;
     /// `Wa`/`Wb` walls open rigidly or fall back to `"rigid"` with an explicit diagnostic note).
@@ -540,6 +552,19 @@ impl DefectCatalogue {
         r: Option<f64>,
     ) -> Option<(BuiltCrystal, Option<crate::plane::draw::DrawingInfo>)> {
         let crystal = self.build_wall(id, r)?;
+        if crystal.is_non_orientable {
+            return Some((crystal, None));
+        }
+        let wall_local = id.starts_with("Wd");
+        Some(crate::plane::draw::draw_wall_picture_with_options(&crystal, wall_local))
+    }
+
+    pub fn wall_picture_scaled(
+        &self,
+        id: &str,
+        radius: f64,
+    ) -> Option<(BuiltCrystal, Option<crate::plane::draw::DrawingInfo>)> {
+        let crystal = self.build_wall_scaled(id, radius)?;
         if crystal.is_non_orientable {
             return Some((crystal, None));
         }

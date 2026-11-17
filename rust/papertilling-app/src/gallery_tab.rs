@@ -12,6 +12,8 @@ use crate::backend::{AppBackend, CatalogueItemUi, CatalogueRuleUi, DSymbolReadou
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::live_plane::{slider_params_ui, tune_item};
 
+mod builder_ui;
+mod search_worker;
 mod ui;
 
 #[cfg(test)]
@@ -23,6 +25,7 @@ mod tests;
 enum BrowseMode {
     ByGroup,
     Named21,
+    CustomBuilder,
 }
 
 pub struct GalleryTabState {
@@ -51,6 +54,7 @@ pub struct GalleryTabState {
     pub rename_buf: String,
     rename_focus_pending: bool,
     pub alias_note: Option<String>,
+    pub custom_builder: builder_ui::CustomBuilderState,
 }
 
 fn same_lattice(a: &CatalogueItemUi, b: &CatalogueItemUi) -> bool {
@@ -101,6 +105,7 @@ impl GalleryTabState {
             rename_buf: String::new(),
             rename_focus_pending: false,
             alias_note: None,
+            custom_builder: builder_ui::CustomBuilderState::new(),
         };
         st.activate_item(item, backend, canvas, true);
         st.revision = 0;

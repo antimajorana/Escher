@@ -2,7 +2,9 @@
 
 mod aliases;
 mod app;
+mod atlas_tab;
 mod backend;
+mod bieberbach_ui;
 mod canvas2d;
 #[cfg(test)]
 mod combine_bench;

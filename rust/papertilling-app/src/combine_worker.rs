@@ -187,6 +187,8 @@ pub(crate) fn empty_sheet3d() -> Sheet3DResult {
         planar_2d_stretch_energy: 0.0,
         site_gsv_energy: Vec::new(),
         bond_gsv_energy: Vec::new(),
+        site_bend_energy: Vec::new(),
+        bond_bend_energy: Vec::new(),
         bond_shear_strain: Vec::new(),
         iterations: 0,
         converged: true,

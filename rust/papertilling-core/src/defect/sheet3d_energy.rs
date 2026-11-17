@@ -445,3 +445,82 @@ pub(crate) fn compute_vertex_omega(
         })
         .collect()
 }
+
+pub(crate) fn compute_hinge_bend_breakdown(
+    xyz: &[[f64; 3]],
+    edges: &[(usize, usize)],
+    faces: &[Vec<usize>],
+    hinges: &[Hinge],
+    kappa_eff: f64,
+) -> (Vec<f64>, Vec<f64>) {
+    let mut site_bend = vec![0.0_f64; xyz.len()];
+    let mut bond_bend = vec![0.0_f64; edges.len()];
+    if kappa_eff <= 0.0 || hinges.is_empty() || xyz.is_empty() {
+        return (site_bend, bond_bend);
+    }
+    let edge_map: HashMap<(usize, usize), usize> = edges
+        .iter()
+        .enumerate()
+        .map(|(idx, &(u, v))| ((u.min(v), u.max(v)), idx))
+        .collect();
+    let centroids: Vec<[f64; 3]> = faces
+        .iter()
+        .map(|f| {
+            let inv = 1.0 / (f.len().max(1) as f64);
+            let mut c = [0.0; 3];
+            for &u in f {
+                if let Some(p) = xyz.get(u) {
+                    c[0] += p[0] * inv;
+                    c[1] += p[1] * inv;
+                    c[2] += p[2] * inv;
+                }
+            }
+            c
+        })
+        .collect();
+    let pt = |hp: HingePt| match hp {
+        HingePt::Vert(u) => xyz[u],
+        HingePt::FaceCentroid(fi) => centroids[fi],
+    };
+    let mut add_site = |hp: HingePt, share: f64| match hp {
+        HingePt::Vert(u) => site_bend[u] += share,
+        HingePt::FaceCentroid(fi) => {
+            let f = &faces[fi];
+            let per = share / (f.len().max(1) as f64);
+            for &u in f {
+                site_bend[u] += per;
+            }
+        }
+    };
+    const EPS2: f64 = 1e-20;
+    for h in hinges {
+        let (p, q, a, b) = (pt(h.p), pt(h.q), pt(h.opp_a), pt(h.opp_b));
+        let u = sub3(q, p);
+        let na_raw = cross3(u, sub3(a, p));
+        let nb_raw = cross3(sub3(b, p), u);
+        let la = (dot3(na_raw, na_raw) + EPS2).sqrt();
+        let lb = (dot3(nb_raw, nb_raw) + EPS2).sqrt();
+        let cos_align = dot3(scale3(na_raw, 1.0 / la), scale3(nb_raw, 1.0 / lb));
+        let e_h = (0.5 * kappa_eff * h.weight * (1.0 - h.sign * cos_align)).max(0.0);
+        for hp in [h.p, h.q, h.opp_a, h.opp_b] {
+            add_site(hp, 0.25 * e_h);
+        }
+        match (h.p, h.q, h.opp_a, h.opp_b) {
+            (HingePt::Vert(u), HingePt::Vert(v), _, _) => {
+                if let Some(&idx) = edge_map.get(&(u.min(v), u.max(v))) {
+                    bond_bend[idx] += e_h;
+                }
+            }
+            (HingePt::FaceCentroid(_), HingePt::Vert(curr), HingePt::Vert(prev), HingePt::Vert(next)) => {
+                if let Some(&idx) = edge_map.get(&(prev.min(curr), prev.max(curr))) {
+                    bond_bend[idx] += 0.5 * e_h;
+                }
+                if let Some(&idx) = edge_map.get(&(curr.min(next), curr.max(next))) {
+                    bond_bend[idx] += 0.5 * e_h;
+                }
+            }
+            _ => {}
+        }
+    }
+    (site_bend, bond_bend)
+}

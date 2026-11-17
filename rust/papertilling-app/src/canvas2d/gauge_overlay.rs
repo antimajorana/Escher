@@ -1,8 +1,8 @@
 //! 2D Ariza-Ortiz discrete gauge & metric elasticity overlays (GSV shear/energy,
-//! plaquette gauge flux `R_f` / `alpha_f`, Volterra seam connection `g_e`, and spectral coloring).
+//! bond stretch, vertex shear, plaquette flux `R_f`/`alpha_f`/Wyckoff, Volterra seams, and spectral coloring).
 
 use crate::canvas2d::{Canvas2D, draw_dashed_egui};
-use crate::mesh3d::sheet_colors::{diverging_rgba, rgba_u8, sequential_heat_rgba};
+use crate::mesh3d::sheet_colors::{diverging_rgba, rgba_u8, sequential_heat_rgba, strain_rgba};
 use crate::scene2d::{CirclePrim, LinePrim, ScenePrimitives, TextPrim};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -10,6 +10,8 @@ pub enum CrystalOverlayMode {
     #[default]
     Standard,
     GsvEnergyShear,
+    BondStretchStrain,
+    VertexAngleShear,
     PlaquetteFlux,
     SeamConnections,
     SpectralLdos,
@@ -17,9 +19,11 @@ pub enum CrystalOverlayMode {
 }
 
 impl CrystalOverlayMode {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::Standard,
         Self::GsvEnergyShear,
+        Self::BondStretchStrain,
+        Self::VertexAngleShear,
         Self::PlaquetteFlux,
         Self::SeamConnections,
         Self::SpectralLdos,
@@ -29,8 +33,10 @@ impl CrystalOverlayMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Standard => "Standard sublattice",
-            Self::GsvEnergyShear => "GSV energy & shear",
-            Self::PlaquetteFlux => "Plaquette flux (R_f, α_f)",
+            Self::GsvEnergyShear => "GSV elastic energy (AO)",
+            Self::BondStretchStrain => "Signed bond stretch ε_e",
+            Self::VertexAngleShear => "Vertex angle-shear energy",
+            Self::PlaquetteFlux => "Plaquette flux (R_f, α_f, Wyckoff)",
             Self::SeamConnections => "Volterra seam g_e",
             Self::SpectralLdos => "LDOS |ψ|² (multiplet)",
             Self::SpectralCharge => "Spectral charge δρ(μ)",
@@ -54,48 +60,128 @@ pub struct SeamConnectionMark {
     pub det_neg: bool,
 }
 
-/// Optional per-site, per-bond, plaquette-flux, and seam overlays painted on 2D crystal scenes + SVG/PNG.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverlayColorbar {
+    pub title: String,
+    pub min_val: f64,
+    pub max_val: f64,
+    pub diverging: bool,
+    pub sqrt_scale: bool,
+}
+
+/// Optional per-site, per-bond, plaquette-flux, seam, and colorbar overlays on 2D crystals + SVG/PNG.
 #[derive(Clone, Debug, Default)]
 pub struct CrystalOverlayData {
     pub site_rgba: Option<Vec<[u8; 4]>>,
     pub bond_rgba: Option<Vec<([u8; 4], f32)>>,
     pub badges: Vec<PlaquetteBadge>,
     pub seams: Vec<SeamConnectionMark>,
+    pub legend: Option<OverlayColorbar>,
+    pub note_suffix: Option<String>,
 }
 
-/// Apply scalar per-site colormap (for LDOS or excess spectral charge `delta_rho`) cleanly.
+/// Compute perceptual heatmap scale `max(P95, 0.20 * max, 1e-8)` so core singularities do not wash out 1/r bulk lobes.
+pub fn perceptual_heat_scale(values: &[f64]) -> (f64, f64) {
+    let mut pos: Vec<f64> = values.iter().copied().filter(|v| v.is_finite() && *v >= 0.0).collect();
+    if pos.is_empty() {
+        return (1e-6, 0.0);
+    }
+    pos.sort_by(f64::total_cmp);
+    let vmax = *pos.last().unwrap_or(&0.0);
+    let p95 = pos[((pos.len() - 1) * 95) / 100];
+    let scale = p95.max(0.22 * vmax).max(1e-8);
+    (scale, vmax)
+}
+
+pub fn color_heat_perceptual(values: &[f64]) -> (Vec<[u8; 4]>, f64) {
+    let (scale, vmax) = perceptual_heat_scale(values);
+    let cols = values
+        .iter()
+        .map(|&v| {
+            let t = (v.max(0.0) / scale).clamp(0.0, 1.0).sqrt();
+            rgba_u8(sequential_heat_rgba(t, 1.0, 1.0))
+        })
+        .collect();
+    (cols, vmax.min(scale))
+}
+
 pub fn color_sites_scalar(values: &[f64], diverging: bool) -> Vec<[u8; 4]> {
     let vmax = values.iter().map(|v| v.abs()).fold(0.0_f64, f64::max).max(1e-6);
     values
         .iter()
         .map(|&v| {
-            let c = if diverging { diverging_rgba(v, vmax, 1.0) } else { sequential_heat_rgba(v.max(0.0), vmax, 1.0) };
+            let c = if diverging {
+                diverging_rgba(v, vmax, 1.0)
+            } else {
+                sequential_heat_rgba(v.max(0.0), vmax, 1.0)
+            };
             rgba_u8(c)
         })
         .collect()
 }
 
-pub(crate) fn apply_overlay_to_prims(prims: &mut ScenePrimitives, ov: &CrystalOverlayData) {
+pub fn color_diverging_strain(values: &[f64], min_span: f64) -> (Vec<([u8; 4], f32)>, f64) {
+    let vmax = values.iter().map(|v| v.abs()).fold(0.0_f64, f64::max).max(min_span);
+    let out = values
+        .iter()
+        .map(|&eps| {
+            let frac = (eps.abs() / vmax).clamp(0.0, 1.0);
+            let c = if min_span >= 0.01 {
+                rgba_u8(diverging_rgba(eps, vmax, 1.0))
+            } else {
+                rgba_u8(strain_rgba(eps * (0.18 / vmax.max(1e-6)), 1.0))
+            };
+            (c, (1.4 + 1.8 * frac) as f32)
+        })
+        .collect();
+    (out, vmax)
+}
+
+/// Apply per-site and per-bond colors using exact site/edge index maps (never heuristics on circle radii).
+pub(crate) fn apply_site_and_bond_colors(prims: &mut ScenePrimitives, ov: &CrystalOverlayData) {
     if let Some(bcols) = &ov.bond_rgba {
-        let mut bi = 0usize;
-        for ln in &mut prims.lines {
-            if !ln.dashed && bi < bcols.len() {
-                let (c, w) = bcols[bi];
-                ln.color = c;
-                ln.width = w;
-                bi += 1;
+        if prims.edge_line_indices.len() == bcols.len() {
+            for (e_idx, &line_opt) in prims.edge_line_indices.iter().enumerate() {
+                if let Some(li) = line_opt
+                    && let Some(ln) = prims.lines.get_mut(li)
+                {
+                    let (c, w) = bcols[e_idx];
+                    ln.color = c;
+                    ln.width = w;
+                }
+            }
+        } else {
+            for (li, &(c, w)) in bcols.iter().enumerate().take(prims.lines.len()) {
+                prims.lines[li].color = c;
+                prims.lines[li].width = w;
             }
         }
     }
-    if let Some(scols) = &ov.site_rgba {
-        let mut si = 0usize;
-        for circ in &mut prims.circles {
-            if circ.radius_world >= 0.08 && si < scols.len() {
-                circ.fill = scols[si];
-                si += 1;
+    if let Some(scols) = &ov.site_rgba
+        && prims.site_circle_indices.len() == scols.len()
+    {
+        for (u, &circ_opt) in prims.site_circle_indices.iter().enumerate() {
+            if let Some(ci) = circ_opt
+                && let Some(circ) = prims.circles.get_mut(ci)
+            {
+                circ.fill = scols[u];
             }
         }
     }
+    if let Some(suf) = &ov.note_suffix
+        && !suf.is_empty()
+    {
+        if prims.note.is_empty() {
+            prims.note = suf.clone();
+        } else if !prims.note.contains(suf) {
+            prims.note.push_str(" | ");
+            prims.note.push_str(suf);
+        }
+    }
+}
+
+/// Append seams and plaquette flux badges once during SVG/PNG export (never called on live `self.compiled`).
+pub(crate) fn append_gauge_export_prims(prims: &mut ScenePrimitives, ov: &CrystalOverlayData) {
     for s in &ov.seams {
         let col = if s.det_neg { [186, 45, 118, 240] } else { [0, 131, 143, 235] };
         prims.lines.push(LinePrim {
@@ -174,4 +260,144 @@ pub(crate) fn draw_gauge_overlays(
         painter.circle_stroke(sp, 11.5, egui::Stroke::new(1.8, col));
         painter.text(sp + egui::vec2(0.0, -14.5), egui::Align2::CENTER_CENTER, &b.label, egui::FontId::proportional(10.0), col);
     }
+    if let Some(leg) = &ov.legend && rect.width() >= 220.0 && rect.height() >= 110.0 {
+        draw_colorbar_legend(painter, rect, leg);
+    }
 }
+
+fn draw_colorbar_legend(painter: &egui::Painter, rect: egui::Rect, leg: &OverlayColorbar) {
+    let box_r = egui::Rect::from_min_max(
+        rect.left_bottom() + egui::vec2(8.0, -52.0),
+        rect.left_bottom() + egui::vec2(182.0, -8.0),
+    );
+    painter.rect_filled(box_r, 5.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 234));
+    painter.rect_stroke(box_r, 5.0, egui::Stroke::new(1.0, egui::Color32::from_gray(165)), egui::StrokeKind::Inside);
+    painter.text(
+        box_r.left_top() + egui::vec2(7.0, 4.0),
+        egui::Align2::LEFT_TOP,
+        &leg.title,
+        egui::FontId::proportional(9.5),
+        egui::Color32::from_gray(35),
+    );
+    let bar = egui::Rect::from_min_max(
+        box_r.left_top() + egui::vec2(8.0, 19.0),
+        box_r.right_top() + egui::vec2(-8.0, 27.0),
+    );
+    let steps = 24usize;
+    let dx = bar.width() / (steps as f32);
+    for i in 0..steps {
+        let t = (i as f64 + 0.5) / (steps as f64);
+        let c = if leg.diverging {
+            rgba_u8(diverging_rgba(2.0 * t - 1.0, 1.0, 1.0))
+        } else {
+            rgba_u8(sequential_heat_rgba(t, 1.0, 1.0))
+        };
+        let seg = egui::Rect::from_min_max(
+            egui::pos2(bar.left() + (i as f32) * dx, bar.top()),
+            egui::pos2(bar.left() + ((i + 1) as f32) * dx + 0.5, bar.bottom()),
+        );
+        painter.rect_filled(seg, 0.0, egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], 255));
+    }
+    painter.rect_stroke(bar, 1.0, egui::Stroke::new(0.8, egui::Color32::from_gray(130)), egui::StrokeKind::Inside);
+    let fmt_v = |v: f64| if v.abs() >= 0.01 || v == 0.0 { format!("{v:.3}") } else { format!("{v:.1e}") };
+    painter.text(box_r.left_bottom() + egui::vec2(7.0, -3.0), egui::Align2::LEFT_BOTTOM, fmt_v(leg.min_val), egui::FontId::proportional(9.0), egui::Color32::from_gray(60));
+    painter.text(box_r.right_bottom() + egui::vec2(-7.0, -3.0), egui::Align2::RIGHT_BOTTOM, fmt_v(leg.max_val), egui::FontId::proportional(9.0), egui::Color32::from_gray(60));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use papertilling_core::defect::DefectCatalogue;
+    use papertilling_core::defect::sheet3d::{Sheet3DOptions, relax_sheet_3d};
+    use papertilling_core::defect::surgery::{DefectSpec, build_point_defects_with_cuts};
+    use papertilling_core::plane::catalogue::parse_named_str;
+    use papertilling_core::types::Frame2D;
+
+    #[test]
+    fn site_bond_recoloring_and_single_pass_overlays() {
+        let named = parse_named_str(include_str!("../../../../papertilling/data/named.json")).unwrap();
+        let sq = named.named.into_iter().find(|n| n.key == "square").unwrap();
+        let mut crystal = papertilling_core::defect::surgery::build_point_defects(
+            &sq.cell,
+            &[DefectSpec::disclination(90.0, [0.5, 0.5])],
+            None,
+            None,
+        ).unwrap();
+        // Inject a ghost stub on edge 0 so !ln.dashed count != crystal.edges.len().
+        let (u0, v0) = crystal.edges[0];
+        if let Some(d) = crystal.adj[u0].iter_mut().find(|d| d.to == v0) {
+            d.ghost_stub = Some(crystal.pos[u0]);
+        }
+        let mut cv = Canvas2D::new(crate::scene2d::Scene2D::CrystalPatch {
+            crystal: crystal.clone(),
+            title: String::from("test"),
+            note: String::new(),
+        });
+        let ov = crate::live_ops_ao::build_ao_crystal_overlay(
+            &crystal,
+            CrystalOverlayMode::GsvEnergyShear,
+            &sq.group,
+            &sq.cell,
+            sq.frame,
+        ).unwrap();
+        let expected_sc = ov.site_rgba.clone().unwrap();
+        let expected_bc = ov.bond_rgba.clone().unwrap();
+        cv.set_gauge_overlay(Some(ov));
+        assert_eq!(cv.compiled.site_circle_indices.len(), crystal.pos.len());
+        assert!(cv.compiled.edge_line_indices[0].is_none(), "ghost edge 0 must not shift later bond colors");
+        for (u, &ci_opt) in cv.compiled.site_circle_indices.iter().enumerate() {
+            let ci = ci_opt.unwrap();
+            assert_eq!(cv.compiled.circles[ci].fill, expected_sc[u]);
+        }
+        for (ei, &li_opt) in cv.compiled.edge_line_indices.iter().enumerate() {
+            if let Some(li) = li_opt {
+                assert_eq!(cv.compiled.lines[li].color, expected_bc[ei].0);
+            }
+        }
+        let base_lines = cv.compiled.lines.len();
+        let base_labels = cv.compiled.labels.len();
+        let ov_flux = crate::live_ops_ao::build_ao_crystal_overlay(
+            &crystal,
+            CrystalOverlayMode::PlaquetteFlux,
+            &sq.group,
+            &sq.cell,
+            sq.frame,
+        ).unwrap();
+        assert!(ov_flux.badges.iter().any(|b| b.label.contains("+90") && (b.label.contains("1a") || b.label.contains("1b"))));
+        cv.set_gauge_overlay(Some(ov_flux));
+        assert_eq!(cv.compiled.lines.len(), base_lines, "seams must not be duplicated into live compiled prims");
+        assert_eq!(cv.compiled.labels.len(), base_labels, "badges must not be duplicated into live compiled prims");
+    }
+
+    #[test]
+    fn half_wall_ray_mobius_scale_and_hinge_bend_breakdown() {
+        let named = parse_named_str(include_str!("../../../../papertilling/data/named.json")).unwrap();
+        let pg = named.named.iter().find(|n| n.key == "brick_pg").unwrap();
+        let (hw_crys, cuts, _) = build_point_defects_with_cuts(
+            &pg.cell,
+            &[DefectSpec::half_wall(Some("Wd1"), [0.0, 0.0], None, None)],
+            Some(3.5),
+            None,
+        ).unwrap();
+        assert!(!hw_crys.pos.is_empty());
+        assert_eq!(cuts.len(), 1);
+        assert!(cuts[0].is_half_wall);
+
+        let pm = named.named.iter().find(|n| n.key == "square").unwrap();
+        let cat = DefectCatalogue::new(&pm.group, &pm.cell, Frame2D::default());
+        let w_def = cat.build_wall("Wc1", None).unwrap();
+        let w_big = cat.build_wall_scaled("Wc1", 7.2).unwrap();
+        assert!(w_big.pos.len() > w_def.pos.len());
+
+        let cone = build_point_defects_with_cuts(
+            &pm.cell,
+            &[DefectSpec::disclination(90.0, [0.5, 0.5])],
+            None,
+            None,
+        ).unwrap().0;
+        let sheet = relax_sheet_3d(&cone, &pm.cell, &Sheet3DOptions { kappa_b: 0.05, max_iters: 40, grad_tol: 1e-5 }, None);
+        let sum_site_bend: f64 = sheet.site_bend_energy.iter().sum();
+        assert!((sum_site_bend - sheet.bend_energy).abs() < 1e-9, "site bend sum {sum_site_bend} vs {}", sheet.bend_energy);
+    }
+}
+

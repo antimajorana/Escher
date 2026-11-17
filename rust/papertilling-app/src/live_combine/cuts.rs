@@ -26,7 +26,7 @@ pub fn build_cut_rays(applied_cuts: &[AppliedCut], patch_centre: [f64; 2], appli
                 let sa = [2.0 * ac.origin[0] - sb[0], 2.0 * ac.origin[1] - sb[1]];
                 (sa, sb)
             });
-            CanvasCutRay { origin: ac.origin, end, strip, is_insertion: ac.is_insertion }
+            CanvasCutRay { origin: ac.origin, end, strip, is_insertion: ac.is_insertion, is_half_wall: ac.is_half_wall }
         })
         .collect()
 }
@@ -54,7 +54,7 @@ pub fn default_cut_angle_deg(
     };
     if let Some(c) = match *spec {
         DefectSpec::Disclination { cut, .. } | DefectSpec::Dislocation { cut, .. } => cut,
-        DefectSpec::HalfWall { .. } => None,
+        DefectSpec::HalfWall { direction, .. } => direction,
     } {
         return c[1].atan2(c[0]).to_degrees();
     }
@@ -67,7 +67,10 @@ pub fn default_cut_angle_deg(
     };
     if let Some(best) = applied_cuts
         .iter()
-        .filter(|ac| ac.strip_end.is_some() == matches!(spec, DefectSpec::Dislocation { .. }))
+        .filter(|ac| {
+            ac.is_half_wall == matches!(spec, DefectSpec::HalfWall { .. })
+                && ac.strip_end.is_some() == matches!(spec, DefectSpec::Dislocation { .. })
+        })
         .min_by(|a, b| {
             let da = (a.origin[0] - anchor[0]).hypot(a.origin[1] - anchor[1]);
             let db = (b.origin[0] - anchor[0]).hypot(b.origin[1] - anchor[1]);

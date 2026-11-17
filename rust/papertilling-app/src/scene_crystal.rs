@@ -74,7 +74,8 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
     }
 
     let n_pos = crystal.pos.len();
-    for &(u, v) in &crystal.edges {
+    let mut edge_line_indices = vec![None; crystal.edges.len()];
+    for (e_idx, &(u, v)) in crystal.edges.iter().enumerate() {
         if u >= n_pos || v >= n_pos {
             continue;
         }
@@ -93,6 +94,7 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
         } else {
             (bond_palette(kind), 1.7)
         };
+        edge_line_indices[e_idx] = Some(lines.len());
         lines.push(LinePrim {
             a: [crystal.pos[u][0] as f32, crystal.pos[u][1] as f32],
             b: [crystal.pos[v][0] as f32, crystal.pos[v][1] as f32],
@@ -105,6 +107,7 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
 
     let cone_set: HashSet<usize> = crystal.cone_sites.iter().copied().collect();
     let anom_deg = interior_anomalous_degrees(crystal);
+    let mut site_circle_indices = vec![None; crystal.pos.len()];
     for (u, p) in crystal.pos.iter().enumerate() {
         let pos = [p[0] as f32, p[1] as f32];
         let side = crystal.side.get(u).copied().flatten();
@@ -138,6 +141,7 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
                 stroke: (scol, 1.8),
             });
         }
+        site_circle_indices[u] = Some(circles.len());
         circles.push(CirclePrim {
             center: pos,
             radius_world: 0.072,
@@ -161,6 +165,8 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
         lines,
         circles,
         labels,
+        site_circle_indices,
+        edge_line_indices,
         title: title.to_owned(),
         note: note.to_owned(),
         bbox,

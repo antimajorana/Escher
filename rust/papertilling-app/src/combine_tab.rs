@@ -455,11 +455,16 @@ impl CombineTabState {
     }
 
     pub fn current_cut_rays(&self) -> Vec<CanvasCutRay> {
-        if !self.show_branch_cuts || self.last_build.refused.is_some() {
+        if self.last_build.refused.is_some() {
             return Vec::new();
         }
+        let cuts: Vec<_> = if self.show_branch_cuts {
+            self.last_build.applied_cuts.clone()
+        } else {
+            self.last_build.applied_cuts.iter().copied().filter(|ac| ac.is_half_wall).collect()
+        };
         build_cut_rays(
-            &self.last_build.applied_cuts,
+            &cuts,
             self.last_build.patch_centre,
             self.last_build.applied_radius,
         )

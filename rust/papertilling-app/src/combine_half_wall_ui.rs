@@ -151,6 +151,7 @@ impl CombineTabState {
             self.inspectors.overlay_mode,
             &item.group,
             &self.info.cell,
+            item.frame,
         );
         self.inspectors.sync_to_canvas(canvas, &self.last_build.crystal, ao);
     }
@@ -182,6 +183,13 @@ impl CombineTabState {
     ) {
         let (circ_dirty, ov_dirty, spec_recomp, spec_col) = self.inspectors.show_controls_ui(
             ui, "comb_insp", self.specs.len(), true,
+        );
+        crate::bieberbach_ui::show_bieberbach_inspector_section(
+            ui,
+            &gallery_item.group,
+            &gallery_item.recipe,
+            &self.inspectors,
+            "comb_bieberbach",
         );
         if spec_col {
             self.inspectors.sync_3d_from_spectrum(&mut self.sheet_opts);

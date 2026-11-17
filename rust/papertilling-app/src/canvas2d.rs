@@ -136,7 +136,7 @@ impl Canvas2D {
         if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() {
             let mut prims = self.compiled.clone();
             if let Some(ov) = &self.gauge_overlay {
-                gauge_overlay::apply_overlay_to_prims(&mut prims, ov);
+                gauge_overlay::append_gauge_export_prims(&mut prims, ov);
             }
             if let Some(circ) = &self.circuit_overlay {
                 circuit::append_circuit_export_prims(&mut prims, circ);
@@ -155,7 +155,7 @@ impl Canvas2D {
         self.gauge_overlay = ov;
         self.compiled = compile_scene(&self.scene);
         if let Some(data) = &self.gauge_overlay {
-            gauge_overlay::apply_overlay_to_prims(&mut self.compiled, data);
+            gauge_overlay::apply_site_and_bond_colors(&mut self.compiled, data);
         }
     }
 

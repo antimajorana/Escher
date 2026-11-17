@@ -34,6 +34,16 @@ pub fn export_sheet_obj(title: &str, sheet: &Sheet3DResult, path: &Path) -> Resu
     write_obj(&target, title, &sheet.xyz, &sheet.faces)
 }
 
+pub fn write_gpu_mesh_obj(path: &Path, mesh: &crate::mesh3d::GpuMeshData) -> Result<String, String> {
+    let target = ensure_obj_ext(path);
+    let xyz: Vec<[f64; 3]> = mesh.faces.iter().map(|v| v.position.map(f64::from)).collect();
+    if xyz.is_empty() {
+        return Err(String::from("cannot export .obj: 3D mesh is empty"));
+    }
+    let faces: Vec<Vec<usize>> = (0..xyz.len() / 3).map(|i| vec![3 * i, 3 * i + 1, 3 * i + 2]).collect();
+    write_obj(&target, "papertilling_atlas", &xyz, &faces)
+}
+
 fn ensure_obj_ext(path: &Path) -> PathBuf {
     if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("obj")) {
         path.to_path_buf()

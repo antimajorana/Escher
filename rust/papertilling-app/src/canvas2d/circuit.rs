@@ -10,6 +10,7 @@ pub enum CircuitTargetMode {
     #[default]
     AllDefects,
     SelectedPin,
+    PinSubset,
 }
 
 #[derive(Clone, Debug)]
@@ -26,6 +27,7 @@ pub struct CircuitUiState {
     pub enabled: bool,
     pub target_mode: CircuitTargetMode,
     pub pin_idx: usize,
+    pub pin_mask: Vec<bool>,
     pub base_v0: Option<usize>,
     pub step_k: usize,
     pub overlay: Option<CanvasCircuitOverlay>,
@@ -174,13 +176,25 @@ fn draw_reference_inset(painter: &egui::Painter, rect: egui::Rect, ov: &CanvasCi
     }
     let p_start = map(rp[0]);
     let p_end = map(*rp.last().unwrap());
+    // Reference frame axes at step 0 and parallel-transported frame triad at step_k inside inset.
+    let tick_len = 13.0_f32;
+    painter.line_segment([p_start, p_start + egui::vec2(tick_len, 0.0)], egui::Stroke::new(1.0, egui::Color32::from_gray(195)));
+    painter.line_segment([p_start, p_start - egui::vec2(0.0, tick_len)], egui::Stroke::new(1.0, egui::Color32::from_gray(195)));
     if ov.result.burgers_norm > 1e-4 {
         let bcol = egui::Color32::from_rgb(230, 81, 0);
         painter.line_segment([p_start, p_end], egui::Stroke::new(2.2, bcol));
         draw_arrow_head(painter, p_start, p_end, bcol);
     }
+    let pk_idx = step_k.min(rp.len() - 1);
+    let pk = map(rp[pk_idx]);
+    if let Some(&frame) = ov.result.frames.get(pk_idx) {
+        let e1 = egui::vec2(frame[0][0] as f32, -frame[1][0] as f32) * 14.0;
+        let e2 = egui::vec2(frame[0][1] as f32, -frame[1][1] as f32) * 14.0;
+        painter.line_segment([pk, pk + e1], egui::Stroke::new(1.8, egui::Color32::from_rgb(211, 47, 47)));
+        painter.line_segment([pk, pk + e2], egui::Stroke::new(1.8, egui::Color32::from_rgb(0, 121, 107)));
+    }
     painter.circle_filled(p_start, 3.6, egui::Color32::from_rgb(46, 125, 50));
-    painter.circle_filled(map(rp[step_k.min(rp.len() - 1)]), 4.0, egui::Color32::from_rgb(230, 81, 0));
+    painter.circle_filled(pk, 4.0, egui::Color32::from_rgb(230, 81, 0));
 }
 
 /// Append the active Burgers circuit loop and basepoint marker to `ScenePrimitives` (for SVG/PNG export).

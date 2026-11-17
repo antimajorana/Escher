@@ -67,7 +67,7 @@ impl GalleryTabState {
     /// lattice); slider moves are reported by `revision()` only.
     pub fn show_side_panel(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
         let mut lattice_changed = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.strong("Browse:");
             if ui.selectable_label(self.mode == BrowseMode::ByGroup, "17 Groups").clicked() {
                 self.select_group(self.selected_group_idx, backend, canvas);
@@ -77,13 +77,24 @@ impl GalleryTabState {
                 self.select_named(self.selected_named_idx, backend, canvas);
                 lattice_changed = true;
             }
+            if ui.selectable_label(self.mode == BrowseMode::CustomBuilder, "+ Custom").clicked() {
+                self.mode = BrowseMode::CustomBuilder;
+            }
         });
         ui.add_space(4.0);
 
-        if self.mode == BrowseMode::ByGroup {
-            lattice_changed |= self.group_tables(ui, backend, canvas);
-        } else {
-            lattice_changed |= self.named_table(ui, backend, canvas);
+        match self.mode {
+            BrowseMode::ByGroup => {
+                lattice_changed |= self.group_tables(ui, backend, canvas);
+                let grp = backend.groups()[self.selected_group_idx].symbol;
+                lattice_changed |= self.live_search_section(ui, backend, canvas, grp);
+            }
+            BrowseMode::Named21 => {
+                lattice_changed |= self.named_table(ui, backend, canvas);
+            }
+            BrowseMode::CustomBuilder => {
+                lattice_changed |= self.custom_builder_panel(ui, backend, canvas);
+            }
         }
 
         ui.separator();
@@ -404,6 +415,11 @@ impl GalleryTabState {
             self.revision(),
             if moved { " at the slider values (Reset: the stored one)" } else { " as stored" }
         ));
+        crate::bieberbach_ui::show_wallpaper_bieberbach_collapsible(
+            ui,
+            &self.readout.active_group,
+            "gal_bieberbach",
+        );
     }
 }
 

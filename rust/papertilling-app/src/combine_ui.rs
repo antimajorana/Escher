@@ -297,29 +297,30 @@ impl CombineTabState {
                         let kstr = spec_short_label(&self.info, sp);
                         let cut_opt = match *sp {
                             DefectSpec::Disclination { cut, .. } | DefectSpec::Dislocation { cut, .. } => cut,
-                            DefectSpec::HalfWall { .. } => None,
+                            DefectSpec::HalfWall { direction, .. } => direction,
                         };
                         body.row(18.0, |mut row| {
                             row.col(|ui| { ui.strong(format!("#{}", idx + 1)); });
                             row.col(|ui| { ui.label(kstr); });
                             row.col(|ui| { ui.small(format!("({:+.2}, {:+.2})", pos[0], pos[1])); });
                             row.col(|ui| {
-                                if matches!(sp, DefectSpec::HalfWall { .. }) {
-                                    ui.small("ray");
-                                } else if let Some(c) = cut_opt {
+                                if let Some(c) = cut_opt {
                                     let mut deg = c[1].atan2(c[0]).to_degrees();
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 2.0;
                                         if ui.add(egui::DragValue::new(&mut deg).range(-180.0..=180.0).speed(2.0).fixed_decimals(0).suffix("°")).changed() {
                                             cut_edit = Some((idx, Some(deg)));
                                         }
-                                        if ui.small_button("a").on_hover_text("Reset cut to auto").clicked() {
+                                        if ui.small_button("a").on_hover_text("Reset direction to auto").clicked() {
                                             cut_edit = Some((idx, None));
                                         }
                                     });
-                                } else if ui.small_button("auto").on_hover_text("Lock to explicit cut angle").clicked() {
-                                    let deg = default_cut_angle_deg(&self.info, &self.specs, idx, &self.last_build.applied_cuts);
-                                    cut_edit = Some((idx, Some(deg)));
+                                } else {
+                                    let lbl = if matches!(sp, DefectSpec::HalfWall { .. }) { "ray" } else { "auto" };
+                                    if ui.small_button(lbl).on_hover_text("Lock to explicit angle").clicked() {
+                                        let deg = default_cut_angle_deg(&self.info, &self.specs, idx, &self.last_build.applied_cuts);
+                                        cut_edit = Some((idx, Some(deg)));
+                                    }
                                 }
                             });
                             row.col(|ui| { if ui.small_button("±").clicked() { flip_idx = Some(idx); } });
@@ -336,11 +337,20 @@ impl CombineTabState {
         }
         if let Some(i) = flip_idx {
             self.push_undo();
+            let hw_deg = if let DefectSpec::HalfWall { direction: None, .. } = &self.specs[i] {
+                Some(default_cut_angle_deg(&self.info, &self.specs, i, &self.last_build.applied_cuts))
+            } else {
+                None
+            };
             match &mut self.specs[i] {
                 DefectSpec::Disclination { angle_deg, .. } => *angle_deg = -*angle_deg,
                 DefectSpec::Dislocation { b, .. } => *b = [-b[0], -b[1]],
                 DefectSpec::HalfWall { direction, .. } => {
-                    if let Some(d) = direction { *d = [-d[0], -d[1]]; }
+                    let cur = direction.unwrap_or_else(|| {
+                        let rad = hw_deg.unwrap_or(0.0).to_radians();
+                        [rad.cos(), rad.sin()]
+                    });
+                    *direction = Some([-cur[0], -cur[1]]);
                 }
             }
             mutated = true;

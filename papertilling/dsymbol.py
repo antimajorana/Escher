@@ -246,3 +246,18 @@ def symmetry_index(key):
         except (ValueError, OverflowError) as err:
             raise DSymbolError(str(err)) from None
     return len(key) // len(network_key(key))
+
+
+def orbifold_curvature(key) -> Fraction:
+    """Exact rational orbifold curvature sum_C (1/m01 + 1/m12 - 1/2)."""
+    return sum((Fraction(1, int(r[0])) + Fraction(1, int(r[1])) - Fraction(1, 2) for r in key), Fraction(0))
+
+
+def geometry_kind(key) -> str:
+    """Return 'spherical' (kappa > 0), 'euclidean' (kappa == 0), or 'hyperbolic' (kappa < 0)."""
+    k = orbifold_curvature(key)
+    if k > 0:
+        return "spherical"
+    if k < 0:
+        return "hyperbolic"
+    return "euclidean"

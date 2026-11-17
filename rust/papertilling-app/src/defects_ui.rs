@@ -99,7 +99,7 @@ impl DefectsTabState {
         });
         ui.horizontal(|ui| {
             ui.label("Radius R:");
-            if ui.add(egui::Slider::new(&mut self.radius, 2.4..=6.2).step_by(0.2)).changed() {
+            if ui.add(egui::Slider::new(&mut self.radius, 2.4..=8.0).step_by(0.2)).changed() {
                 dirty = true;
                 reset_view = true;
             }
@@ -169,6 +169,13 @@ impl DefectsTabState {
         if spec_recomp && !self.last_crystal.pos.is_empty() {
             self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
         }
+        crate::bieberbach_ui::show_bieberbach_inspector_section(
+            ui,
+            &active_item.group,
+            &active_item.recipe,
+            &self.inspectors,
+            "def_bieberbach",
+        );
     }
 
     pub fn show_central(

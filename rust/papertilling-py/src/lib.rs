@@ -1,5 +1,6 @@
 //! PyO3 bindings (`papertilling_rs`) exposing `papertilling-core` Stages 0–5 to Python.
 
+mod atlas_py;
 mod insights_py;
 mod stage5_py;
 
@@ -289,6 +290,7 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(relax_surface_3d_json, m)?)?;
     m.add_function(wrap_pyfunction!(relax_defect_sheet_3d_json, m)?)?;
     m.add_function(wrap_pyfunction!(spectrum_json, m)?)?;
+    atlas_py::register(m)?;
     Ok(())
 }
 

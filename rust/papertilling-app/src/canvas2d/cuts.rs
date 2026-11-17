@@ -10,6 +10,7 @@ pub struct CanvasCutRay {
     pub end: [f64; 2],
     pub strip: Option<([f64; 2], [f64; 2])>,
     pub is_insertion: bool,
+    pub is_half_wall: bool,
 }
 
 /// Live preview arrow showing a disclination step + emitted Burgers vector or dislocation absorption.
@@ -37,14 +38,21 @@ pub(crate) fn draw_cut_rays(
     rays: &[CanvasCutRay],
 ) {
     for ray in rays {
-        let col = if ray.is_insertion {
+        let col = if ray.is_half_wall {
+            egui::Color32::from_rgba_unmultiplied(214, 128, 0, 235)
+        } else if ray.is_insertion {
             egui::Color32::from_rgba_unmultiplied(0, 121, 107, 215)
         } else {
             egui::Color32::from_rgba_unmultiplied(123, 31, 162, 215)
         };
         let p0 = canvas.world_to_screen_at(rect, [ray.origin[0] as f32, ray.origin[1] as f32]);
         let p1 = canvas.world_to_screen_at(rect, [ray.end[0] as f32, ray.end[1] as f32]);
-        draw_dashed_egui(painter, p0, p1, egui::Stroke::new(2.0, col), 7.0, 4.5);
+        if ray.is_half_wall {
+            painter.line_segment([p0, p1], egui::Stroke::new(2.8, col));
+            painter.circle_filled(p0, 4.5, col);
+        } else {
+            draw_dashed_egui(painter, p0, p1, egui::Stroke::new(2.0, col), 7.0, 4.5);
+        }
 
         // Small directional barb halfway out along the branch-cut ray.
         let dv = p1 - p0;

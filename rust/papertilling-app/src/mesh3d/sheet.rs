@@ -1,97 +1,21 @@
-//! 3D GPU mesh builder and shared UI controls for relaxed elastic defect sheets (`Defects` and `Combine` tabs).
+//! 3D GPU mesh builder for relaxed elastic defect sheets (`Defects` and `Combine` tabs).
 
 use std::collections::HashSet;
 
 use papertilling_core::defect::sheet3d::{Sheet3DResult, validate_sheet_crystal};
 use papertilling_core::types::BuiltCrystal;
 
+use crate::canvas2d::gauge_overlay::perceptual_heat_scale;
 use super::geom::{
     append_icosahedron, append_octahedron, blend_normal, compute_smooth_vertex_normals, cone_rgba,
     mean_chord_len, polygon_centroid_idx, push_wire, tri_normal,
 };
 use super::sheet_colors::{diverging_rgba, height_rgba, sequential_heat_rgba, strain_rgba};
+pub use super::sheet_modes::{
+    DefectViewMode, Sheet3dColorMode, Sheet3dViewOpts, sheet3d_caption, show_sheet3d_controls,
+};
 use super::{GpuMeshData, Vertex3d, face_size_rgba};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DefectViewMode {
-    Planar2D,
-    Sheet3D,
-    Split2D3D,
-}
-
-impl DefectViewMode {
-    pub const ALL: [Self; 3] = [Self::Planar2D, Self::Sheet3D, Self::Split2D3D];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Planar2D => "2D Planar",
-            Self::Sheet3D => "3D Sheet",
-            Self::Split2D3D => "Split (2D + 3D)",
-        }
-    }
-
-    pub fn uses_3d(self) -> bool {
-        !matches!(self, Self::Planar2D)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Sheet3dColorMode {
-    FaceRingSize,
-    ElasticEnergyGsv,
-    BondStrain,
-    GaussianCurvature,
-    HeightZ,
-    SpectralLdos,
-    SpectralCharge,
-}
-
-impl Sheet3dColorMode {
-    pub const ALL: [Self; 7] = [
-        Self::FaceRingSize,
-        Self::ElasticEnergyGsv,
-        Self::BondStrain,
-        Self::GaussianCurvature,
-        Self::HeightZ,
-        Self::SpectralLdos,
-        Self::SpectralCharge,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::FaceRingSize => "Face ring size",
-            Self::ElasticEnergyGsv => "Elastic energy density (GSV)",
-            Self::BondStrain => "Signed bond strain",
-            Self::GaussianCurvature => "Gaussian curvature Ω_v",
-            Self::HeightZ => "Height z",
-            Self::SpectralLdos => "LDOS |ψ|² (multiplet)",
-            Self::SpectralCharge => "Spectral charge δρ(μ)",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Sheet3dViewOpts {
-    pub kappa_b: f64,
-    pub z_exag: f32,
-    pub color_mode: Sheet3dColorMode,
-    pub show_flat_baseline: bool,
-}
-
-impl Default for Sheet3dViewOpts {
-    fn default() -> Self {
-        Self {
-            kappa_b: 0.02,
-            z_exag: 1.0,
-            color_mode: Sheet3dColorMode::FaceRingSize,
-            show_flat_baseline: false,
-        }
-    }
-}
-
-/// Convert a relaxed `Sheet3DResult` into `GpuMeshData` for `View3dState`.
-/// Maps sheet `(x, y, z)` to turntable `(x, z * z_exag, -y)` (right-handed SO(3) rotation) so the `z = 0`
-/// plane lies horizontally on the turntable and `+z` cones point upward.
 #[cfg(test)]
 pub fn mesh_from_sheet3d(
     crystal: &BuiltCrystal,
@@ -109,61 +33,58 @@ pub fn mesh_from_sheet3d_with_spectral(
 ) -> GpuMeshData {
     let n = sheet.xyz.len();
     if n == 0 || !renderable(crystal, sheet, opts) {
-        return GpuMeshData {
-            radius: 1.0,
-            ..Default::default()
-        };
+        return GpuMeshData { radius: 1.0, ..Default::default() };
     }
     let exag = f64::from(opts.z_exag.clamp(1.0, 3.0));
-    let mapped: Vec<[f64; 3]> = sheet
-        .xyz
-        .iter()
-        .map(|p| [p[0], p[2] * exag, -p[1]])
-        .collect();
-
-    let r_horiz = sheet
-        .xyz
-        .iter()
-        .map(|p| p[0].hypot(p[1]))
-        .fold(0.0_f64, f64::max)
-        .max(1e-6);
-    let r_3d = mapped
-        .iter()
-        .map(|p| p[0].hypot(p[1]).hypot(p[2]))
-        .fold(r_horiz, f64::max);
+    let mapped: Vec<[f64; 3]> = sheet.xyz.iter().map(|p| [p[0], p[2] * exag, -p[1]]).collect();
+    let r_horiz = sheet.xyz.iter().map(|p| p[0].hypot(p[1])).fold(0.0_f64, f64::max).max(1e-6);
+    let r_3d = mapped.iter().map(|p| p[0].hypot(p[1]).hypot(p[2])).fold(r_horiz, f64::max);
     if !r_3d.is_finite() || r_3d > f64::from(f32::MAX) {
-        return GpuMeshData {
-            radius: 1.0,
-            ..Default::default()
-        };
+        return GpuMeshData { radius: 1.0, ..Default::default() };
     }
 
     let pts: Vec<[f32; 3]> = mapped
         .iter()
-        .map(|p| {
-            [
-                (p[0] / r_3d) as f32,
-                (p[1] / r_3d) as f32,
-                (p[2] / r_3d) as f32,
-            ]
-        })
+        .map(|p| [(p[0] / r_3d) as f32, (p[1] / r_3d) as f32, (p[2] / r_3d) as f32])
         .collect();
-
-    // In this physical view all original bonds exist, regardless of their 2D display annotations.
     let avg_bond = mean_chord_len(&pts, crystal.edges.iter().copied());
     let site_r = (avg_bond * 0.095).clamp(0.011, 0.032);
     let cone_r = (avg_bond * 0.185).clamp(0.024, 0.058);
 
-    let cone_set: HashSet<usize> = crystal.cone_sites.iter().copied().collect();
-    let mut face_vertices = Vec::new();
-    let mut wire_vertices = Vec::new();
+    let site_tot_e: Vec<f64> = (0..n)
+        .map(|u| {
+            sheet.site_gsv_energy.get(u).copied().unwrap_or(0.0)
+                + sheet.site_bend_energy.get(u).copied().unwrap_or(0.0)
+        })
+        .collect();
+    let e_cnt = crystal.edges.len();
+    let bond_tot_e: Vec<f64> = (0..e_cnt)
+        .map(|i| {
+            sheet.bond_gsv_energy.get(i).copied().unwrap_or(0.0)
+                + sheet.bond_bend_energy.get(i).copied().unwrap_or(0.0)
+        })
+        .collect();
+
+    let mut site_shear = vec![0.0_f64; n];
+    let mut site_sh_cnt = vec![0_usize; n];
+    for (i, &(u, v)) in crystal.edges.iter().enumerate() {
+        let sh = sheet.bond_shear_strain.get(i).copied().unwrap_or(0.0).abs();
+        if u < n { site_shear[u] += sh; site_sh_cnt[u] += 1; }
+        if v < n { site_shear[v] += sh; site_sh_cnt[v] += 1; }
+    }
+    for (s, c) in site_shear.iter_mut().zip(site_sh_cnt) {
+        if c > 0 { *s /= c as f64; }
+    }
 
     let omega_span = sheet.vertex_omega.iter().map(|w| w.abs()).fold(0.0_f64, f64::max).max(0.25);
-    let gsv_site_max = sheet.site_gsv_energy.iter().copied().fold(0.0_f64, f64::max).max(1e-6);
-    let gsv_bond_max = sheet.bond_gsv_energy.iter().copied().fold(0.0_f64, f64::max).max(1e-6);
+    let (e_site_scale, _) = perceptual_heat_scale(&site_tot_e);
+    let (e_bond_scale, _) = perceptual_heat_scale(&bond_tot_e);
+    let (sh_site_scale, _) = perceptual_heat_scale(&site_shear);
+    let (sh_bond_scale, _) = perceptual_heat_scale(&sheet.bond_shear_strain);
     let spec_vmax = spectral_scalar
         .map(|(v, _)| v.iter().map(|x| x.abs()).fold(0.0_f64, f64::max).max(1e-6))
         .unwrap_or(1.0);
+
     let site_vis_rgba = |u: usize, fallback: [f32; 4]| -> [f32; 4] {
         match (opts.color_mode, spectral_scalar) {
             (Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge, Some((vals, div))) => {
@@ -171,8 +92,12 @@ pub fn mesh_from_sheet3d_with_spectral(
                 if div { diverging_rgba(x, spec_vmax, fallback[3]) } else { sequential_heat_rgba(x.max(0.0), spec_vmax, fallback[3]) }
             }
             (Sheet3dColorMode::ElasticEnergyGsv, _) if !sheet.site_gsv_energy.is_empty() => {
-                let e = sheet.site_gsv_energy.get(u).copied().unwrap_or(0.0).max(0.0);
-                sequential_heat_rgba(e, gsv_site_max, fallback[3])
+                let t = (site_tot_e[u].max(0.0) / e_site_scale).clamp(0.0, 1.0).sqrt();
+                sequential_heat_rgba(t, 1.0, fallback[3])
+            }
+            (Sheet3dColorMode::BondShearStrain, _) if !sheet.bond_shear_strain.is_empty() => {
+                let t = (site_shear[u].max(0.0) / sh_site_scale).clamp(0.0, 1.0).sqrt();
+                sequential_heat_rgba(t, 1.0, fallback[3])
             }
             (Sheet3dColorMode::GaussianCurvature, _) => {
                 diverging_rgba(sheet.vertex_omega.get(u).copied().unwrap_or(0.0), omega_span, fallback[3])
@@ -181,10 +106,17 @@ pub fn mesh_from_sheet3d_with_spectral(
         }
     };
 
+    let cone_set: HashSet<usize> = crystal.cone_sites.iter().copied().collect();
+    let mut face_vertices = Vec::new();
+    let mut wire_vertices = Vec::new();
+
     for (u, &pos) in pts.iter().enumerate() {
         let omega = sheet.vertex_omega.get(u).copied().unwrap_or(0.0);
         if (cone_set.contains(&u) || omega.abs() > 0.20)
-            && !matches!(opts.color_mode, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge | Sheet3dColorMode::GaussianCurvature)
+            && !matches!(
+                opts.color_mode,
+                Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge | Sheet3dColorMode::GaussianCurvature
+            )
         {
             let deg = if omega.abs() > 0.05 { omega.to_degrees() } else { 60.0 };
             append_icosahedron(&mut face_vertices, pos, cone_r, cone_rgba(deg));
@@ -201,14 +133,9 @@ pub fn mesh_from_sheet3d_with_spectral(
 
     let orientable = !crystal.is_non_orientable;
     let alpha = if orientable { 0.88 } else { 0.74 };
-    let z_half_span = sheet
-        .xyz
-        .iter()
-        .map(|p| p[2].abs())
-        .fold(0.0_f64, f64::max)
-        .max(0.22 * sheet.mean_bond_len);
-
+    let z_half_span = sheet.xyz.iter().map(|p| p[2].abs()).fold(0.0_f64, f64::max).max(0.22 * sheet.mean_bond_len);
     let smooth_normals = compute_smooth_vertex_normals(&pts, &sheet.faces);
+
     for (fi, face) in sheet.faces.iter().enumerate() {
         if face.len() < 3 || face.iter().any(|&u| u >= n) {
             continue;
@@ -221,19 +148,12 @@ pub fn mesh_from_sheet3d_with_spectral(
 
         let face_col = match opts.color_mode {
             Sheet3dColorMode::FaceRingSize => face_size_rgba(face.len(), orientable),
-            Sheet3dColorMode::ElasticEnergyGsv if !sheet.site_gsv_energy.is_empty() => {
-                let mut mean_c = [0.0_f32; 4];
-                for &u in face {
-                    let cu = site_vis_rgba(u, face_size_rgba(face.len(), orientable));
-                    for ch in 0..4 { mean_c[ch] += cu[ch] / (face.len() as f32); }
-                }
-                mean_c[3] = alpha;
-                mean_c
+            Sheet3dColorMode::ElasticEnergyGsv if sheet.site_gsv_energy.is_empty() => {
+                sequential_heat_rgba(f_strain * f_strain * 16.0, 0.15, alpha)
             }
-            Sheet3dColorMode::ElasticEnergyGsv => sequential_heat_rgba(f_strain * f_strain * 16.0, 0.15, alpha),
             Sheet3dColorMode::BondStrain => strain_rgba(f_strain, alpha),
             Sheet3dColorMode::HeightZ => height_rgba(cz_sheet, z_half_span, alpha),
-            Sheet3dColorMode::GaussianCurvature | Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge => {
+            _ => {
                 let mut mean_c = [0.0_f32; 4];
                 for &u in face {
                     let cu = site_vis_rgba(u, face_size_rgba(face.len(), orientable));
@@ -255,47 +175,33 @@ pub fn mesh_from_sheet3d_with_spectral(
                     height_rgba(sheet.xyz[u0][2], z_half_span, alpha),
                     height_rgba(sheet.xyz[u1][2], z_half_span, alpha),
                 ),
-                Sheet3dColorMode::GaussianCurvature
+                Sheet3dColorMode::ElasticEnergyGsv if sheet.site_gsv_energy.is_empty() => (face_col, face_col),
+                Sheet3dColorMode::ElasticEnergyGsv
+                | Sheet3dColorMode::BondShearStrain
+                | Sheet3dColorMode::GaussianCurvature
                 | Sheet3dColorMode::SpectralLdos
                 | Sheet3dColorMode::SpectralCharge => (
                     site_vis_rgba(u0, face_col),
                     site_vis_rgba(u1, face_col),
                 ),
-                Sheet3dColorMode::ElasticEnergyGsv if !sheet.site_gsv_energy.is_empty() => (
-                    site_vis_rgba(u0, face_col),
-                    site_vis_rgba(u1, face_col),
-                ),
                 _ => (face_col, face_col),
             };
-            face_vertices.push(Vertex3d {
-                position: centroid,
-                normal: fnrm,
-                color: face_col,
-            });
-            face_vertices.push(Vertex3d {
-                position: pts[u0],
-                normal: n0,
-                color: c0,
-            });
-            face_vertices.push(Vertex3d {
-                position: pts[u1],
-                normal: n1,
-                color: c1,
-            });
+            face_vertices.push(Vertex3d { position: centroid, normal: fnrm, color: face_col });
+            face_vertices.push(Vertex3d { position: pts[u0], normal: n0, color: c0 });
+            face_vertices.push(Vertex3d { position: pts[u1], normal: n1, color: c1 });
         }
     }
 
     for (e_idx, &(u, v)) in crystal.edges.iter().enumerate() {
-        let across = crystal
-            .adj
-            .get(u)
-            .is_some_and(|r| r.iter().any(|d| d.to == v && d.across));
+        let across = crystal.adj.get(u).is_some_and(|r| r.iter().any(|d| d.to == v && d.across));
         let wc = if opts.color_mode == Sheet3dColorMode::BondStrain {
-            let eps = sheet.bond_strain.get(e_idx).copied().unwrap_or(0.0);
-            strain_rgba(eps, 0.98)
-        } else if opts.color_mode == Sheet3dColorMode::ElasticEnergyGsv && !sheet.bond_gsv_energy.is_empty() {
-            let be = sheet.bond_gsv_energy.get(e_idx).copied().unwrap_or(0.0).max(0.0);
-            sequential_heat_rgba(be, gsv_bond_max, 0.98)
+            strain_rgba(sheet.bond_strain.get(e_idx).copied().unwrap_or(0.0), 0.98)
+        } else if opts.color_mode == Sheet3dColorMode::BondShearStrain && !sheet.bond_shear_strain.is_empty() {
+            let t = (sheet.bond_shear_strain[e_idx].abs() / sh_bond_scale).clamp(0.0, 1.0).sqrt();
+            sequential_heat_rgba(t, 1.0, 0.98)
+        } else if opts.color_mode == Sheet3dColorMode::ElasticEnergyGsv && !bond_tot_e.is_empty() {
+            let t = (bond_tot_e[e_idx].max(0.0) / e_bond_scale).clamp(0.0, 1.0).sqrt();
+            sequential_heat_rgba(t, 1.0, 0.98)
         } else if across {
             [0.95, 0.45, 0.14, 0.98]
         } else {
@@ -326,121 +232,6 @@ fn renderable(crystal: &BuiltCrystal, sheet: &Sheet3DResult, opts: &Sheet3dViewO
         && opts.kappa_b.is_finite()
 }
 
-/// Summary caption for the 3D elastic sheet viewport.
-pub fn sheet3d_caption(title: &str, sheet: &Sheet3DResult, opts: &Sheet3dViewOpts) -> String {
-    // Put limitations first: appending them after a long title/metrics line can clip them off-screen.
-    let title = if sheet.diagnostics.is_empty() {
-        title.to_owned()
-    } else {
-        format!("{} | {title}", sheet.diagnostics.join("; "))
-    };
-    if !sheet.has_finite_geometry() || !opts.z_exag.is_finite() || !opts.kappa_b.is_finite() {
-        return format!("3D unavailable: invalid numerical geometry | {title}");
-    }
-    if sheet.xyz.is_empty() {
-        return if sheet.diagnostics.is_empty() {
-            title
-        } else {
-            format!("3D unavailable: {title}")
-        };
-    }
-    let z_min = sheet.xyz.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
-    let z_max = sheet
-        .xyz
-        .iter()
-        .map(|p| p[2])
-        .fold(f64::NEG_INFINITY, f64::max);
-    let dz_a = (z_max - z_min) / sheet.mean_bond_len.max(1e-9);
-    let max_eps = sheet
-        .bond_strain
-        .iter()
-        .map(|e| e.abs())
-        .fold(0.0_f64, f64::max)
-        * 100.0;
-    let tag = if opts.show_flat_baseline {
-        " [Flat plane baseline]"
-    } else {
-        ""
-    };
-    if sheet.planar_2d_stretch_energy > 1e-8 && !opts.show_flat_baseline {
-        let red =
-            (1.0 - sheet.stretch_energy / sheet.planar_2d_stretch_energy).clamp(-1.0, 1.0) * 100.0;
-        let comparison =
-            if sheet.converged && sheet.planar_2d_converged && sheet.diagnostics.is_empty() {
-                "strain relief"
-            } else {
-                "provisional stretch change"
-            };
-        format!(
-            "{title}{tag} | Δz/a={dz_a:.2} (×{:.1}) | max|ε|={max_eps:.1}% | {comparison} {red:.0}%",
-            opts.z_exag
-        )
-    } else {
-        let flat = if sheet
-            .xyz
-            .iter()
-            .all(|p| p[2].abs() < 1e-9 * sheet.mean_bond_len)
-        {
-            " (flat z=0)"
-        } else {
-            ""
-        };
-        format!("{title}{tag} | Δz/a={dz_a:.3}{flat} | max|ε|={max_eps:.2}%")
-    }
-}
-
-/// Compact inline UI strip for 3D sheet controls (shared by `Defects` and `Combine`).
-/// Returns `(kappa_changed, visual_only_changed)`.
-pub fn show_sheet3d_controls(
-    ui: &mut egui::Ui,
-    opts: &mut Sheet3dViewOpts,
-    id_salt: &str,
-) -> (bool, bool) {
-    let mut kappa_changed = false;
-    let mut visual_changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.small("κ_b:");
-        if ui
-            .add(
-                egui::Slider::new(&mut opts.kappa_b, 0.001..=1.5)
-                    .logarithmic(true)
-                    .custom_formatter(|x, _| format!("{x:.3}")),
-            )
-            .on_hover_text("Bending stiffness κ_b: small = sharp isometric cones/ridges; large = smooth stiff buckling")
-            .changed()
-        {
-            kappa_changed = true;
-        }
-        ui.small("Z×:");
-        if ui
-            .add(egui::Slider::new(&mut opts.z_exag, 1.0..=3.0).step_by(0.1).suffix("×"))
-            .on_hover_text("Vertical Z-exaggeration (1.0× = true metric geometry)")
-            .changed()
-        {
-            visual_changed = true;
-        }
-        ui.small("Color:");
-        egui::ComboBox::from_id_salt(id_salt)
-            .selected_text(opts.color_mode.label())
-            .show_ui(ui, |ui| {
-                for cm in Sheet3dColorMode::ALL {
-                    if ui.selectable_value(&mut opts.color_mode, cm, cm.label()).changed() {
-                        visual_changed = true;
-                    }
-                }
-            });
-        if ui
-            .selectable_label(opts.show_flat_baseline, "Flat plane baseline")
-            .on_hover_text("Compare directly against the defect-free flat z = 0 plane of this lattice")
-            .clicked()
-        {
-            opts.show_flat_baseline = !opts.show_flat_baseline;
-            visual_changed = true;
-        }
-    });
-    (kappa_changed, visual_changed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,30 +240,10 @@ mod tests {
     use papertilling_core::plane::catalogue::parse_named_str;
 
     fn square_sheet() -> (BuiltCrystal, Sheet3DResult) {
-        let named =
-            parse_named_str(include_str!("../../../../papertilling/data/named.json")).unwrap();
-        let cell = named
-            .named
-            .into_iter()
-            .find(|n| n.key == "square")
-            .unwrap()
-            .cell;
-        let crystal = build_point_defects(
-            &cell,
-            &[DefectSpec::disclination(90.0, [0.0, 0.0])],
-            Some(3.5),
-            None,
-        )
-        .unwrap();
-        let sheet = relax_sheet_3d(
-            &crystal,
-            &cell,
-            &Sheet3DOptions {
-                max_iters: 2,
-                ..Default::default()
-            },
-            None,
-        );
+        let named = parse_named_str(include_str!("../../../../papertilling/data/named.json")).unwrap();
+        let cell = named.named.into_iter().find(|n| n.key == "square").unwrap().cell;
+        let crystal = build_point_defects(&cell, &[DefectSpec::disclination(90.0, [0.0, 0.0])], Some(3.5), None).unwrap();
+        let sheet = relax_sheet_3d(&crystal, &cell, &Sheet3DOptions { max_iters: 2, ..Default::default() }, None);
         (crystal, sheet)
     }
 
@@ -492,14 +263,7 @@ mod tests {
         assert_eq!(marked.wires.len(), 2 * crystal.edges.len());
         assert_eq!(plain.wires, marked.wires);
         assert_eq!(plain.faces, marked.faces);
-        assert!(
-            marked
-                .faces
-                .iter()
-                .chain(&marked.wires)
-                .flat_map(|v| v.position.iter().chain(&v.normal).chain(&v.color))
-                .all(|x| x.is_finite())
-        );
+        assert!(marked.faces.iter().chain(&marked.wires).flat_map(|v| v.position.iter().chain(&v.normal).chain(&v.color)).all(|x| x.is_finite()));
         let mut bad = sheet.clone();
         bad.xyz[0][0] = f64::NAN;
         assert_eq!(mesh_from_sheet3d(&crystal, &bad, &opts).vertex_count, 0);
@@ -511,10 +275,7 @@ mod tests {
         crystal.adj[0][0].to = usize::MAX;
         assert_eq!(mesh_from_sheet3d(&crystal, &sheet, &opts).vertex_count, 0);
         let (_, valid_sheet) = square_sheet();
-        let invalid_opts = Sheet3dViewOpts {
-            z_exag: f32::NAN,
-            ..opts
-        };
+        let invalid_opts = Sheet3dViewOpts { z_exag: f32::NAN, ..opts };
         assert!(sheet3d_caption("test", &valid_sheet, &invalid_opts).contains("unavailable"));
     }
 

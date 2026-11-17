@@ -21,6 +21,7 @@ pub struct AppliedCut {
     pub dir: [f64; 2],
     pub strip_end: Option<[f64; 2]>,
     pub is_insertion: bool,
+    pub is_half_wall: bool,
 }
 
 /// Specification of an elementary dislocation or disclination on an open patch.
@@ -402,7 +403,14 @@ pub fn build_point_defects_with_cuts(
     let (ctr, r_patch) = centre_and_radius_from_validated(&lat_info, &norm, hw.as_ref(), r_opt, centre_opt)?;
     if let (true, Some(hw_res)) = (norm.is_empty(), hw.as_ref()) {
         let built = build_half_wall_raw(&lat_info, hw_res, Some(r_patch), Some(ctr), true)?;
-        return Ok((built.crystal, Vec::new(), 0));
+        let hw_cut = AppliedCut {
+            origin: hw_res.at,
+            dir: hw_res.direction,
+            strip_end: None,
+            is_insertion: false,
+            is_half_wall: true,
+        };
+        return Ok((built.crystal, vec![hw_cut], 0));
     }
     let eff = coalesce_coincident_specs(&norm)?;
     let hw_frank = hw.as_ref().and_then(|h| h.ending.frank_angle_deg).unwrap_or(0.0);
@@ -417,7 +425,16 @@ pub fn build_point_defects_with_cuts(
     } else {
         ConeBuilder::new(&lat_info, ctr, r_patch)
     };
-    let mut applied_cuts = Vec::with_capacity(eff.len());
+    let mut applied_cuts = Vec::with_capacity(eff.len() + usize::from(hw.is_some()));
+    if let Some(ref hw_res) = hw {
+        applied_cuts.push(AppliedCut {
+            origin: hw_res.at,
+            dir: hw_res.direction,
+            strip_end: None,
+            is_insertion: false,
+            is_half_wall: true,
+        });
+    }
     for (idx, d) in eff.iter().enumerate() {
         let cuts = match d.cut {
             Some(c) => vec![c],
@@ -462,6 +479,7 @@ pub fn build_point_defects_with_cuts(
                 dir,
                 strip_end: d.is_disloc.then(|| [d.at[0] + d.b[0], d.at[1] + d.b[1]]),
                 is_insertion: d.is_disloc && cross2(dir, d.b) > 0.0,
+                is_half_wall: false,
             });
         }
     }

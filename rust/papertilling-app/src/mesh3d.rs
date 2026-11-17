@@ -2,10 +2,12 @@ use std::collections::HashMap;
 
 use papertilling_core::types::{SurfaceCover3D, SurfaceMesh};
 
+pub mod atlas_mesh;
 mod geom;
 mod rp2;
 pub mod sheet;
 pub mod sheet_colors;
+pub mod sheet_modes;
 mod sort;
 mod surface_elastic;
 #[cfg(test)]

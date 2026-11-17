@@ -16,8 +16,8 @@ use crate::defect::gsv_elastic::{
 use crate::defect::gsv_mobius::seed_mobius_3d;
 use crate::defect::gsv_model::{GsvModel, compute_gsv_diagnostics, eval_gsv_fg};
 use crate::defect::sheet3d_energy::{
-    bond_stretch_energy_3d, build_hinges, compute_strains, compute_vertex_omega, dist3_at,
-    eval_gsv_sheet_fg, eval_hinge_bending_fg,
+    bond_stretch_energy_3d, build_hinges, compute_hinge_bend_breakdown, compute_strains,
+    compute_vertex_omega, dist3_at, eval_gsv_sheet_fg, eval_hinge_bending_fg,
 };
 #[cfg(test)]
 use crate::defect::sheet3d_energy::{Spring, eval_sheet_fg};
@@ -85,6 +85,10 @@ pub struct Sheet3DResult {
     pub site_gsv_energy: Vec<f64>,
     /// Per-bond total GSV energy (`E_s(e) + 0.5 * sum_{corners ni e} E_shear`) in 3D.
     pub bond_gsv_energy: Vec<f64>,
+    /// Per-site hinge bending energy (`kappa_b * E_bend` distributed to vertices).
+    pub site_bend_energy: Vec<f64>,
+    /// Per-bond hinge bending energy (`kappa_b * E_bend` distributed to edges).
+    pub bond_bend_energy: Vec<f64>,
     /// Per-bond dimensionless RMS shear strain across incident face corners.
     pub bond_shear_strain: Vec<f64>,
     pub iterations: usize,
@@ -108,6 +112,8 @@ impl Sheet3DResult {
             .chain(&self.vertex_omega)
             .chain(&self.site_gsv_energy)
             .chain(&self.bond_gsv_energy)
+            .chain(&self.site_bend_energy)
+            .chain(&self.bond_bend_energy)
             .chain(&self.bond_shear_strain)
             .all(|x| x.is_finite())
             && [
@@ -307,6 +313,8 @@ pub fn relax_sheet_3d(
         &mut centroid_grad,
     );
     let bend_energy = if bend_energy.is_finite() { bend_energy.max(0.0) } else { bend_energy };
+    let (site_bend_energy, bond_bend_energy) =
+        compute_hinge_bend_breakdown(&xyz, &crystal.edges, &model.faces, &hinges, kappa_eff);
     let (bond_strain, face_strain) = compute_strains(&xyz, crystal, &model.edge_rest, &model.faces);
     let vertex_omega = compute_vertex_omega(&xyz, &model.faces, &model.is_boundary);
 
@@ -326,6 +334,8 @@ pub fn relax_sheet_3d(
         planar_2d_stretch_energy,
         site_gsv_energy: diag.site_gsv_energy,
         bond_gsv_energy: diag.bond_gsv_energy,
+        site_bend_energy,
+        bond_bend_energy,
         bond_shear_strain: diag.bond_shear_strain,
         iterations,
         converged,
@@ -356,6 +366,8 @@ fn empty_result() -> Sheet3DResult {
         planar_2d_stretch_energy: 0.0,
         site_gsv_energy: Vec::new(),
         bond_gsv_energy: Vec::new(),
+        site_bend_energy: Vec::new(),
+        bond_bend_energy: Vec::new(),
         bond_shear_strain: Vec::new(),
         iterations: 0,
         converged: true,

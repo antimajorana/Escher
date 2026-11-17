@@ -86,13 +86,23 @@ fn kabsch_max_err<const D: usize>(a: &[[f64; D]], b: &[[f64; D]], perm: &[usize]
             - r_raw[(0, 1)] * (r_raw[(1, 0)] * r_raw[(2, 2)] - r_raw[(1, 2)] * r_raw[(2, 0)])
             + r_raw[(0, 2)] * (r_raw[(1, 0)] * r_raw[(2, 1)] - r_raw[(1, 1)] * r_raw[(2, 0)])
     };
-    let mut d = Mat::<f64>::identity(D, D);
-    if det < 0.0 { d[(D - 1, D - 1)] = -1.0; }
-    let rot = u_m * d * v_m.transpose();
-    a.iter().enumerate().map(|(u, pa)| {
-        let pb = b[perm[u]];
-        (0..D).map(|r| (pa[r] - ca[r] - (0..D).map(|c| rot[(r, c)] * (pb[c] - cb[c])).sum::<f64>()).powi(2)).sum::<f64>().sqrt()
-    }).fold(0.0_f64, f64::max)
+    let mut d_pos = Mat::<f64>::identity(D, D);
+    if det < 0.0 { d_pos[(D - 1, D - 1)] = -1.0; }
+    let align_err = |rot: &Mat<f64>| {
+        a.iter().enumerate().map(|(u, pa)| {
+            let pb = b[perm[u]];
+            (0..D).map(|r| (pa[r] - ca[r] - (0..D).map(|c| rot[(r, c)] * (pb[c] - cb[c])).sum::<f64>()).powi(2)).sum::<f64>().sqrt()
+        }).fold(0.0_f64, f64::max)
+    };
+    let err_pos = align_err(&(u_m * d_pos * v_m.transpose()));
+    if D == 3 {
+        // Also allow proper/improper z <-> -z buckling reflection in 3D when matching unconstrained sheets.
+        let mut d_neg = Mat::<f64>::identity(D, D);
+        if det >= 0.0 { d_neg[(D - 1, D - 1)] = -1.0; }
+        let err_neg = align_err(&(u_m * d_neg * v_m.transpose()));
+        return err_pos.min(err_neg);
+    }
+    err_pos
 }
 
 fn find_graph_iso(a: &BuiltCrystal, b: &BuiltCrystal) -> Option<Vec<usize>> {
@@ -208,7 +218,7 @@ fn gate2_gauge_and_cut_routing_invariance() {
         assert!(r1.converged && r2.converged && err2 < 1e-8 && esite2 < 1e-10 && ebond2 < 1e-10,
             "{label} 2D gauge mismatch: err={err2:.2e}, esite={esite2:.2e}, ebond={ebond2:.2e}");
 
-        let s_opts = Sheet3DOptions { kappa_b: 0.02, max_iters: 3000, grad_tol: 1e-12 };
+        let s_opts = Sheet3DOptions { kappa_b: 0.02, max_iters: 5000, grad_tol: 1e-13 };
         let s1 = relax_sheet_3d(c1, cell, &s_opts, None);
         let s2 = relax_sheet_3d(&c2, cell, &s_opts, None);
         let err3 = kabsch_max_err(&s1.xyz, &s2.xyz, &perm);
@@ -216,8 +226,9 @@ fn gate2_gauge_and_cut_routing_invariance() {
         let ebond3 = s1.bond_gsv_energy.iter().zip(&s2.bond_gsv_energy).fold(0.0_f64, |m, (a, b)| m.max((a - b).abs()));
         println!("# Gate 2 {label}: err2D={err2:.2e} err3D={err3:.2e} it=({},{}) conv=({},{}) dSite={esite2:.2e}/{esite3:.2e}",
             s1.iterations, s2.iterations, s1.converged, s2.converged);
-        assert!(err3 < 1e-8 && esite3 < 1e-10 && ebond3 < 1e-10,
-            "{label} 3D gauge mismatch: err={err3:.2e}, esite={esite3:.2e}, ebond={ebond3:.2e}");
+        assert!(s1.converged && s2.converged && err3 < 1e-8 && esite3 < 1e-10 && ebond3 < 1e-10,
+            "{label} 3D gauge mismatch: conv=({},{}) err={err3:.2e}, esite={esite3:.2e}, ebond={ebond3:.2e}",
+            s1.converged, s2.converged);
     }
     println!("# time Gate 2: {:.2} ms", t0.elapsed().as_secs_f64() * 1e3);
 }

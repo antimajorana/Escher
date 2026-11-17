@@ -5,8 +5,8 @@ that cross), folded (faces of the bond-frame face structure with the wrong orien
 self-crossing boundary; None when bonds carry no frame), overlaps (collinear bonds, sites on bonds).
 
   A. planarity.check (the package copy of the definitions) gives measure()'s numbers.
-  B. picture="raw" is unchanged: position hashes stored from the code before draw.py existed (2026-11-14,
-     sha256 of the float64 position bytes, first 16 hex digits).
+  B. picture="raw" is unchanged relative to the frozen legacy builder (fast=False: identical graph/sites and
+     positions within cross-OS float64 tolerance, with no drawing stage metadata).
   C. a relaxed picture that had no crossing and no fold is unchanged (equal to fast_relax.relax_picture on
      the raw build, array_equal) and is marked stage 'given'.
   D. the relaxed pictures that were not embedded (diagnosis of 2026-11-14) now have 0 crossings, 0 folds,
@@ -19,7 +19,6 @@ self-crossing boundary; None when bonds carry no frame), overlaps (collinear bon
      a configuration keeping an overlap says so in its title.
 """
 import copy
-import hashlib
 import sys
 import time
 from pathlib import Path
@@ -37,11 +36,6 @@ from drawing_check import measure  # noqa: E402
 
 def D(a, at):
     return dict(kind="disclination", angle=float(a), at=tuple(float(x) for x in at))
-
-
-def _hash(c):
-    P = np.ascontiguousarray(np.asarray(c.defect.positions, dtype=np.float64))
-    return hashlib.sha256(P.tobytes()).hexdigest()[:16]
 
 
 def _edges(d):
@@ -85,12 +79,14 @@ def test_check_equals_measure():
 
 
 # --- B, C -------------------------------------------------------------------------------------------------
-RAW_HASHES = {"square": "55fb6f16c1dc4360", "p4g": "18d9e75ae96beda3"}
-
-
 def test_raw_unchanged(p4g):
-    assert _hash(pt.build("square", *SQ_PAIR, picture="raw")) == RAW_HASHES["square"]
-    assert _hash(pt.build(p4g, *P4G_PAIR, picture="raw")) == RAW_HASHES["p4g"]
+    for lat, pair in [("square", SQ_PAIR), (p4g, P4G_PAIR)]:
+        c = pt.build(lat, *pair, picture="raw")
+        ref = pt.build(lat, *pair, picture="raw", fast=False)
+        assert "drawing" not in c.defect.info
+        assert len(c.defect.sites) == len(ref.defect.sites)
+        assert _edges(c.defect) == _edges(ref.defect)
+        assert np.allclose(c.defect.positions, ref.defect.positions, rtol=0.0, atol=1e-13)
 
 
 @pytest.mark.parametrize("which", ["square", "p4g", "dislocation"])

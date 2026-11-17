@@ -144,7 +144,6 @@ impl View3dState {
             && self.counters.painted_primitives() > 0
     }
 
-    #[cfg(test)]
     pub fn mesh_data(&self) -> &GpuMeshData {
         &self.mesh_data
     }

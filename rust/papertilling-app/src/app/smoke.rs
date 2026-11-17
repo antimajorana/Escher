@@ -39,7 +39,7 @@ impl PapertillingApp {
                     || self.combine.last_build.refused.is_some()
                     || self.combine.inspectors.spectrum.last_error.is_some()
             }
-            NavTab::Gallery => false,
+            NavTab::Gallery | NavTab::Atlas => false,
         }
     }
 
@@ -79,12 +79,12 @@ impl PapertillingApp {
             && !cap.contains("unavailable");
 
         if ready {
-            if self.last_smoke_stage == 9 {
+            if self.last_smoke_stage == 11 {
                 self.smoke_outcome.store(1, Ordering::Release);
                 if !self.smoke_reported {
                     self.smoke_reported = true;
                     println!(
-                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=10 (surfaces,defects-sheet,combine-sheet,fvk,ao-mobius,ldos)",
+                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=12 (surfaces,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,atlas-h2)",
                         self.adapter_name, self.backend_name, self.view3d.counters.uploads()
                     );
                 }
@@ -95,6 +95,15 @@ impl PapertillingApp {
             self.smoke_frame_at_switch = painted;
             self.smoke_gen_at_switch = mesh_gen;
             match self.last_smoke_stage {
+                10 => {
+                    self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::SpaceGroups3D;
+                    self.atlas.dirty = true;
+                    self.switch_tab(NavTab::Atlas);
+                }
+                11 => {
+                    self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::HyperbolicH2;
+                    self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
+                }
                 5 => {
                     self.defects.view_mode = DefectViewMode::Sheet3D;
                     self.switch_tab(NavTab::Defects);
@@ -187,7 +196,7 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(app.last_smoke_stage, 9);
+        assert_eq!(app.last_smoke_stage, 11);
         assert_eq!(outcome.load(Ordering::Acquire), 1);
     }
 

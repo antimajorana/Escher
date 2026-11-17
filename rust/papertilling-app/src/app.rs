@@ -25,10 +25,11 @@ pub enum NavTab {
     Surfaces,
     Defects,
     Combine,
+    Atlas,
 }
 
 impl NavTab {
-    const ALL: [Self; 4] = [Self::Gallery, Self::Surfaces, Self::Defects, Self::Combine];
+    const ALL: [Self; 5] = [Self::Gallery, Self::Surfaces, Self::Defects, Self::Combine, Self::Atlas];
 
     fn label(self) -> &'static str {
         match self {
@@ -36,6 +37,7 @@ impl NavTab {
             Self::Surfaces => "Surfaces (2D Net + 3D)",
             Self::Defects => "Defects (T, D, Wa-Wd)",
             Self::Combine => "Combine (Live Fusion & Cores)",
+            Self::Atlas => "Atlas (0D–3D & H²)",
         }
     }
 }
@@ -68,6 +70,7 @@ pub struct PapertillingApp {
     surfaces: SurfacesTabState,
     defects: DefectsTabState,
     combine: CombineTabState,
+    atlas: crate::atlas_tab::AtlasTabState,
 }
 
 impl PapertillingApp {
@@ -90,6 +93,7 @@ impl PapertillingApp {
         let mut surfaces = SurfacesTabState::new();
         let defects = DefectsTabState::new(gallery.active_item(), &backend);
         let combine = CombineTabState::new(gallery.active_item(), &backend);
+        let atlas = crate::atlas_tab::AtlasTabState::new();
 
         let active_tab = if smoke_test {
             surfaces.activate_and_sync(
@@ -124,6 +128,7 @@ impl PapertillingApp {
             surfaces,
             defects,
             combine,
+            atlas,
         }
     }
 
@@ -181,6 +186,9 @@ impl PapertillingApp {
                 }
                 self.combine.sync_view3d(&item, &mut self.view3d);
             }
+            NavTab::Atlas => {
+                self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
+            }
         }
     }
 
@@ -198,6 +206,7 @@ impl PapertillingApp {
             NavTab::Surfaces => "surface_net.svg",
             NavTab::Defects => "defect_crystal.svg",
             NavTab::Combine => "combined_defects.svg",
+            NavTab::Atlas => "atlas_scene.svg",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 2D scene (SVG or PNG)")
@@ -230,6 +239,7 @@ impl PapertillingApp {
             NavTab::Surfaces => "surface_mesh.obj",
             NavTab::Defects => "defect_sheet.obj",
             NavTab::Combine => "combined_sheet.obj",
+            NavTab::Atlas => "atlas_mesh.obj",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 3D mesh (.obj)")
@@ -241,6 +251,7 @@ impl PapertillingApp {
                 NavTab::Surfaces => self.surfaces.export_active_obj(&path),
                 NavTab::Defects => self.defects.export_active_obj(&path),
                 NavTab::Combine => self.combine.export_active_obj(self.gallery.active_item(), &path),
+                NavTab::Atlas => self.atlas.export_active_obj(&path, &self.view3d),
             };
             self.export_status = match res {
                 Ok(msg) => msg,
@@ -270,6 +281,7 @@ impl PapertillingApp {
                 self.combine.sync_to_canvas(&item, &mut self.canvas2d, false);
                 self.combine.view3d_dirty = true;
             }
+            NavTab::Atlas => {}
         }
     }
 
@@ -381,6 +393,13 @@ impl PapertillingApp {
                                 &mut self.canvas2d,
                             );
                         }
+                        NavTab::Atlas => {
+                            self.atlas.show_side_panel(
+                                ui,
+                                &mut self.canvas2d,
+                                &mut self.view3d,
+                            );
+                        }
                     }
 
                     ui.separator();
@@ -442,6 +461,9 @@ impl PapertillingApp {
                 let item = self.gallery.active_item().clone();
                 self.combine
                     .show_central(ui, &item, &self.backend, &mut self.canvas2d, &mut self.view3d);
+            }
+            NavTab::Atlas => {
+                self.atlas.show_central(ui, &mut self.canvas2d, &mut self.view3d);
             }
         });
     }

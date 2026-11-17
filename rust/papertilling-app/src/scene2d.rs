@@ -18,17 +18,20 @@ pub enum Scene2D {
         title: String,
         note: String,
     },
+    VectorScene {
+        primitives: ScenePrimitives,
+    },
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PolyPrim {
+pub struct PolyPrim {
     pub points: Vec<[f32; 2]>,
     pub fill: [u8; 4],
     pub stroke: Option<([u8; 4], f32)>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct LinePrim {
+pub struct LinePrim {
     pub a: [f32; 2],
     pub b: [f32; 2],
     pub color: [u8; 4],
@@ -38,7 +41,7 @@ pub(crate) struct LinePrim {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CirclePrim {
+pub struct CirclePrim {
     pub center: [f32; 2],
     pub radius_world: f32,
     pub min_px: f32,
@@ -48,7 +51,7 @@ pub(crate) struct CirclePrim {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TextPrim {
+pub struct TextPrim {
     pub pos: [f32; 2],
     pub text: String,
     pub color: [u8; 4],
@@ -56,11 +59,13 @@ pub(crate) struct TextPrim {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScenePrimitives {
+pub struct ScenePrimitives {
     pub polygons: Vec<PolyPrim>,
     pub lines: Vec<LinePrim>,
     pub circles: Vec<CirclePrim>,
     pub labels: Vec<TextPrim>,
+    pub site_circle_indices: Vec<Option<usize>>,
+    pub edge_line_indices: Vec<Option<usize>>,
     pub title: String,
     pub note: String,
     pub bbox: ([f32; 2], [f32; 2]),
@@ -81,6 +86,7 @@ pub(crate) fn compile_scene(scene: &Scene2D) -> ScenePrimitives {
             title,
             note,
         } => compile_crystal_patch(crystal, title, note),
+        Scene2D::VectorScene { primitives } => primitives.clone(),
     }
 }
 
@@ -253,6 +259,8 @@ fn compile_periodic_cell(cell: &Cell2D, repeat: i32, show_unit_cell: bool) -> Sc
         lines,
         circles,
         labels,
+        site_circle_indices: Vec::new(),
+        edge_line_indices: Vec::new(),
         title: String::new(),
         note: String::new(),
         bbox,
@@ -302,7 +310,8 @@ fn compile_surface_net(mesh: &SurfaceMesh) -> ScenePrimitives {
         }
     }
 
-    for &(a, b, v) in &mesh.bonds {
+    let mut edge_line_indices = vec![None; mesh.bonds.len()];
+    for (e_idx, &(a, b, v)) in mesh.bonds.iter().enumerate() {
         if a >= mesh.uv.len() || b >= mesh.uv.len() {
             continue;
         }
@@ -312,6 +321,7 @@ fn compile_surface_net(mesh: &SurfaceMesh) -> ScenePrimitives {
         let dy = (pb[1] - pa[1]) - v[1];
         let v_len2 = v[0] * v[0] + v[1] * v[1];
         if v_len2 < 1e-10 || dx * dx + dy * dy < 1e-3 {
+            edge_line_indices[e_idx] = Some(lines.len());
             lines.push(LinePrim {
                 a: [pa[0] as f32, pa[1] as f32],
                 b: [pb[0] as f32, pb[1] as f32],
@@ -400,8 +410,10 @@ fn compile_surface_net(mesh: &SurfaceMesh) -> ScenePrimitives {
     }
 
     let edge_set: HashSet<usize> = mesh.edge_sites.iter().copied().collect();
+    let mut site_circle_indices = vec![None; mesh.uv.len()];
     for (u, uv) in mesh.uv.iter().enumerate() {
         let is_rim = edge_set.contains(&u);
+        site_circle_indices[u] = Some(circles.len());
         circles.push(CirclePrim {
             center: [uv[0] as f32, uv[1] as f32],
             radius_world: 0.065,
@@ -457,6 +469,8 @@ fn compile_surface_net(mesh: &SurfaceMesh) -> ScenePrimitives {
         lines,
         circles,
         labels,
+        site_circle_indices,
+        edge_line_indices,
         title: format!("{} — 2D net", mesh.name),
         note: String::new(),
         bbox,

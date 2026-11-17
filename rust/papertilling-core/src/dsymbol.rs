@@ -50,6 +50,14 @@ pub struct DSymbol {
     pub m12: Vec<u32>,
 }
 
+/// Ambient 2D constant-curvature geometry determined by orbifold curvature `kappa(D)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GeometryKind {
+    Spherical,
+    Euclidean,
+    Hyperbolic,
+}
+
 impl DSymbol {
     /// Construct and validate a 2D Delaney-Dress symbol.
     pub fn new(s0: Vec<usize>, s1: Vec<usize>, s2: Vec<usize>, m01: Vec<u32>, m12: Vec<u32>) -> Result<Self, DSymbolError> {
@@ -107,8 +115,8 @@ impl DSymbol {
         serde_json::from_str(json)
     }
 
-    /// Exact rational check of flat orbifold curvature `sum (1/m01 + 1/m12 - 1/2) == 0`.
-    pub fn is_flat(&self) -> bool {
+    /// Exact rational orbifold curvature `kappa(D) = sum_C (1/m01 + 1/m12 - 1/2)`.
+    pub fn orbifold_curvature_rat(&self) -> (i128, i128) {
         let (mut num, mut den): (i128, i128) = (0, 1);
         for (&a, &b) in self.m01.iter().zip(&self.m12) {
             let (ai, bi) = (i128::from(a), i128::from(b));
@@ -117,7 +125,27 @@ impl DSymbol {
             let g = gcd(num.unsigned_abs(), den.unsigned_abs()) as i128;
             (num, den) = (num / g, den / g);
         }
-        num == 0
+        (num, den)
+    }
+
+    /// Floating-point orbifold curvature `kappa(D)` (`> 0` spherical, `0` Euclidean, `< 0` hyperbolic).
+    pub fn orbifold_curvature(&self) -> f64 {
+        let (num, den) = self.orbifold_curvature_rat();
+        (num as f64) / (den as f64)
+    }
+
+    /// Geometry classification induced by `kappa(D)`.
+    pub fn geometry_kind(&self) -> GeometryKind {
+        match self.orbifold_curvature_rat().0.cmp(&0) {
+            std::cmp::Ordering::Greater => GeometryKind::Spherical,
+            std::cmp::Ordering::Equal => GeometryKind::Euclidean,
+            std::cmp::Ordering::Less => GeometryKind::Hyperbolic,
+        }
+    }
+
+    /// Exact rational check of flat orbifold curvature `sum (1/m01 + 1/m12 - 1/2) == 0`.
+    pub fn is_flat(&self) -> bool {
+        self.orbifold_curvature_rat().0 == 0
     }
 }
 

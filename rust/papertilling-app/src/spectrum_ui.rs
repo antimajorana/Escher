@@ -21,17 +21,17 @@ pub fn show_spectrum_panel(
     ui.separator();
     let header_txt = if let Some(res) = &st.result {
         format!(
-            "Spectrum & Bound States (N={}, zero modes={})",
+            "Optional: Spectrum (N={}, zero modes={})",
             res.eigenvalues.len(),
             res.zero_mode_count
         )
     } else {
-        String::from("Spectrum & Bound States (Tight-Binding)")
+        String::from("Optional: Tight-Binding Spectrum")
     };
 
-    egui::CollapsingHeader::new(header_txt)
+    let resp = egui::CollapsingHeader::new(header_txt)
         .id_salt(id_salt)
-        .default_open(st.expanded)
+        .default_open(false)
         .show(ui, |ui| {
             st.expanded = true;
             ui.horizontal_wrapped(|ui| {
@@ -138,6 +138,7 @@ pub fn show_spectrum_panel(
                 }
             }
         });
+    st.expanded = resp.body_returned.is_some();
 
     ev
 }

@@ -3,10 +3,12 @@
 
 pub mod catalogue;
 pub mod cell;
+pub mod custom_builder;
 pub mod draw;
 pub mod family;
 pub mod groups;
 pub mod groups_data;
+pub mod live_search;
 pub mod loci;
 pub mod planarity;
 pub mod relax;
@@ -21,6 +23,7 @@ mod test_fixtures;
 pub mod tuning;
 mod tuning_eval;
 pub mod tutte;
+pub mod voronoi;
 
 #[cfg(test)]
 mod tuning_tests;

@@ -317,13 +317,13 @@ pub fn build_defect_patch_mode(
                 };
             }
             let built = if relax_draw {
-                cat.wall_picture(&w_ui.id, Some(radius)).map(|(c, inf)| {
+                cat.wall_picture_scaled(&w_ui.id, radius).map(|(c, inf)| {
                     let draw_note = inf.map(|i| i.note).unwrap_or_default();
                     let n = [w_ui.default_note.as_str(), draw_note.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join("; ");
                     (c, n)
                 })
             } else {
-                cat.build_wall(&w_ui.id, Some(radius)).map(|mut c| {
+                cat.build_wall_scaled(&w_ui.id, radius).map(|mut c| {
                     let mut n = w_ui.default_note.clone();
                     if draw_mode == Defect2dMode::ElasticAoMetric {
                         let ao_note = match relax_crystal_ao_2d(&mut c) {

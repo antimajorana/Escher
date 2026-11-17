@@ -137,6 +137,8 @@ pub(crate) fn compile_core_card(entry: &CoreGalleryEntry) -> ScenePrimitives {
         lines,
         circles,
         labels,
+        site_circle_indices: Vec::new(),
+        edge_line_indices: Vec::new(),
         title: entry.name.clone(),
         note: entry.description.clone(),
         bbox,
