@@ -8,9 +8,8 @@ mod bieberbach_ui;
 mod canvas2d;
 #[cfg(test)]
 mod combine_bench;
+mod combine;
 mod combine_half_wall_ui;
-mod combine_tab;
-mod combine_ui;
 mod combine_worker;
 mod core_panel;
 mod defects_inspectors;
@@ -30,6 +29,8 @@ mod spectrum_ui;
 mod spectrum_worker;
 mod surfaces_elastic;
 mod surfaces_tab;
+mod theme;
+mod ui;
 mod view3d;
 #[cfg(test)]
 mod features_gate_tests;
@@ -88,6 +89,8 @@ fn main() -> ExitCode {
         "papertilling",
         options,
         Box::new(move |cc| {
+            theme::typography::register_fonts(&cc.egui_ctx);
+            theme::StudioTheme::Paper.apply(&cc.egui_ctx);
             let (adapter_name, backend_name) = if let Some(rs) = &cc.wgpu_render_state {
                 view3d::init_view3d_resources(rs);
                 let info = rs.adapter.get_info();

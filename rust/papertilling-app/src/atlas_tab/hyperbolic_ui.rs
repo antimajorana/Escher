@@ -8,6 +8,7 @@ use papertilling_core::hyperbolic::{build_hyperbolic_tiling, HyperbolicStyle};
 use crate::mesh3d::atlas_mesh::mesh_from_hyperboloid;
 use crate::mesh3d::GpuMeshData;
 use crate::scene2d::{compute_bbox, ring_tint_rgba, CirclePrim, LinePrim, PolyPrim, Scene2D, ScenePrimitives};
+use crate::theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiskProjection {
@@ -84,10 +85,21 @@ impl HyperbolicPanelState {
                 dirty |= ui.selectable_value(&mut self.wedge_delta, d, format!("{d:+}")).changed();
             }
         });
-        if !self.status.is_empty() {
-            ui.small(&self.status);
-        }
         dirty
+    }
+
+    pub fn show_inspector(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        ui.strong("Hyperbolic H² Metric & Status");
+        let is_hyperbolic = (self.p.saturating_sub(2)) * (self.q.saturating_sub(2)) > 4;
+        if !self.status.is_empty() {
+            let col = if is_hyperbolic { tokens.status_ok } else { tokens.status_err };
+            ui.colored_label(col, egui::RichText::new(&self.status).small());
+        }
+        ui.small(format!(
+            "Schläfli {{{}, {}}} | Layers: {} | Wedge Δp: {:+}",
+            self.p, self.q, self.layers, self.wedge_delta
+        ));
+        ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
     }
 
     pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {

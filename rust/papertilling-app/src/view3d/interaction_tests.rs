@@ -70,7 +70,7 @@ impl Harness {
             time: Some(self.time), events, ..Default::default()
         }, |ui| {
             self.rect = ui.available_rect_before_wrap();
-            self.view.show(ui);
+            self.view.show(ui, &crate::theme::ThemeTokens::paper());
         });
         out.drop_without_applying_deltas();
     }

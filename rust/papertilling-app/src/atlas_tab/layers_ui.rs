@@ -7,6 +7,7 @@ use papertilling_core::space3d::{analyze_layer_group, list_layer_groups};
 use crate::mesh3d::atlas_mesh::mesh_from_net3d;
 use crate::mesh3d::GpuMeshData;
 use crate::scene2d::{CirclePrim, LinePrim, Scene2D, ScenePrimitives, compute_bbox};
+use crate::theme::ThemeTokens;
 
 pub struct LayersPanelState {
     pub filter: String,
@@ -59,13 +60,31 @@ impl LayersPanelState {
             }
         });
         self.ensure_cached();
-        ui.separator();
-        if let Some(s) = &self.summary {
-            let st = if s.is_split { "split ([ν]=0)" } else { "nonsymmorphic ([ν]≠0)" };
-            ui.strong(format!("Layer #{} {} | |P|={} | {st}", s.number, s.symbol, s.point_order));
-            ui.small(format!("H²(P, Λ) = {} | (G⁺)ᵃᵇ = {} | Gᵃᵇ = {}", s.h2_label, s.ab_plus_label, s.ab_full_label));
-        }
         dirty
+    }
+
+    pub fn show_inspector(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        self.ensure_cached();
+        ui.strong("Layer Group Cohomology (ITE Vol. E)");
+        if let Some(s) = &self.summary {
+            let (st, col) = if s.is_split {
+                ("split ([ν]=0)", tokens.status_ok)
+            } else {
+                ("nonsymmorphic ([ν]≠0)", tokens.status_warn)
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.strong(format!("Layer #{} {} | |P|={} | ", s.number, s.symbol, s.point_order));
+                ui.colored_label(col, egui::RichText::new(st).strong());
+            });
+            ui.small(format!(
+                "H²(P, Λ) = {} | (G⁺)ᵃᵇ = {} | Gᵃᵇ = {}",
+                s.h2_label, s.ab_plus_label, s.ab_full_label
+            ));
+            if !s.torus_counts.is_empty() {
+                let tor: Vec<String> = s.torus_counts.iter().map(|(n, c)| format!("N={n}: {c}")).collect();
+                ui.small(format!("#Conj(G / NΛ): {}", tor.join(", ")));
+            }
+        }
     }
 
     pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {

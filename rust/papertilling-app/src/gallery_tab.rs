@@ -13,6 +13,7 @@ use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::live_plane::{slider_params_ui, tune_item};
 
 mod builder_ui;
+mod inspector;
 mod search_worker;
 mod ui;
 

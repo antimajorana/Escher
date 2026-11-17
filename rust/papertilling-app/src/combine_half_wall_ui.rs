@@ -4,8 +4,9 @@ use papertilling_core::defect::surgery::DefectSpec;
 
 use crate::backend::{AppBackend, CatalogueItemUi, WallEntryUi};
 use crate::canvas2d::Canvas2D;
-use crate::combine_tab::CombineTabState;
+use crate::combine::CombineTabState;
 use crate::live_ops::{collect_walls_ui, defect_context};
+use crate::theme::ThemeTokens;
 
 /// Metadata of a terminable (`Wa`/`Wb`/`Wd`) wall for the `Combine` studio.
 #[derive(Clone, Debug)]
@@ -180,9 +181,10 @@ impl CombineTabState {
         ui: &mut egui::Ui,
         gallery_item: &CatalogueItemUi,
         canvas: &mut Canvas2D,
+        tokens: &ThemeTokens,
     ) {
         let (circ_dirty, ov_dirty, spec_recomp, spec_col) = self.inspectors.show_controls_ui(
-            ui, "comb_insp", self.specs.len(), true,
+            ui, "comb_insp", self.specs.len(), true, tokens,
         );
         crate::bieberbach_ui::show_bieberbach_inspector_section(
             ui,
@@ -190,6 +192,7 @@ impl CombineTabState {
             &gallery_item.recipe,
             &self.inspectors,
             "comb_bieberbach",
+            tokens,
         );
         if spec_col {
             self.inspectors.sync_3d_from_spectrum(&mut self.sheet_opts);

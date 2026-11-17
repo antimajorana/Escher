@@ -1,5 +1,5 @@
 use super::*;
-use crate::combine_tab::{MotionMode, ToolMode};
+use crate::combine::{MotionMode, ToolMode};
 use crate::live_combine::spec_world_pos;
 use papertilling_core::defect::combine_types::{
     ClassifiedCharge, EquivalentSingleReport, NotebookConfigJson,

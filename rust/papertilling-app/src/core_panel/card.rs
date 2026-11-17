@@ -8,6 +8,7 @@ use papertilling_core::defect::combine_types::CoreGalleryEntry;
 use super::{CHORD_RGBA, CONFIG_FACE_RGBA, ODD_FACE_RGBA, SPLIT_FACE_RGBA, UNDER_SITE_RGBA};
 use crate::canvas2d::{draw_dashed_egui, to_color32};
 use crate::scene2d::{CirclePrim, LinePrim, PolyPrim, ScenePrimitives, TextPrim, bond_palette, compute_bbox};
+use crate::theme::ThemeTokens;
 
 pub(crate) fn compile_core_card(entry: &CoreGalleryEntry) -> ScenePrimitives {
     let crystal = &entry.crystal;
@@ -167,8 +168,13 @@ fn compute_zoomed_bbox(
     ([cx as f32 - half, cy as f32 - half], [cx as f32 + half, cy as f32 + half])
 }
 
-pub(crate) fn paint_card_primitives(painter: &egui::Painter, rect: egui::Rect, prims: &ScenePrimitives) {
-    painter.rect_filled(rect, 3.0, egui::Color32::WHITE);
+pub(crate) fn paint_card_primitives(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    prims: &ScenePrimitives,
+    tokens: &ThemeTokens,
+) {
+    painter.rect_filled(rect, 3.0, tokens.bg_canvas_2d);
     let (bmin, bmax) = prims.bbox;
     let wc = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
     let sx = (bmax[0] - bmin[0]).max(0.5);
@@ -193,7 +199,7 @@ pub(crate) fn paint_card_primitives(painter: &egui::Painter, rect: egui::Rect, p
     }
     for ln in &prims.lines {
         let (p0, p1) = (to_screen(ln.a), to_screen(ln.b));
-        let stroke = egui::Stroke::new(ln.width, to_color32(ln.color));
+        let stroke = egui::Stroke::new(ln.width, tokens.remap_scene_ink(ln.color));
         if ln.dashed {
             draw_dashed_egui(painter, p0, p1, stroke, 5.2, 3.4);
         } else {
@@ -204,14 +210,18 @@ pub(crate) fn paint_card_primitives(painter: &egui::Painter, rect: egui::Rect, p
         let pos = to_screen(circ.center);
         let r = (circ.radius_world * zoom).clamp(circ.min_px, circ.max_px);
         if circ.fill[3] > 0 {
-            painter.circle_filled(pos, r, to_color32(circ.fill));
+            painter.circle_filled(pos, r, tokens.remap_scene_ink(circ.fill));
         }
         if circ.stroke.1 > 0.0 && circ.stroke.0[3] > 0 {
-            painter.circle_stroke(pos, r, egui::Stroke::new(circ.stroke.1, to_color32(circ.stroke.0)));
+            painter.circle_stroke(pos, r, egui::Stroke::new(circ.stroke.1, tokens.remap_scene_ink(circ.stroke.0)));
         }
     }
+    // Ring-number labels sit on filled core polygons (`ODD_FACE_RGBA`/`SPLIT_FACE_RGBA`/`CONFIG_FACE_RGBA`),
+    // so keep dark ink there and only lift labels when there are no face polygons behind them.
+    let has_faces = !prims.polygons.is_empty();
     for lbl in &prims.labels {
-        painter.text(to_screen(lbl.pos), egui::Align2::CENTER_CENTER, &lbl.text, egui::FontId::proportional(lbl.size_px), to_color32(lbl.color));
+        let col = if has_faces { to_color32(lbl.color) } else { tokens.remap_scene_ink(lbl.color) };
+        painter.text(to_screen(lbl.pos), egui::Align2::CENTER_CENTER, &lbl.text, egui::FontId::proportional(lbl.size_px), col);
     }
-    painter.rect_stroke(rect, 3.0, egui::Stroke::new(0.8, egui::Color32::from_gray(215)), egui::StrokeKind::Inside);
+    painter.rect_stroke(rect, 3.0, egui::Stroke::new(0.8, tokens.border_subtle), egui::StrokeKind::Inside);
 }

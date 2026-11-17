@@ -9,6 +9,7 @@ use papertilling_core::subperiodic::{
 use crate::mesh3d::atlas_mesh::mesh_from_frieze3d;
 use crate::mesh3d::GpuMeshData;
 use crate::scene2d::{compute_bbox, CirclePrim, LinePrim, Scene2D, ScenePrimitives};
+use crate::theme::ThemeTokens;
 
 pub struct SubperiodicPanelState {
     pub is_frieze: bool,
@@ -71,8 +72,6 @@ impl SubperiodicPanelState {
             if self.dihedral {
                 dirty |= ui.checkbox(&mut self.mirror_wall, "Mirror domain wall").changed();
             }
-            let r = build_rosette(self.dihedral, self.rosette_n, self.wedge_delta, self.mirror_wall);
-            ui.small(format!("Point group {} | |P|={} | Gᵃᵇ = {}", r.symbol, r.point_order, r.ab_label));
         } else {
             ui.horizontal_wrapped(|ui| {
                 ui.small("Group:");
@@ -103,13 +102,36 @@ impl SubperiodicPanelState {
                 ui.small("Cells:");
                 dirty |= ui.add(egui::Slider::new(&mut self.cells, 4..=20)).changed();
             });
-            if let Some(s) = &self.summary {
-                let st = if s.is_split { "split ([ν]=0)" } else { "nonsymmorphic ([ν]≠0)" };
-                ui.small(format!("#{} {} | |P|={} | {st}", s.number, s.symbol, s.point_order));
-                ui.small(format!("H²(P, Z) = {} | (G⁺)ᵃᵇ = {} | Gᵃᵇ = {}", s.h2_label, s.ab_plus_label, s.ab_full_label));
-            }
         }
         dirty
+    }
+
+    pub fn show_inspector(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        if !self.is_frieze {
+            ui.strong("0D Rosette Symmetry");
+            let r = build_rosette(self.dihedral, self.rosette_n, self.wedge_delta, self.mirror_wall);
+            ui.small(format!("Point group {} | |P| = {}", r.symbol, r.point_order));
+            ui.small(format!("Abelianization Gᵃᵇ = {}", r.ab_label));
+            ui.small(format!("Wedge Δn = {:+} | Mirror wall = {}", self.wedge_delta, self.mirror_wall));
+        } else {
+            ui.strong("1D Frieze Cohomology & Quotient");
+            if let Some(s) = &self.summary {
+                let (st, col) = if s.is_split {
+                    ("split ([ν]=0)", tokens.status_ok)
+                } else {
+                    ("nonsymmorphic ([ν]≠0)", tokens.status_warn)
+                };
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(format!("#{} {} | |P|={} | ", s.number, s.symbol, s.point_order));
+                    ui.colored_label(col, egui::RichText::new(st).strong());
+                });
+                ui.small(format!(
+                    "H²(P, Z) = {} | (G⁺)ᵃᵇ = {} | Gᵃᵇ = {}",
+                    s.h2_label, s.ab_plus_label, s.ab_full_label
+                ));
+            }
+            ui.small(format!("Topology: {:?} | Defect: {:?} | Cells: {}", self.topology, self.defect, self.cells));
+        }
     }
 
     pub fn build_scenes(&self) -> (Scene2D, GpuMeshData, String) {

@@ -1,22 +1,20 @@
-//! Side panel and central 2D / 3D / Split viewports of the `Defects` tab.
-
-use egui_extras::{Column, Size, StripBuilder, TableBuilder};
+use egui_extras::{Column, TableBuilder};
 
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
 use crate::defects_tab::{DefectSubTab, DefectsTabState};
 use crate::live_ops_ao::Defect2dMode;
-use crate::mesh3d::{DefectViewMode, show_sheet3d_controls};
-use crate::view3d::View3dState;
+use crate::theme::ThemeTokens;
 
 impl DefectsTabState {
-    pub fn show_side_panel(
+    pub fn show_left_panel(
         &mut self,
         ui: &mut egui::Ui,
         active_item: &CatalogueItemUi,
         backend: &AppBackend,
         canvas: &mut Canvas2D,
-    ) {
+        tokens: &ThemeTokens,
+    ) -> bool {
         if self.stale {
             self.rebuild_crystal(active_item, backend, canvas, true);
         }
@@ -29,10 +27,10 @@ impl DefectsTabState {
         if self.initializing {
             ui.spinner();
             ui.label("Preparing the defect catalogue and picture in the background…");
-            return;
+            return false;
         }
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::DARK_RED, err);
+            ui.colored_label(tokens.status_err, err);
         }
         ui.add_space(3.0);
         ui.horizontal(|ui| {
@@ -54,13 +52,13 @@ impl DefectsTabState {
                 }
             }
             DefectSubTab::Disclinations => {
-                if let Some(idx) = self.disclinations_table(ui) {
+                if let Some(idx) = self.disclinations_table(ui, tokens) {
                     self.selected_disclin = idx;
                     dirty = true;
                 }
             }
             DefectSubTab::Walls => {
-                if let Some(idx) = self.walls_table(ui) {
+                if let Some(idx) = self.walls_table(ui, tokens) {
                     self.selected_wall = idx;
                     dirty = true;
                 }
@@ -87,16 +85,7 @@ impl DefectsTabState {
         }
 
         ui.separator();
-        ui.strong("Patch, 2D & 3D Sheet Controls");
-        ui.horizontal(|ui| {
-            ui.label("View:");
-            for vm in DefectViewMode::ALL {
-                if ui.selectable_label(self.view_mode == vm, vm.label()).clicked() {
-                    self.view_mode = vm;
-                    self.view3d_dirty = true;
-                }
-            }
-        });
+        ui.strong("Patch & 2D Drawing Controls");
         ui.horizontal(|ui| {
             ui.label("Radius R:");
             if ui.add(egui::Slider::new(&mut self.radius, 2.4..=8.0).step_by(0.2)).changed() {
@@ -115,151 +104,10 @@ impl DefectsTabState {
             }
         });
 
-        let (kappa_changed, vis_changed) = show_sheet3d_controls(ui, &mut self.sheet_opts, "def_side_col");
-        if vis_changed {
-            if self.inspectors.on_sheet_color_changed(self.sheet_opts.color_mode) {
-                self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
-            }
-            self.view3d_dirty = true;
-        }
-
         if dirty {
             self.rebuild_crystal(active_item, backend, canvas, reset_view);
-        } else if kappa_changed {
-            self.rebuild_sheet3d_only(active_item);
         }
-
-        ui.separator();
-        ui.strong("Core Charge & 3D Buckling Readout");
-        if self.is_busy() || self.error.is_some() {
-            ui.horizontal(|ui| {
-                if self.is_busy() {
-                    ui.spinner();
-                }
-                ui.label("Previous readout — stale");
-            });
-        }
-        ui.label(&self.readout.charge_summary);
-        ui.small(&self.readout.holonomy_detail);
-        ui.small(format!("Core structure: {}", self.readout.core_rings));
-        if !self.last_sheet.xyz.is_empty() {
-            let z_min = self.last_sheet.xyz.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
-            let z_max = self.last_sheet.xyz.iter().map(|p| p[2]).fold(f64::NEG_INFINITY, f64::max);
-            let dz_a = (z_max - z_min) / self.last_sheet.mean_bond_len.max(1e-9);
-            ui.small(format!(
-                "3D Sheet: Δz/a = {dz_a:.2} | E_stretch = {:.4}, E_bend = {:.4}",
-                self.last_sheet.stretch_energy, self.last_sheet.bend_energy
-            ));
-        }
-        if !self.readout.note.is_empty() {
-            ui.colored_label(
-                egui::Color32::from_rgb(168, 92, 14),
-                format!("Note: {}", self.readout.note),
-            );
-        }
-
-        let (circ_dirty, ov_dirty, spec_recomp, spec_col) = self.inspectors.show_controls_ui(ui, "def_insp", 0, true);
-        if spec_col {
-            self.inspectors.sync_3d_from_spectrum(&mut self.sheet_opts);
-            self.view3d_dirty = true;
-        }
-        if circ_dirty || ov_dirty {
-            self.refresh_and_sync_inspectors(active_item, canvas);
-        }
-        if spec_recomp && !self.last_crystal.pos.is_empty() {
-            self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
-        }
-        crate::bieberbach_ui::show_bieberbach_inspector_section(
-            ui,
-            &active_item.group,
-            &active_item.recipe,
-            &self.inspectors,
-            "def_bieberbach",
-        );
-    }
-
-    pub fn show_central(
-        &mut self,
-        ui: &mut egui::Ui,
-        active_item: &CatalogueItemUi,
-        canvas: &mut Canvas2D,
-        view3d: &mut View3dState,
-    ) {
-        self.poll_worker(ui.ctx(), canvas);
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("View:");
-            for vm in DefectViewMode::ALL {
-                if ui.selectable_label(self.view_mode == vm, vm.label()).clicked() {
-                    self.view_mode = vm;
-                    self.view3d_dirty = true;
-                }
-            }
-            if self.is_busy() {
-                ui.spinner();
-            }
-        });
-        if self.view_mode.uses_3d() {
-            let (kc, vc) = show_sheet3d_controls(ui, &mut self.sheet_opts, "def_top_col");
-            if vc {
-                if self.inspectors.on_sheet_color_changed(self.sheet_opts.color_mode) {
-                    self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
-                }
-                self.view3d_dirty = true;
-            }
-            if kc {
-                self.rebuild_sheet3d_only(active_item);
-            }
-        }
-        if self.view3d_dirty && self.view_mode.uses_3d() {
-            self.sync_view3d(view3d);
-        }
-        ui.add_space(2.0);
-
-        match self.view_mode {
-            DefectViewMode::Planar2D => {
-                ui.strong("2D Surgical Crystal Patch (irregular core rings, cones, A|B domains)");
-                ui.add_space(2.0);
-                if self.inspectors.circuit.enabled {
-                    let inter = canvas.show_interactive(ui, &[], false, None);
-                    if let Some(v0) = inter.clicked_circuit_vertex {
-                        self.inspectors.circuit.base_v0 = Some(v0);
-                        self.refresh_and_sync_inspectors(active_item, canvas);
-                    }
-                } else {
-                    canvas.show(ui);
-                }
-            }
-            DefectViewMode::Sheet3D => {
-                ui.strong("3D Elastic Sheet Geometry (buckling relieves in-plane defect strain)");
-                ui.add_space(2.0);
-                view3d.show(ui);
-            }
-            DefectViewMode::Split2D3D => {
-                StripBuilder::new(ui)
-                    .clip(true)
-                    .sizes(Size::remainder().at_least(180.0), 2)
-                    .horizontal(|mut strip| {
-                        strip.cell(|ui| {
-                            ui.strong("2D Surgical Crystal Patch");
-                            ui.add_space(2.0);
-                            if self.inspectors.circuit.enabled {
-                                let inter = canvas.show_interactive(ui, &[], false, None);
-                                if let Some(v0) = inter.clicked_circuit_vertex {
-                                    self.inspectors.circuit.base_v0 = Some(v0);
-                                    self.refresh_and_sync_inspectors(active_item, canvas);
-                                }
-                            } else {
-                                canvas.show(ui);
-                            }
-                        });
-                        strip.cell(|ui| {
-                            ui.strong("3D Elastic Sheet Geometry (orbit & zoom)");
-                            ui.add_space(2.0);
-                            view3d.show(ui);
-                        });
-                    });
-            }
-        }
+        true
     }
 
     fn dislocations_table(&self, ui: &mut egui::Ui) -> Option<usize> {
@@ -298,10 +146,10 @@ impl DefectsTabState {
         picked
     }
 
-    fn disclinations_table(&self, ui: &mut egui::Ui) -> Option<usize> {
+    fn disclinations_table(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) -> Option<usize> {
         if self.catalogue.centres.is_empty() {
             ui.colored_label(
-                egui::Color32::from_rgb(176, 82, 24),
+                tokens.status_warn,
                 "No rotational centres in this group (|P+| = 1): zero disclination classes.",
             );
             return None;
@@ -368,7 +216,7 @@ impl DefectsTabState {
         picked
     }
 
-    fn walls_table(&self, ui: &mut egui::Ui) -> Option<usize> {
+    fn walls_table(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) -> Option<usize> {
         ui.strong("Four Mirror / Glide Wall Kinds (Wa - Wd)");
         let mut picked = None;
         ui.push_id("walls_tbl", |ui| {
@@ -396,9 +244,9 @@ impl DefectsTabState {
                             row.col(|ui| { ui.label(w.kind.label()); });
                             row.col(|ui| {
                                 let (txt, col) = if w.can_end_orientable {
-                                    ("orientable", egui::Color32::from_rgb(34, 108, 42))
+                                    ("orientable", tokens.status_ok)
                                 } else {
-                                    ("non-orient.", egui::Color32::from_rgb(168, 92, 10))
+                                    ("non-orient.", tokens.status_warn)
                                 };
                                 ui.colored_label(col, egui::RichText::new(txt).size(11.0)).on_hover_text(&w.ending_summary);
                             });

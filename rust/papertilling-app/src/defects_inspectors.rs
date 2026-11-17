@@ -13,6 +13,7 @@ use crate::canvas2d::gauge_overlay::{
 use crate::mesh3d::{Sheet3dColorMode, Sheet3dViewOpts};
 use crate::spectrum_ui::show_spectrum_panel;
 use crate::spectrum_worker::{SpectrumColorOverlay, SpectrumPanelState};
+use crate::theme::ThemeTokens;
 
 /// Interactive inspection state shared by `DefectsTabState` and `CombineTabState`.
 pub struct DefectInspectors {
@@ -217,6 +218,7 @@ impl DefectInspectors {
         id_prefix: &str,
         num_pins: usize,
         allow_seam_sign: bool,
+        tokens: &ThemeTokens,
     ) -> (bool, bool, bool, bool) {
         let mut circ_dirty = false;
         let mut ov_dirty = false;
@@ -328,7 +330,7 @@ impl DefectInspectors {
             }
         });
 
-        let sp_ev = show_spectrum_panel(ui, &mut self.spectrum, &format!("{id_prefix}_spec"), true, allow_seam_sign);
+        let sp_ev = show_spectrum_panel(ui, &mut self.spectrum, &format!("{id_prefix}_spec"), true, allow_seam_sign, tokens);
         let mut spec_recomp = sp_ev.recompute;
         if ov_dirty && matches!(self.overlay_mode, CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge) && self.spectrum.result.is_none() {
             spec_recomp = true;

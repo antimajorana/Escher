@@ -1,13 +1,10 @@
-//! Side panel of the Gallery tab.
+//! Left-rail browsing and rename bar of the Gallery tab.
 
 use egui_extras::{Column, TableBuilder};
 
 use super::{BrowseMode, GalleryTabState};
-use crate::backend::{AppBackend, CatalogueRuleUi, SliderParamUi};
+use crate::backend::{AppBackend, CatalogueRuleUi};
 use crate::canvas2d::Canvas2D;
-
-/// A parameter move cheaper than this is applied live while the slider is dragged.
-const LIVE_MOVE_SECS: f64 = 0.05;
 
 impl GalleryTabState {
     /// Inline rename control bar (Enter to save, Esc to cancel, Reset name when custom alias is active).
@@ -63,9 +60,17 @@ impl GalleryTabState {
         });
     }
 
-    /// Draw the side panel. Returns true when another lattice was selected (group, rule, list entry, named
-    /// lattice); slider moves are reported by `revision()` only.
+    /// Draw the full side panel (browsing + inspector) for legacy callers/tests.
+    #[cfg(test)]
     pub fn show_side_panel(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
+        let lattice_changed = self.show_left_panel(ui, backend, canvas);
+        ui.separator();
+        self.show_inspector_panel(ui, backend, canvas, &crate::theme::ThemeTokens::paper());
+        lattice_changed
+    }
+
+    /// Left rail: browse mode tabs, group/catalogue/named tables, live search, and custom builder.
+    pub fn show_left_panel(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
         let mut lattice_changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong("Browse:");
@@ -96,27 +101,6 @@ impl GalleryTabState {
                 lattice_changed |= self.custom_builder_panel(ui, backend, canvas);
             }
         }
-
-        ui.separator();
-        self.wyckoff_table(ui, backend);
-        ui.separator();
-        self.parameter_sliders(ui, canvas);
-
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label("Patch repeat:");
-            let mut r = self.repeat;
-            if ui.add(egui::Slider::new(&mut r, 1..=6)).changed() {
-                self.set_repeat(r, canvas);
-            }
-        });
-        let mut show = self.show_unit_cell;
-        if ui.checkbox(&mut show, "Show unit cell (a1, a2)").changed() {
-            self.set_show_unit_cell(show, canvas);
-        }
-
-        ui.separator();
-        self.readout_lines(ui);
         lattice_changed
     }
 
@@ -281,202 +265,4 @@ impl GalleryTabState {
         }
         false
     }
-
-    fn wyckoff_table(&self, ui: &mut egui::Ui, backend: &AppBackend) {
-        let wyck = backend.wyckoff_table(&self.active_item.group, &self.active_item.occupied_wyckoff);
-        ui.strong(format!("ITA Wyckoff Table ({})", self.active_item.group));
-        ui.push_id("wyckoff_tbl", |ui| {
-            TableBuilder::new(ui)
-                .striped(true)
-                .max_scroll_height(110.0)
-                .column(Column::exact(38.0))
-                .column(Column::exact(48.0))
-                .column(Column::exact(76.0))
-                .column(Column::remainder())
-                .header(17.0, |mut h| {
-                    for t in ["Pos", "Sym", "Coords", "State"] {
-                        h.col(|ui| {
-                            ui.strong(t);
-                        });
-                    }
-                })
-                .body(|mut body| {
-                    for w in &wyck {
-                        body.row(17.0, |mut row| {
-                            let tag = format!("{}{}", w.multiplicity, w.letter);
-                            row.col(|ui| {
-                                if w.occupied {
-                                    ui.colored_label(egui::Color32::from_rgb(22, 108, 192), egui::RichText::new(tag).strong());
-                                } else {
-                                    ui.label(tag);
-                                }
-                            });
-                            row.col(|ui| {
-                                ui.label(&w.site_symmetry);
-                            });
-                            row.col(|ui| {
-                                ui.label(&w.coords_expr);
-                            });
-                            row.col(|ui| {
-                                if w.occupied {
-                                    ui.colored_label(egui::Color32::from_rgb(24, 134, 75), "occupied");
-                                } else {
-                                    ui.small("-");
-                                }
-                            });
-                        });
-                    }
-                });
-        });
-    }
-
-    fn parameter_sliders(&mut self, ui: &mut egui::Ui, canvas: &mut Canvas2D) {
-        ui.horizontal(|ui| {
-            ui.strong("Free Parameters");
-            if !self.sliders().is_empty() && ui.small_button("Reset").clicked() {
-                self.reset_params(canvas);
-            }
-        });
-        if self.sliders().is_empty() {
-            ui.small("No free parameters: lattice is rigid inside its group (scale a only).");
-            return;
-        }
-        // Live update while dragging when a move is cheap; otherwise only on release (ipywidgets'
-        // continuous_update=False), so a 20-parameter lattice does not drag at a few frames per second.
-        let live = self.last_move_secs < LIVE_MOVE_SECS;
-        // (name, value, from a pointer drag): drags go on the step grid, typed / keyboard values are set as given
-        let mut moved: Option<(String, f64, bool)> = None;
-        let mut pending = self.pending_drag.clone();
-        for s in self.sliders() {
-            let shown = pending.as_ref().filter(|(n, _)| *n == s.name).map_or(s.value, |p| p.1);
-            let mut v = shown;
-            ui.horizontal(|ui| {
-                ui.label(&s.name);
-                // No egui clamping, step or rounding: those would rewrite the stored value on the first frame (a
-                // default such as b = 1.154 would become 1.15 without any input). Grid, limits and snapping are
-                // applied by SliderState when the user moves the slider.
-                let resp = ui.add_enabled(
-                    s.allowed_min < s.allowed_max,
-                    egui::Slider::new(&mut v, s.allowed_min..=s.allowed_max)
-                        .clamping(egui::SliderClamping::Never)
-                        .custom_formatter(|x, _| format!("{x:.3}")),
-                );
-                let by_pointer = resp.dragged() || resp.drag_stopped();
-                if resp.changed() && v != shown {
-                    if resp.dragged() && !live {
-                        pending = Some((s.name.clone(), v));
-                    } else {
-                        moved = Some((s.name.clone(), v, by_pointer));
-                    }
-                }
-                if !resp.dragged() && pending.as_ref().is_some_and(|(n, _)| *n == s.name) {
-                    moved = pending.take().map(|(n, x)| (n, x, true));
-                }
-            });
-            draw_range_bar(ui, s, shown);
-        }
-        ui.small(
-            "Bars: red = forbidden (bonds cross, a bond through a site, sites coincide or another tiling); \
-             black = current value; grey = default; blue tick = special value where the group is larger.",
-        );
-        self.pending_drag = pending;
-        if let Some((name, v, by_pointer)) = moved {
-            self.pending_drag = None;
-            if by_pointer {
-                self.drag_param(&name, v, canvas);
-            } else {
-                self.set_param(&name, v, canvas);
-            }
-        }
-    }
-
-    fn readout_lines(&self, ui: &mut egui::Ui) {
-        ui.strong("Delaney-Dress Symbol & Symmetry");
-        let status_col = if self.readout.status_ok {
-            egui::Color32::from_rgb(24, 128, 56)
-        } else {
-            egui::Color32::from_rgb(184, 38, 32)
-        };
-        ui.colored_label(status_col, &self.readout.status_message);
-        ui.small(format!(
-            "Group: {} | Orbits: {} site, {} bond | Origin: ({:.2}, {:.2})",
-            self.readout.active_group,
-            self.active_item.site_orbits,
-            self.active_item.bond_orbits,
-            self.active_item.frame.origin[0],
-            self.active_item.frame.origin[1]
-        ));
-        ui.small(format!("D-symbol key: {}", self.readout.dsymbol_key));
-        ui.small(format!("Network key: {}", self.readout.network_key));
-        ui.small(format!("Symmetry index [Aut(net) : G] = {}", self.readout.symmetry_index));
-        let moved = self.active_item.recipe != self.base_item().recipe;
-        ui.small(format!(
-            "Lattice revision {}: the other tabs use this lattice{}",
-            self.revision(),
-            if moved { " at the slider values (Reset: the stored one)" } else { " as stored" }
-        ));
-        crate::bieberbach_ui::show_wallpaper_bieberbach_collapsible(
-            ui,
-            &self.readout.active_group,
-            "gal_bieberbach",
-        );
-    }
-}
-
-fn draw_range_bar(ui: &mut egui::Ui, s: &SliderParamUi, current: f64) {
-    let w = (ui.available_width() - 8.0).max(80.0);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::hover());
-    {
-        let mut tip = vec![format!(
-            "{}: limits [{:.4}, {:.4}], step {}, default {:.4} (grey mark)",
-            s.name, s.allowed_min, s.allowed_max, s.step, s.default_value
-        )];
-        for sp in &s.special_ticks {
-            tip.push(format!("Special {} at {:.4}: {}", sp.supergroup, sp.value, sp.equation));
-        }
-        for fb in &s.forbidden {
-            tip.push(format!("[{:.3}, {:.3}]: {}", fb.lo, fb.hi, fb.reason));
-        }
-        resp.on_hover_text(tip.join("\n"));
-    }
-    let painter = ui.painter_at(rect);
-    let span = (s.nominal_max - s.nominal_min).max(1e-6);
-    let x_of = |val: f64| -> f32 {
-        let t = ((val - s.nominal_min) / span).clamp(0.0, 1.0) as f32;
-        rect.left() + t * rect.width()
-    };
-    let bar = egui::Rect::from_min_max(
-        egui::pos2(rect.left(), rect.top() + 11.0),
-        egui::pos2(rect.right(), rect.top() + 19.0),
-    );
-    painter.rect_filled(bar, 2.0, egui::Color32::from_rgb(216, 238, 198));
-    for f in &s.forbidden {
-        let fb = egui::Rect::from_min_max(egui::pos2(x_of(f.lo), bar.top()), egui::pos2(x_of(f.hi), bar.bottom()));
-        painter.rect_filled(fb, 1.0, egui::Color32::from_rgb(238, 168, 168));
-    }
-    painter.rect_stroke(bar, 2.0, egui::Stroke::new(1.0, egui::Color32::from_gray(145)), egui::StrokeKind::Inside);
-    let dx = x_of(s.default_value);
-    painter.line_segment(
-        [egui::pos2(dx, bar.top()), egui::pos2(dx, bar.bottom())],
-        egui::Stroke::new(1.5, egui::Color32::from_gray(120)),
-    );
-    for sp in &s.special_ticks {
-        let sx = x_of(sp.value);
-        painter.line_segment(
-            [egui::pos2(sx, bar.top() - 2.0), egui::pos2(sx, bar.bottom() + 2.0)],
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(21, 101, 192)),
-        );
-        painter.text(
-            egui::pos2(sx, rect.top() + 5.0),
-            egui::Align2::CENTER_CENTER,
-            &sp.supergroup,
-            egui::FontId::proportional(10.0),
-            egui::Color32::from_rgb(21, 101, 192),
-        );
-    }
-    let cx = x_of(current);
-    painter.line_segment(
-        [egui::pos2(cx, bar.top() - 2.0), egui::pos2(cx, bar.bottom() + 2.0)],
-        egui::Stroke::new(2.4, egui::Color32::BLACK),
-    );
 }

@@ -12,7 +12,7 @@ use papertilling_core::types::Cell2D;
 use crate::aliases::AliasStore;
 use crate::backend::{AppBackend, CatalogueRuleUi};
 use crate::canvas2d::{Canvas2D, Scene2D};
-use crate::combine_tab::{CombineTabState, MotionMode, ToolMode};
+use crate::combine::{CombineTabState, MotionMode, ToolMode};
 use crate::core_panel::{CorePanelState, show_core_panel};
 use crate::defects_tab::{DefectSubTab, DefectsTabState};
 use crate::gallery_tab::GalleryTabState;
@@ -104,8 +104,9 @@ fn gallery_parameter_edits_and_overlays_preserve_zoom_and_pan() {
     let idx = backend.named_lattices().iter().position(|it| it.named_key.as_deref() == Some("oblique")).unwrap();
     gallery.select_named(idx, &backend, &mut canvas);
     let ctx = egui::Context::default();
+    let tokens = crate::theme::ThemeTokens::paper();
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-        canvas.show(ui);
+        canvas.show(ui, &tokens);
     });
     canvas.zoom = 312.5;
     canvas.pan = egui::vec2(44.0, -29.0);
@@ -118,7 +119,7 @@ fn gallery_parameter_edits_and_overlays_preserve_zoom_and_pan() {
     gallery.reset_params(&mut canvas);
 
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-        canvas.show(ui);
+        canvas.show(ui, &tokens);
     });
     assert!((canvas.zoom - 312.5).abs() < 1e-4, "zoom reset unexpectedly to {}", canvas.zoom);
     assert_eq!(canvas.pan, egui::vec2(44.0, -29.0), "pan reset unexpectedly to {:?}", canvas.pan);
@@ -127,7 +128,7 @@ fn gallery_parameter_edits_and_overlays_preserve_zoom_and_pan() {
     let sq_idx = backend.named_lattices().iter().position(|it| it.named_key.as_deref() == Some("square")).unwrap();
     gallery.select_named(sq_idx, &backend, &mut canvas);
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-        canvas.show(ui);
+        canvas.show(ui, &tokens);
     });
     assert_eq!(canvas.pan, egui::Vec2::ZERO);
     assert!((canvas.zoom - 312.5).abs() > 1.0);
@@ -144,7 +145,8 @@ fn view3d_pinch_zoom_and_core_card_inspector_modal_run_headless() {
         events: vec![egui::Event::PointerMoved(center), egui::Event::Zoom(2.0)],
         ..Default::default()
     };
-    let _ = ctx.run_ui(input, |ui| view3d.show(ui));
+    let tokens = crate::theme::ThemeTokens::paper();
+    let _ = ctx.run_ui(input, |ui| view3d.show(ui, &tokens));
     assert!((view3d.distance - 0.5 * d0).abs() < 1e-3, "3D pinch zoom halved distance: {} -> {}", d0, view3d.distance);
 
     // Core gallery click opens the zoomable inspector window without panic and Esc closes it.
@@ -168,7 +170,7 @@ fn view3d_pinch_zoom_and_core_card_inspector_modal_run_headless() {
             events,
             ..Default::default()
         };
-        let _ = ctx.run_ui(inp, |ui| show_core_panel(&mut core_state, ui, combine.compare_result.as_ref()));
+        let _ = ctx.run_ui(inp, |ui| show_core_panel(&mut core_state, ui, combine.compare_result.as_ref(), &tokens));
     }
 }
 
@@ -188,6 +190,8 @@ fn defects_and_combine_live_3d_sheet_geometry_end_to_end() {
     def.rebuild_crystal(hc, &backend, &mut canvas, true);
     def.wait_idle(&mut canvas);
 
+    let tokens = crate::theme::ThemeTokens::paper();
+    let mut split_ratio = 0.5_f32;
     for cm in Sheet3dColorMode::ALL {
         def.sheet_opts.color_mode = cm;
         def.sheet_opts.z_exag = 1.6;
@@ -195,7 +199,7 @@ fn defects_and_combine_live_3d_sheet_geometry_end_to_end() {
         for vm in DefectViewMode::ALL {
             def.view_mode = vm;
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-                def.show_central(ui, hc, &mut canvas, &mut view3d);
+                def.show_central(ui, hc, &mut canvas, &mut view3d, &mut split_ratio, &tokens);
             });
         }
     }
@@ -231,7 +235,7 @@ fn defects_and_combine_live_3d_sheet_geometry_end_to_end() {
     assert!(!view3d.mesh_data().faces.is_empty());
 
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-        comb.show_central(ui, sq, &backend, &mut canvas, &mut view3d);
+        comb.show_central(ui, sq, &backend, &mut canvas, &mut view3d, &mut split_ratio, &tokens);
     });
 }
 

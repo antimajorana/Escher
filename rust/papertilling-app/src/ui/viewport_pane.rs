@@ -1,0 +1,157 @@
+use crate::app::{NavTab, PapertillingApp};
+use crate::mesh3d::{DefectViewMode, Sheet3dViewOpts, show_sheet3d_controls};
+use crate::theme::ThemeTokens;
+
+impl PapertillingApp {
+    pub(crate) fn show_viewport_pane(&mut self, ui: &mut egui::Ui) {
+        let tokens = self.theme.tokens();
+        egui::CentralPanel::default().show(ui, |ui| {
+            #[cfg(test)]
+            {
+                self.test_rects.center = ui.max_rect();
+            }
+            match self.active_tab {
+            NavTab::Gallery => {
+                ui.strong(format!(
+                    "2D Periodic Lattice — {} ({}) [drag: pan, scroll/pinch/+/-: zoom, 0/dbl-click: fit]",
+                    self.gallery.active_item().display_with_orig(),
+                    self.gallery.active_item().group
+                ));
+                ui.add_space(2.0);
+                self.canvas2d.show(ui, &tokens);
+            }
+            NavTab::Surfaces => {
+                self.surfaces
+                    .poll_background(ui.ctx(), &mut self.canvas2d, &mut self.view3d);
+                let mut ratio = self.viewport_split_ratio;
+                show_split_2d_3d(
+                    ui,
+                    &mut ratio,
+                    "surfaces_split",
+                    &tokens,
+                    |ui| {
+                        ui.strong("2D Fundamental Chart / Gluing Net (drag pan, scroll/pinch zoom)");
+                        ui.add_space(2.0);
+                        self.canvas2d.show(ui, &tokens);
+                    },
+                    |ui| {
+                        ui.strong("3D wgpu Surface Viewport (two-sided lit faces + bond curves)");
+                        ui.add_space(2.0);
+                        self.view3d.show(ui, &tokens);
+                    },
+                );
+                self.viewport_split_ratio = ratio;
+            }
+            NavTab::Defects => {
+                let item = self.gallery.active_item().clone();
+                self.defects.show_central(
+                    ui,
+                    &item,
+                    &mut self.canvas2d,
+                    &mut self.view3d,
+                    &mut self.viewport_split_ratio,
+                    &tokens,
+                );
+            }
+            NavTab::Combine => {
+                let item = self.gallery.active_item().clone();
+                self.combine.show_central(
+                    ui,
+                    &item,
+                    &self.backend,
+                    &mut self.canvas2d,
+                    &mut self.view3d,
+                    &mut self.viewport_split_ratio,
+                    &tokens,
+                );
+            }
+            NavTab::Atlas => {
+                self.atlas.show_central(
+                    ui,
+                    &mut self.canvas2d,
+                    &mut self.view3d,
+                    &mut self.viewport_split_ratio,
+                    &tokens,
+                );
+            }
+        }
+        });
+    }
+}
+
+/// Shared viewport header for `Defects` and `Combine`: renders `DefectViewMode` selector + busy spinner,
+/// and when `view_mode.uses_3d()` renders `show_sheet3d_controls` once. Returns `(kappa_changed, visual_changed)`.
+pub fn show_defect_viewport_header(
+    ui: &mut egui::Ui,
+    view_mode: &mut DefectViewMode,
+    sheet_opts: &mut Sheet3dViewOpts,
+    is_busy: bool,
+    view3d_dirty: &mut bool,
+    id_salt: &str,
+) -> (bool, bool) {
+    ui.horizontal_wrapped(|ui| {
+        ui.strong("View:");
+        for vm in DefectViewMode::ALL {
+            if ui.selectable_label(*view_mode == vm, vm.label()).clicked() {
+                *view_mode = vm;
+                *view3d_dirty = true;
+            }
+        }
+        if is_busy {
+            ui.spinner();
+        }
+    });
+    if view_mode.uses_3d() {
+        show_sheet3d_controls(ui, sheet_opts, id_salt)
+    } else {
+        (false, false)
+    }
+}
+
+pub fn show_split_2d_3d(
+    ui: &mut egui::Ui,
+    split_ratio: &mut f32,
+    id_salt: &str,
+    tokens: &ThemeTokens,
+    left_fn: impl FnOnce(&mut egui::Ui),
+    right_fn: impl FnOnce(&mut egui::Ui),
+) {
+    *split_ratio = split_ratio.clamp(0.2, 0.8);
+    let total = ui.available_rect_before_wrap();
+    let sep_w = 6.0_f32;
+    let usable_w = (total.width() - sep_w).max(0.0);
+    let min_pane = (usable_w * 0.5).min(80.0);
+    let left_w = (usable_w * *split_ratio).clamp(min_pane, (usable_w - min_pane).max(min_pane));
+    let left_rect = egui::Rect::from_min_size(total.min, egui::vec2(left_w, total.height()));
+    let sep_rect = egui::Rect::from_min_size(
+        egui::pos2(left_rect.right(), total.top()),
+        egui::vec2(sep_w.min((total.right() - left_rect.right()).max(0.0)), total.height()),
+    );
+    let right_rect = egui::Rect::from_min_size(
+        egui::pos2(sep_rect.right(), total.top()),
+        egui::vec2((total.right() - sep_rect.right()).max(0.0), total.height()),
+    );
+
+    let sep_resp = ui.interact(sep_rect, ui.make_persistent_id(id_salt), egui::Sense::click_and_drag());
+    if sep_resp.hovered() || sep_resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if sep_resp.double_clicked() {
+        *split_ratio = 0.5;
+    } else if sep_resp.dragged() && usable_w > 1.0 {
+        *split_ratio = (*split_ratio + sep_resp.drag_delta().x / usable_w).clamp(0.2, 0.8);
+    }
+
+    ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), left_fn);
+    let sep_col = if sep_resp.hovered() || sep_resp.dragged() {
+        tokens.border_focus
+    } else {
+        tokens.border_strong
+    };
+    ui.painter().line_segment(
+        [sep_rect.center_top(), sep_rect.center_bottom()],
+        egui::Stroke::new(if sep_resp.dragged() { 2.0 } else { 1.0 }, sep_col),
+    );
+    ui.scope_builder(egui::UiBuilder::new().max_rect(right_rect), right_fn);
+    ui.advance_cursor_after_rect(total);
+}

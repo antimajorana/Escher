@@ -2,13 +2,13 @@
 
 use papertilling_core::defect::combine_types::CoreGalleryEntry;
 
-use super::MATCH_BORDER_RGB;
 use super::card::compile_core_card;
 use crate::canvas2d::{
     ZOOM_MAX, ZOOM_MIN, ZOOM_STEP_FACTOR, draw_dashed_egui, input_zoom_factor,
     take_keyboard_zoom_action, to_color32, zoom_by_factor_about, ZoomKeyAction,
 };
 use crate::scene2d::ScenePrimitives;
+use crate::theme::ThemeTokens;
 
 pub struct CoreInspectorModal {
     pub title: String,
@@ -62,7 +62,7 @@ impl CoreInspectorModal {
     }
 
     /// Show the floating modal window; returns `false` when the user closes it.
-    pub fn show(&mut self, ctx: &egui::Context) -> bool {
+    pub fn show(&mut self, ctx: &egui::Context, tokens: &ThemeTokens) -> bool {
         let mut open = true;
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return false;
@@ -75,7 +75,7 @@ impl CoreInspectorModal {
             .show(ctx, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if self.is_match {
-                        ui.colored_label(MATCH_BORDER_RGB, egui::RichText::new("MATCH").strong());
+                        ui.colored_label(tokens.status_ok, egui::RichText::new("MATCH").strong());
                         ui.separator();
                     }
                     ui.label(format!("Rings: [{}]", self.rings_text));
@@ -112,12 +112,20 @@ impl CoreInspectorModal {
                 );
                 self.handle_input(ui, rect, &resp, hud_rect);
 
-                paint_zoomed_prims(&ui.painter_at(rect), rect, &self.prims, self.world_center, self.pan, self.zoom);
+                paint_zoomed_prims(
+                    &ui.painter_at(rect),
+                    rect,
+                    &self.prims,
+                    self.world_center,
+                    self.pan,
+                    self.zoom,
+                    tokens,
+                );
 
                 ui.scope_builder(egui::UiBuilder::new().max_rect(hud_rect), |ui| {
                     egui::Frame::NONE
-                        .fill(egui::Color32::from_rgba_unmultiplied(245, 247, 251, 232))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(185)))
+                        .fill(tokens.bg_hud)
+                        .stroke(egui::Stroke::new(1.0, tokens.border_strong))
                         .corner_radius(4.0)
                         .inner_margin(egui::Margin::symmetric(5, 3))
                         .show(ui, |ui| {
@@ -183,8 +191,9 @@ fn paint_zoomed_prims(
     wc: [f32; 2],
     pan: egui::Vec2,
     zoom: f32,
+    tokens: &ThemeTokens,
 ) {
-    painter.rect_filled(rect, 4.0, egui::Color32::WHITE);
+    painter.rect_filled(rect, 4.0, tokens.bg_canvas_2d);
     let origin = rect.center() + pan;
     let to_screen = |p: [f32; 2]| -> egui::Pos2 {
         egui::pos2(origin.x + (p[0] - wc[0]) * zoom, origin.y - (p[1] - wc[1]) * zoom)
@@ -206,13 +215,13 @@ fn paint_zoomed_prims(
                 ));
             }
             if let Some((sc, sw)) = poly.stroke {
-                painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(sw, to_color32(sc))));
+                painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(sw, tokens.remap_scene_ink(sc))));
             }
         }
     }
     for ln in &prims.lines {
         let (p0, p1) = (to_screen(ln.a), to_screen(ln.b));
-        let stroke = egui::Stroke::new(ln.width * 1.15, to_color32(ln.color));
+        let stroke = egui::Stroke::new(ln.width * 1.15, tokens.remap_scene_ink(ln.color));
         if ln.dashed {
             draw_dashed_egui(painter, p0, p1, stroke, 6.0, 4.0);
         } else {
@@ -223,25 +232,27 @@ fn paint_zoomed_prims(
         let pos = to_screen(circ.center);
         let r = (circ.radius_world * zoom).clamp(circ.min_px, circ.max_px * 1.8);
         if circ.fill[3] > 0 {
-            painter.circle_filled(pos, r, to_color32(circ.fill));
+            painter.circle_filled(pos, r, tokens.remap_scene_ink(circ.fill));
         }
         if circ.stroke.1 > 0.0 && circ.stroke.0[3] > 0 {
-            painter.circle_stroke(pos, r, egui::Stroke::new(circ.stroke.1, to_color32(circ.stroke.0)));
+            painter.circle_stroke(pos, r, egui::Stroke::new(circ.stroke.1, tokens.remap_scene_ink(circ.stroke.0)));
         }
     }
+    let has_faces = !prims.polygons.is_empty();
     for lbl in &prims.labels {
+        let col = if has_faces { to_color32(lbl.color) } else { tokens.remap_scene_ink(lbl.color) };
         painter.text(
             to_screen(lbl.pos),
             egui::Align2::CENTER_CENTER,
             &lbl.text,
             egui::FontId::proportional((lbl.size_px * 1.2).clamp(10.0, 16.0)),
-            to_color32(lbl.color),
+            col,
         );
     }
     painter.rect_stroke(
         rect,
         4.0,
-        egui::Stroke::new(1.0, egui::Color32::from_gray(185)),
+        egui::Stroke::new(1.0, tokens.border_strong),
         egui::StrokeKind::Inside,
     );
 }

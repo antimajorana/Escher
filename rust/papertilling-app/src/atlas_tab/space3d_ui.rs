@@ -8,6 +8,7 @@ use papertilling_core::space3d::{analyze_space_group_3d, list_space_groups_3d};
 use crate::mesh3d::atlas_mesh::mesh_from_net3d;
 use crate::mesh3d::GpuMeshData;
 use crate::scene2d::{CirclePrim, LinePrim, Scene2D, ScenePrimitives, compute_bbox};
+use crate::theme::ThemeTokens;
 
 pub struct Space3dPanelState {
     pub filter: String,
@@ -79,13 +80,6 @@ impl Space3dPanelState {
             }
         });
 
-        self.ensure_cached();
-        if let Some(s) = &self.summary {
-            let st = if s.is_split { "split ([ν]=0)" } else { "nonsymmorphic ([ν]≠0)" };
-            ui.strong(format!("#{} {} | |P|={} | {st}", s.number, s.symbol, s.point_order));
-            ui.small(format!("H²(P, Λ) = {} | (G⁺)ᵃᵇ = {} | Gᵃᵇ = {}", s.h2_label, s.ab_plus_label, s.ab_full_label));
-        }
-
         ui.separator();
         ui.strong("3D Crystal Net & Line Defect");
         egui::ComboBox::from_id_salt("atlas_3d_net")
@@ -107,6 +101,34 @@ impl Space3dPanelState {
                 }
             });
         dirty
+    }
+
+    pub fn show_inspector(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        self.ensure_cached();
+        ui.strong("3D Space Group Cohomology");
+        if let Some(s) = &self.summary {
+            let (st, col) = if s.is_split {
+                ("split ([ν]=0)", tokens.status_ok)
+            } else {
+                ("nonsymmorphic ([ν]≠0)", tokens.status_warn)
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.strong(format!("#{} {} | |P|={} | ", s.number, s.symbol, s.point_order));
+                ui.colored_label(col, egui::RichText::new(st).strong());
+            });
+            ui.small(format!(
+                "H²(P, Λ) = {} | (G⁺)ᵃᵇ = {} | Gᵃᵇ = {}",
+                s.h2_label, s.ab_plus_label, s.ab_full_label
+            ));
+            if !s.torus_counts.is_empty() {
+                let tor: Vec<String> = s.torus_counts.iter().map(|(n, c)| format!("N={n}: {c}")).collect();
+                ui.small(format!("#Conj(G / NΛ): {}", tor.join(", ")));
+            }
+        }
+        ui.separator();
+        ui.strong("Active 3D Net & Defect");
+        ui.small(format!("Net: {}", self.selected_net.label()));
+        ui.small(format!("Line defect: {}", self.selected_defect.label()));
     }
 
     pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {

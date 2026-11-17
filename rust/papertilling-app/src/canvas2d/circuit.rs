@@ -4,6 +4,7 @@ use papertilling_core::defect::circuit::CircuitResult;
 
 use crate::canvas2d::{Canvas2D, draw_dashed_egui};
 use crate::scene2d::{CirclePrim, LinePrim, ScenePrimitives, TextPrim};
+use crate::theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CircuitTargetMode {
@@ -62,6 +63,7 @@ pub(crate) fn draw_circuit_overlay(
     canvas: &Canvas2D,
     rect: egui::Rect,
     ov: &CanvasCircuitOverlay,
+    tokens: &ThemeTokens,
 ) {
     let m = ov.world_pts.len();
     if m < 2 {
@@ -71,15 +73,23 @@ pub(crate) fn draw_circuit_overlay(
     let k_max = ov.result.ref_path.len().saturating_sub(1);
     let step_k = ov.step_k.min(k_max);
 
+    let across_col = if tokens.is_light { egui::Color32::from_rgb(216, 67, 21) } else { tokens.status_warn };
+    let inactive_loop = egui::Color32::from_rgba_unmultiplied(
+        tokens.accent_primary.r(),
+        tokens.accent_primary.g(),
+        tokens.accent_primary.b(),
+        145,
+    );
+
     for i in 0..m - 1 {
         let p0 = to_sc(ov.world_pts[i]);
         let p1 = to_sc(ov.world_pts[i + 1]);
         let active = i < step_k;
         let across = ov.across_steps.get(i).copied().unwrap_or(false);
         let col = if active {
-            if across { egui::Color32::from_rgb(216, 67, 21) } else { egui::Color32::from_rgb(21, 101, 192) }
+            if across { across_col } else { tokens.accent_primary }
         } else {
-            egui::Color32::from_rgba_unmultiplied(21, 101, 192, 135)
+            inactive_loop
         };
         let width = if active { 3.2 } else { 2.0 };
         if across {
@@ -93,14 +103,14 @@ pub(crate) fn draw_circuit_overlay(
     for (i, &wp) in ov.world_pts.iter().take(m - 1).enumerate() {
         let sp = to_sc(wp);
         let (r, fill) = if i == 0 {
-            (6.0, egui::Color32::from_rgb(46, 125, 50))
+            (6.0, tokens.status_ok)
         } else if i == step_k {
-            (6.5, egui::Color32::from_rgb(230, 81, 0))
+            (6.5, across_col)
         } else {
-            (3.4, egui::Color32::from_rgb(25, 118, 210))
+            (3.4, tokens.accent_primary)
         };
         painter.circle_filled(sp, r, fill);
-        painter.circle_stroke(sp, r, egui::Stroke::new(1.3, egui::Color32::WHITE));
+        painter.circle_stroke(sp, r, egui::Stroke::new(1.3, tokens.bg_canvas_2d));
     }
 
     // Parallel-transported local triad (e1, e2) at step_k.
@@ -109,11 +119,11 @@ pub(crate) fn draw_circuit_overlay(
         let len = (canvas.zoom * 0.48).clamp(16.0, 36.0);
         let e1 = egui::vec2(frame[0][0] as f32, -frame[1][0] as f32) * len;
         let e2 = egui::vec2(frame[0][1] as f32, -frame[1][1] as f32) * len;
-        draw_triad_vec(painter, sc, sc + e1, egui::Color32::from_rgb(211, 47, 47), "e1");
-        draw_triad_vec(painter, sc, sc + e2, egui::Color32::from_rgb(0, 121, 107), "e2");
+        draw_triad_vec(painter, sc, sc + e1, tokens.status_err, "e1");
+        draw_triad_vec(painter, sc, sc + e2, tokens.cut_insertion, "e2");
     }
 
-    draw_reference_inset(painter, rect, ov, step_k);
+    draw_reference_inset(painter, rect, ov, step_k, tokens);
 }
 
 fn draw_triad_vec(painter: &egui::Painter, a: egui::Pos2, b: egui::Pos2, col: egui::Color32, label: &str) {
@@ -137,7 +147,13 @@ fn draw_arrow_head(painter: &egui::Painter, p0: egui::Pos2, p1: egui::Pos2, col:
     painter.line_segment([mid + u * 2.5, mid - u * w - n * (0.65 * w)], st);
 }
 
-fn draw_reference_inset(painter: &egui::Painter, rect: egui::Rect, ov: &CanvasCircuitOverlay, step_k: usize) {
+fn draw_reference_inset(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    ov: &CanvasCircuitOverlay,
+    step_k: usize,
+    tokens: &ThemeTokens,
+) {
     let size = rect.width().min(rect.height()).clamp(120.0, 210.0).min(196.0);
     if size < 96.0 || ov.result.ref_path.len() < 2 {
         return;
@@ -146,14 +162,14 @@ fn draw_reference_inset(painter: &egui::Painter, rect: egui::Rect, ov: &CanvasCi
         rect.right_bottom() - egui::vec2(size + 10.0, size + 10.0),
         rect.right_bottom() - egui::vec2(10.0, 10.0),
     );
-    painter.rect_filled(inset, 6.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 238));
-    painter.rect_stroke(inset, 6.0, egui::Stroke::new(1.2, egui::Color32::from_gray(145)), egui::StrokeKind::Inside);
+    painter.rect_filled(inset, 6.0, tokens.bg_hud);
+    painter.rect_stroke(inset, 6.0, egui::Stroke::new(1.2, tokens.border_strong), egui::StrokeKind::Inside);
 
     let title = match ov.result.frank_angle_deg {
         Some(a) => format!("Ref Chart (α={a:+.0}°, |b|={:.2})", ov.result.burgers_norm),
         None => format!("Ref Chart (non-orientable, |b|={:.2})", ov.result.burgers_norm),
     };
-    painter.text(inset.left_top() + egui::vec2(7.0, 5.0), egui::Align2::LEFT_TOP, title, egui::FontId::proportional(10.0), egui::Color32::from_gray(40));
+    painter.text(inset.left_top() + egui::vec2(7.0, 5.0), egui::Align2::LEFT_TOP, title, egui::FontId::proportional(10.0), tokens.text_primary);
 
     let rp = &ov.result.ref_path;
     let (mut minx, mut maxx, mut miny, mut maxy) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
@@ -171,17 +187,17 @@ fn draw_reference_inset(painter: &egui::Painter, rect: egui::Rect, ov: &CanvasCi
     };
 
     for i in 0..rp.len() - 1 {
-        let col = if i < step_k { egui::Color32::from_rgb(21, 101, 192) } else { egui::Color32::from_gray(175) };
+        let col = if i < step_k { tokens.accent_primary } else { tokens.text_muted };
         painter.line_segment([map(rp[i]), map(rp[i + 1])], egui::Stroke::new(1.8, col));
     }
     let p_start = map(rp[0]);
     let p_end = map(*rp.last().unwrap());
     // Reference frame axes at step 0 and parallel-transported frame triad at step_k inside inset.
     let tick_len = 13.0_f32;
-    painter.line_segment([p_start, p_start + egui::vec2(tick_len, 0.0)], egui::Stroke::new(1.0, egui::Color32::from_gray(195)));
-    painter.line_segment([p_start, p_start - egui::vec2(0.0, tick_len)], egui::Stroke::new(1.0, egui::Color32::from_gray(195)));
+    painter.line_segment([p_start, p_start + egui::vec2(tick_len, 0.0)], egui::Stroke::new(1.0, tokens.border_subtle));
+    painter.line_segment([p_start, p_start - egui::vec2(0.0, tick_len)], egui::Stroke::new(1.0, tokens.border_subtle));
+    let bcol = if tokens.is_light { egui::Color32::from_rgb(230, 81, 0) } else { tokens.status_warn };
     if ov.result.burgers_norm > 1e-4 {
-        let bcol = egui::Color32::from_rgb(230, 81, 0);
         painter.line_segment([p_start, p_end], egui::Stroke::new(2.2, bcol));
         draw_arrow_head(painter, p_start, p_end, bcol);
     }
@@ -190,11 +206,11 @@ fn draw_reference_inset(painter: &egui::Painter, rect: egui::Rect, ov: &CanvasCi
     if let Some(&frame) = ov.result.frames.get(pk_idx) {
         let e1 = egui::vec2(frame[0][0] as f32, -frame[1][0] as f32) * 14.0;
         let e2 = egui::vec2(frame[0][1] as f32, -frame[1][1] as f32) * 14.0;
-        painter.line_segment([pk, pk + e1], egui::Stroke::new(1.8, egui::Color32::from_rgb(211, 47, 47)));
-        painter.line_segment([pk, pk + e2], egui::Stroke::new(1.8, egui::Color32::from_rgb(0, 121, 107)));
+        painter.line_segment([pk, pk + e1], egui::Stroke::new(1.8, tokens.status_err));
+        painter.line_segment([pk, pk + e2], egui::Stroke::new(1.8, tokens.cut_insertion));
     }
-    painter.circle_filled(p_start, 3.6, egui::Color32::from_rgb(46, 125, 50));
-    painter.circle_filled(pk, 4.0, egui::Color32::from_rgb(230, 81, 0));
+    painter.circle_filled(p_start, 3.6, tokens.status_ok);
+    painter.circle_filled(pk, 4.0, bcol);
 }
 
 /// Append the active Burgers circuit loop and basepoint marker to `ScenePrimitives` (for SVG/PNG export).

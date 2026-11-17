@@ -1,6 +1,7 @@
 struct Uniforms {
     mvp: mat4x4<f32>,
     rot: mat4x4<f32>,
+    theme: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -44,5 +45,27 @@ fn fs_face(in: VertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_wire(in: VertexOutput) -> @location(0) vec4<f32> {
+    let c = in.color.rgb;
+    let max_c = max(c.r, max(c.g, c.b));
+    let min_c = min(c.r, min(c.g, c.b));
+    let chroma = max_c - min_c;
+    let luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    if uniforms.theme.x > 0.5 {
+        // Light Paper backdrop: map near-white mesh wires to crisp dark slate (#1E293B) without
+        // snapping strain/heat colormap zero-endpoints (luma <= 0.908).
+        if chroma < 0.22 && luma > 0.925 {
+            return vec4<f32>(0.118, 0.161, 0.231, in.color.a);
+        }
+        // Darken pale warm yellow quotient rim wires (>= 5.0:1 on #F4F6FA) without altering
+        // sequential_heat_rgba peaks (whose blue channel stays <= 0.22).
+        if c.r > 0.95 && c.g > 0.80 && c.b > 0.36 && c.b < 0.55 {
+            return vec4<f32>(0.58, 0.34, 0.02, in.color.a);
+        }
+    } else {
+        // Dark Studio backdrop: lift dark neutral atlas wires to cool light slate (#B8C7D9).
+        if chroma < 0.20 && luma < 0.38 {
+            return vec4<f32>(0.722, 0.780, 0.851, in.color.a);
+        }
+    }
     return in.color;
 }

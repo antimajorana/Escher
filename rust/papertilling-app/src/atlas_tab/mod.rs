@@ -1,9 +1,9 @@
 //! 5th Desktop App Tab: Complete Atlas (0D–3D & Hyperbolic H²).
 
-use egui_extras::{Size, StripBuilder};
-
 use crate::canvas2d::Canvas2D;
 use crate::export_obj::write_gpu_mesh_obj;
+use crate::theme::ThemeTokens;
+use crate::ui::viewport_pane::show_split_2d_3d;
 use crate::view3d::View3dState;
 
 pub mod hyperbolic_ui;
@@ -70,7 +70,7 @@ impl AtlasTabState {
         self.dirty = false;
     }
 
-    pub fn show_side_panel(
+    pub fn show_left_panel(
         &mut self,
         ui: &mut egui::Ui,
         canvas: &mut Canvas2D,
@@ -98,42 +98,54 @@ impl AtlasTabState {
         }
     }
 
+    pub fn show_inspector_panel(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        match self.sub_tab {
+            AtlasSubTab::Subperiodic => self.subperiodic.show_inspector(ui, tokens),
+            AtlasSubTab::Layers80 => self.layers.show_inspector(ui, tokens),
+            AtlasSubTab::SpaceGroups3D => self.space3d.show_inspector(ui, tokens),
+            AtlasSubTab::HyperbolicH2 => self.hyperbolic.show_inspector(ui, tokens),
+        }
+    }
+
     pub fn show_central(
         &mut self,
         ui: &mut egui::Ui,
         canvas: &mut Canvas2D,
         view3d: &mut View3dState,
+        split_ratio: &mut f32,
+        tokens: &ThemeTokens,
     ) {
         if self.dirty {
             self.sync_scenes(canvas, view3d);
         }
-        StripBuilder::new(ui)
-            .clip(true)
-            .sizes(Size::remainder().at_least(180.0), 2)
-            .horizontal(|mut strip| {
-                strip.cell(|ui| {
-                    let h = match self.sub_tab {
-                        AtlasSubTab::HyperbolicH2 => "2D Hyperbolic Disk (Poincare Geodesics / Klein Chords)",
-                        AtlasSubTab::SpaceGroups3D => "3D Net xy-Projection",
-                        AtlasSubTab::Layers80 => "Layer Slab xy-Projection",
-                        AtlasSubTab::Subperiodic => "2D Rosette / Frieze Strip",
-                    };
-                    ui.strong(h);
-                    ui.add_space(2.0);
-                    canvas.show(ui);
-                });
-                strip.cell(|ui| {
-                    let h = match self.sub_tab {
-                        AtlasSubTab::HyperbolicH2 => "3D Minkowski Hyperboloid Bowl (t = sqrt(1 + x^2 + y^2))",
-                        AtlasSubTab::SpaceGroups3D => "3D Crystal Net & Defect Axis (drag orbit, scroll zoom)",
-                        AtlasSubTab::Layers80 => "3D Layer Group Slab",
-                        AtlasSubTab::Subperiodic => "3D Strip Quotient (Cylinder / Mobius) or Planar Net",
-                    };
-                    ui.strong(h);
-                    ui.add_space(2.0);
-                    view3d.show(ui);
-                });
-            });
+        let left_heading = match self.sub_tab {
+            AtlasSubTab::HyperbolicH2 => "2D Hyperbolic Disk (Poincare Geodesics / Klein Chords)",
+            AtlasSubTab::SpaceGroups3D => "3D Net xy-Projection",
+            AtlasSubTab::Layers80 => "Layer Slab xy-Projection",
+            AtlasSubTab::Subperiodic => "2D Rosette / Frieze Strip",
+        };
+        let right_heading = match self.sub_tab {
+            AtlasSubTab::HyperbolicH2 => "3D Minkowski Hyperboloid Bowl (t = sqrt(1 + x^2 + y^2))",
+            AtlasSubTab::SpaceGroups3D => "3D Crystal Net & Defect Axis (drag orbit, scroll zoom)",
+            AtlasSubTab::Layers80 => "3D Layer Group Slab",
+            AtlasSubTab::Subperiodic => "3D Strip Quotient (Cylinder / Mobius) or Planar Net",
+        };
+        show_split_2d_3d(
+            ui,
+            split_ratio,
+            "atlas_split",
+            tokens,
+            |ui| {
+                ui.strong(left_heading);
+                ui.add_space(2.0);
+                canvas.show(ui, tokens);
+            },
+            |ui| {
+                ui.strong(right_heading);
+                ui.add_space(2.0);
+                view3d.show(ui, tokens);
+            },
+        );
     }
 
     pub fn export_active_obj(&self, path: &std::path::Path, view3d: &View3dState) -> Result<String, String> {

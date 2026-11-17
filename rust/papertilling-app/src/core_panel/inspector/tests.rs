@@ -49,7 +49,7 @@ impl Harness {
             if self.editing {
                 ui.add(egui::TextEdit::singleline(&mut self.text)).request_focus();
             }
-            self.canvas.show(ui);
+            self.canvas.show(ui, &crate::theme::ThemeTokens::paper());
             egui::Window::new("Inspector input test")
                 .fixed_pos([200.0, 100.0]).fixed_size([400.0, 350.0])
                 .resizable(false).movable(false).collapsible(false).show(ui.ctx(), |ui| {

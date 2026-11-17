@@ -5,6 +5,7 @@ use papertilling_core::types::SurfaceMesh;
 
 use crate::combine_worker::LatestWorker;
 use crate::mesh3d::{GpuMeshData, SurfaceColor3d, elastic_surface_gpu_mesh, mesh_from_surface};
+use crate::theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SurfaceShapeMode {
@@ -125,7 +126,7 @@ impl SurfaceElasticState {
 
     /// Render the `3D Shape`, `kappa_b`, colouring, and FvK readout controls inside `Surfaces`.
     /// Returns `(need_solve, need_resync_view3d)`.
-    pub fn show_controls(&mut self, ui: &mut egui::Ui) -> (bool, bool) {
+    pub fn show_controls(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) -> (bool, bool) {
         let mut need_solve = false;
         let mut need_resync = false;
 
@@ -188,7 +189,7 @@ impl SurfaceElasticState {
                 ));
             }
             if let Some(err) = &self.last_error {
-                ui.colored_label(egui::Color32::DARK_RED, format!("FvK error: {err}"));
+                ui.colored_label(tokens.status_err, format!("FvK error: {err}"));
             }
         }
         (need_solve, need_resync)

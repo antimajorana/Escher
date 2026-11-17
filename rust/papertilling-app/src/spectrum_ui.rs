@@ -1,6 +1,7 @@
 //! Collapsible Tight-Binding Spectrum & Bound States panel shared across tabs.
 
 use crate::spectrum_worker::{SpectrumColorOverlay, SpectrumPanelState};
+use crate::theme::ThemeTokens;
 
 /// Outcome flags returned from `show_spectrum_panel`.
 pub struct SpectrumUiEvent {
@@ -15,6 +16,7 @@ pub fn show_spectrum_panel(
     id_salt: &str,
     allow_flux: bool,
     allow_seam_sign: bool,
+    tokens: &ThemeTokens,
 ) -> SpectrumUiEvent {
     let mut ev = SpectrumUiEvent { recompute: false, redraw_colors: false };
 
@@ -47,7 +49,7 @@ pub fn show_spectrum_panel(
             });
 
             if let Some(err) = &st.last_error {
-                ui.colored_label(egui::Color32::from_rgb(168, 72, 16), err);
+                ui.colored_label(tokens.status_warn, err);
             }
 
             ui.horizontal(|ui| {
@@ -112,7 +114,7 @@ pub fn show_spectrum_panel(
             });
 
             if let Some(res) = st.result.clone() && !res.eigenvalues.is_empty() {
-                draw_eigenvalue_strip(ui, st, &res.eigenvalues, &res.core_weight, &mut ev);
+                draw_eigenvalue_strip(ui, st, &res.eigenvalues, &res.core_weight, &mut ev, tokens);
                 let sel_idx = st.selected_level.unwrap_or_else(|| {
                     res.eigenvalues
                         .iter()
@@ -149,12 +151,13 @@ fn draw_eigenvalue_strip(
     evals: &[f64],
     core_weight: &[f64],
     ev: &mut SpectrumUiEvent,
+    tokens: &ThemeTokens,
 ) {
     let desired = egui::vec2(ui.available_width().max(180.0), 42.0);
     let (rect, resp) = ui.allocate_exact_size(desired, egui::Sense::click_and_drag());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 3.0, egui::Color32::from_rgb(243, 245, 249));
-    painter.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, egui::Color32::from_gray(190)), egui::StrokeKind::Inside);
+    painter.rect_filled(rect, 3.0, tokens.bg_card);
+    painter.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, tokens.border_subtle), egui::StrokeKind::Inside);
 
     let e_min = evals[0];
     let e_max = *evals.last().unwrap();
@@ -163,18 +166,24 @@ fn draw_eigenvalue_strip(
 
     // Fermi level mu marker
     let mx = to_x(st.opts.mu.clamp(e_min, e_max));
-    painter.line_segment([egui::pos2(mx, rect.top() + 2.0), egui::pos2(mx, rect.bottom() - 2.0)], egui::Stroke::new(1.8, egui::Color32::from_rgb(46, 125, 50)));
+    painter.line_segment([egui::pos2(mx, rect.top() + 2.0), egui::pos2(mx, rect.bottom() - 2.0)], egui::Stroke::new(1.8, tokens.status_ok));
 
+    let bulk_col = egui::Color32::from_rgba_unmultiplied(
+        tokens.text_muted.r(),
+        tokens.text_muted.g(),
+        tokens.text_muted.b(),
+        145,
+    );
     for (i, &e) in evals.iter().enumerate() {
         let x = to_x(e);
         let w = core_weight.get(i).copied().unwrap_or(0.0);
         let sel = st.selected_level == Some(i);
         let col = if sel {
-            egui::Color32::from_rgb(21, 101, 192)
+            tokens.accent_primary
         } else if w > 0.35 {
-            egui::Color32::from_rgb(211, 47, 47)
+            tokens.status_err
         } else {
-            egui::Color32::from_rgba_unmultiplied(70, 84, 102, 135)
+            bulk_col
         };
         let y0 = if w > 0.35 || sel { rect.top() + 5.0 } else { rect.top() + 12.0 };
         painter.line_segment([egui::pos2(x, y0), egui::pos2(x, rect.bottom() - 5.0)], egui::Stroke::new(if sel { 2.4 } else { 1.2 }, col));

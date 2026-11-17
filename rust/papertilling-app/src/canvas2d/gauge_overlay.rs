@@ -4,6 +4,7 @@
 use crate::canvas2d::{Canvas2D, draw_dashed_egui};
 use crate::mesh3d::sheet_colors::{diverging_rgba, rgba_u8, sequential_heat_rgba, strain_rgba};
 use crate::scene2d::{CirclePrim, LinePrim, ScenePrimitives, TextPrim};
+use crate::theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CrystalOverlayMode {
@@ -232,13 +233,14 @@ pub(crate) fn draw_gauge_overlays(
     canvas: &Canvas2D,
     rect: egui::Rect,
     ov: &CrystalOverlayData,
+    tokens: &ThemeTokens,
 ) {
     let to_sc = |p: [f64; 2]| canvas.world_to_screen_at(rect, [p[0] as f32, p[1] as f32]);
     for s in &ov.seams {
         let col = if s.det_neg {
-            egui::Color32::from_rgb(186, 45, 118)
+            if tokens.is_light { egui::Color32::from_rgb(186, 45, 118) } else { egui::Color32::from_rgb(244, 114, 182) }
         } else {
-            egui::Color32::from_rgb(0, 131, 143)
+            tokens.cut_insertion
         };
         let (p0, p1) = (to_sc(s.a), to_sc(s.b));
         draw_dashed_egui(painter, p0, p1, egui::Stroke::new(2.8, col), 5.0, 3.0);
@@ -249,35 +251,51 @@ pub(crate) fn draw_gauge_overlays(
     }
     for b in &ov.badges {
         let col = if b.improper {
-            egui::Color32::from_rgb(142, 36, 170)
+            tokens.cut_ray_line
         } else if b.is_rotation {
-            egui::Color32::from_rgb(198, 40, 40)
+            tokens.status_err
         } else {
-            egui::Color32::from_rgb(230, 81, 0)
+            tokens.status_warn
         };
         let sp = to_sc(b.center);
         painter.circle_filled(sp, 11.5, egui::Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 38));
         painter.circle_stroke(sp, 11.5, egui::Stroke::new(1.8, col));
         painter.text(sp + egui::vec2(0.0, -14.5), egui::Align2::CENTER_CENTER, &b.label, egui::FontId::proportional(10.0), col);
     }
-    if let Some(leg) = &ov.legend && rect.width() >= 220.0 && rect.height() >= 110.0 {
-        draw_colorbar_legend(painter, rect, leg);
+    if let Some(leg) = &ov.legend
+        && let Some(box_r) = colorbar_legend_rect(rect)
+    {
+        draw_colorbar_legend(painter, box_r, leg, tokens);
     }
 }
 
-fn draw_colorbar_legend(painter: &egui::Painter, rect: egui::Rect, leg: &OverlayColorbar) {
-    let box_r = egui::Rect::from_min_max(
-        rect.left_bottom() + egui::vec2(8.0, -52.0),
-        rect.left_bottom() + egui::vec2(182.0, -8.0),
-    );
-    painter.rect_filled(box_r, 5.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 234));
-    painter.rect_stroke(box_r, 5.0, egui::Stroke::new(1.0, egui::Color32::from_gray(165)), egui::StrokeKind::Inside);
+pub(crate) fn colorbar_legend_rect(rect: egui::Rect) -> Option<egui::Rect> {
+    let stack_above_hud = rect.width() < 360.0;
+    let min_h = if stack_above_hud { 140.0 } else { 110.0 };
+    if rect.width() < 220.0 || rect.height() < min_h {
+        return None;
+    }
+    let (y_top, y_bot) = if stack_above_hud { (-84.0, -40.0) } else { (-52.0, -8.0) };
+    Some(egui::Rect::from_min_max(
+        rect.left_bottom() + egui::vec2(8.0, y_top),
+        rect.left_bottom() + egui::vec2(182.0, y_bot),
+    ))
+}
+
+fn draw_colorbar_legend(
+    painter: &egui::Painter,
+    box_r: egui::Rect,
+    leg: &OverlayColorbar,
+    tokens: &ThemeTokens,
+) {
+    painter.rect_filled(box_r, 5.0, tokens.bg_hud);
+    painter.rect_stroke(box_r, 5.0, egui::Stroke::new(1.0, tokens.border_strong), egui::StrokeKind::Inside);
     painter.text(
         box_r.left_top() + egui::vec2(7.0, 4.0),
         egui::Align2::LEFT_TOP,
         &leg.title,
         egui::FontId::proportional(9.5),
-        egui::Color32::from_gray(35),
+        tokens.text_primary,
     );
     let bar = egui::Rect::from_min_max(
         box_r.left_top() + egui::vec2(8.0, 19.0),
@@ -298,10 +316,10 @@ fn draw_colorbar_legend(painter: &egui::Painter, rect: egui::Rect, leg: &Overlay
         );
         painter.rect_filled(seg, 0.0, egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], 255));
     }
-    painter.rect_stroke(bar, 1.0, egui::Stroke::new(0.8, egui::Color32::from_gray(130)), egui::StrokeKind::Inside);
+    painter.rect_stroke(bar, 1.0, egui::Stroke::new(0.8, tokens.border_subtle), egui::StrokeKind::Inside);
     let fmt_v = |v: f64| if v.abs() >= 0.01 || v == 0.0 { format!("{v:.3}") } else { format!("{v:.1e}") };
-    painter.text(box_r.left_bottom() + egui::vec2(7.0, -3.0), egui::Align2::LEFT_BOTTOM, fmt_v(leg.min_val), egui::FontId::proportional(9.0), egui::Color32::from_gray(60));
-    painter.text(box_r.right_bottom() + egui::vec2(-7.0, -3.0), egui::Align2::RIGHT_BOTTOM, fmt_v(leg.max_val), egui::FontId::proportional(9.0), egui::Color32::from_gray(60));
+    painter.text(box_r.left_bottom() + egui::vec2(7.0, -3.0), egui::Align2::LEFT_BOTTOM, fmt_v(leg.min_val), egui::FontId::proportional(9.0), tokens.text_secondary);
+    painter.text(box_r.right_bottom() + egui::vec2(-7.0, -3.0), egui::Align2::RIGHT_BOTTOM, fmt_v(leg.max_val), egui::FontId::proportional(9.0), tokens.text_secondary);
 }
 
 #[cfg(test)]
@@ -398,6 +416,33 @@ mod tests {
         let sheet = relax_sheet_3d(&cone, &pm.cell, &Sheet3DOptions { kappa_b: 0.05, max_iters: 40, grad_tol: 1e-5 }, None);
         let sum_site_bend: f64 = sheet.site_bend_energy.iter().sum();
         assert!((sum_site_bend - sheet.bend_energy).abs() < 1e-9, "site bend sum {sum_site_bend} vs {}", sheet.bend_energy);
+    }
+
+    #[test]
+    fn colorbar_and_zoom_hud_never_overlap_across_widths() {
+        use super::super::input::zoom_hud_rect;
+        for (w, h, expect_legend) in [
+            (300.0_f32, 300.0_f32, true),
+            (220.0, 200.0, true),
+            (346.0, 200.0, true),
+            (360.0, 200.0, true),
+            (600.0, 400.0, true),
+            (250.0, 120.0, false),
+            (180.0, 300.0, false),
+        ] {
+            let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(w, h));
+            let leg = colorbar_legend_rect(rect);
+            assert_eq!(leg.is_some(), expect_legend, "size ({w}, {h}) legend={leg:?}");
+            if let Some(leg_r) = leg {
+                assert!(rect.contains_rect(leg_r), "legend {leg_r:?} must stay inside {rect:?}");
+                if let Some(hud_r) = zoom_hud_rect(rect) {
+                    assert!(
+                        !leg_r.intersects(hud_r),
+                        "legend {leg_r:?} overlapped zoom HUD {hud_r:?} at ({w}, {h})"
+                    );
+                }
+            }
+        }
     }
 }
 

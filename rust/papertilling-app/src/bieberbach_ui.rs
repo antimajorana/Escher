@@ -11,6 +11,8 @@ use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::groups::{canonical_symbol, prim_u, prim_u_inv, WALLPAPER_GROUPS};
 use papertilling_core::types::{Isometry2, Recipe};
 
+use crate::theme::ThemeTokens;
+
 fn mat2_inv_loc(m: [[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
     let d = m[0][0] * m[1][1] - m[0][1] * m[1][0];
     (d.abs() > 1e-12).then_some([[m[1][1] / d, -m[0][1] / d], [-m[1][0] / d, m[0][0] / d]])
@@ -106,7 +108,12 @@ pub fn format_holonomy_abelian_charge(
 }
 
 /// Render a collapsible Bieberbach cohomology & topological sector readout.
-pub fn show_wallpaper_bieberbach_collapsible(ui: &mut egui::Ui, group: &str, id_salt: &str) {
+pub fn show_wallpaper_bieberbach_collapsible(
+    ui: &mut egui::Ui,
+    group: &str,
+    id_salt: &str,
+    tokens: &ThemeTokens,
+) {
     let Some(sum) = wallpaper_bieberbach_summary(group) else {
         return;
     };
@@ -123,9 +130,9 @@ pub fn show_wallpaper_bieberbach_collapsible(ui: &mut egui::Ui, group: &str, id_
             "nonsymmorphic ([ν]≠0)"
         };
         let split_col = if sum.is_split {
-            egui::Color32::from_rgb(24, 122, 54)
+            tokens.status_ok
         } else {
-            egui::Color32::from_rgb(162, 74, 14)
+            tokens.status_warn
         };
         ui.horizontal_wrapped(|ui| {
             ui.small(format!("#{} {} | |P|={} | ", sum.number, sum.symbol, sum.point_order));
@@ -174,6 +181,7 @@ pub fn show_bieberbach_inspector_section(
     recipe: &Recipe,
     inspectors: &crate::defects_inspectors::DefectInspectors,
     id_salt: &str,
+    tokens: &ThemeTokens,
 ) {
     if inspectors.circuit.enabled
         && let Some(ov) = &inspectors.circuit.overlay
@@ -181,5 +189,5 @@ pub fn show_bieberbach_inspector_section(
     {
         ui.small(format!("Abelianized loop charge: {chi_line}"));
     }
-    show_wallpaper_bieberbach_collapsible(ui, group, id_salt);
+    show_wallpaper_bieberbach_collapsible(ui, group, id_salt, tokens);
 }

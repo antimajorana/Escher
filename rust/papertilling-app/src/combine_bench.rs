@@ -157,7 +157,7 @@ fn combine_bench_equivalent_single() {
 #[ignore = "timing harness, run by hand"]
 fn combine_bench_ui_submission_and_drag_frames() {
     use crate::canvas2d::{Canvas2D, Scene2D};
-    use crate::combine_tab::{CombineTabState, ToolMode};
+    use crate::combine::{CombineTabState, ToolMode};
     let backend = AppBackend::new();
     for key in ["square", "honeycomb", "shastry_sutherland", "chiral_triangular"] {
         let ctx = egui::Context::default();
@@ -168,10 +168,12 @@ fn combine_bench_ui_submission_and_drag_frames() {
         });
         let mut view3d = crate::view3d::View3dState::default();
         st.wait_idle(item, Some(&mut canvas));
+        let tokens = crate::theme::ThemeTokens::paper();
+        let mut split_ratio = 0.5_f32;
         for _ in 0..3 {
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
                 st.show_side_panel(ui, item, &backend, &mut canvas);
-                st.show_central(ui, item, &backend, &mut canvas, &mut view3d);
+                st.show_central(ui, item, &backend, &mut canvas, &mut view3d, &mut split_ratio, &tokens);
             });
         }
         st.tool_mode = ToolMode::PlaceDislocation;
@@ -194,7 +196,7 @@ fn combine_bench_ui_submission_and_drag_frames() {
             };
             let _ = ctx.run_ui(input, |ui| {
                 st.show_side_panel(ui, item, &backend, &mut canvas);
-                st.show_central(ui, item, &backend, &mut canvas, &mut view3d);
+                st.show_central(ui, item, &backend, &mut canvas, &mut view3d, &mut split_ratio, &tokens);
             });
             times.push(ms(t));
         }

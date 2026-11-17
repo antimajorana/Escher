@@ -63,7 +63,7 @@ impl Harness {
         let (canvas, rect) = (&mut self.canvas, &mut self.rect);
         let _ = self.ctx.run_ui(input, |ui| {
             *rect = ui.available_rect_before_wrap();
-            out = canvas.show_interactive(ui, markers, click_to_place, None);
+            out = canvas.show_interactive(ui, markers, click_to_place, None, &ThemeTokens::paper());
         });
         out
     }
@@ -250,6 +250,71 @@ fn cursor_anchored_pinch_and_zoom_at_invariance_and_keyboard_shortcuts() {
     let hud_pt = h.rect.right_bottom() - egui::vec2(24.0, 16.0);
     let outs = h.click(hud_pt, &[], true);
     assert!(outs.iter().all(|o| o.clicked_world.is_none()), "HUD click must not place a defect pin");
+}
+
+#[test]
+fn pin_badge_text_and_core_ring_labels_keep_contrast_in_paper_and_studio() {
+    use crate::scene2d::{PolyPrim, TextPrim};
+    use crate::theme::StudioTheme;
+
+    for theme in StudioTheme::ALL {
+        let tokens = theme.tokens();
+        for kind in [MarkerKind::DisclinationPlus, MarkerKind::DisclinationMinus, MarkerKind::Dislocation] {
+            let (fill, _) = marker_colors(kind, &tokens);
+            let ratio = ThemeTokens::contrast_wcag_ratio(tokens.text_on_accent, fill);
+            assert!(
+                ratio >= 4.5,
+                "{theme:?} {kind:?} pin text_on_accent contrast {ratio:.2} < 4.5"
+            );
+        }
+    }
+
+    let studio = ThemeTokens::studio();
+    let poly_scene = Scene2D::VectorScene {
+        primitives: crate::scene2d::ScenePrimitives {
+            polygons: vec![PolyPrim {
+                points: vec![[0.0, 0.0], [2.0, 0.0], [1.0, 2.0]],
+                fill: [244, 196, 68, 145],
+                stroke: None,
+            }],
+            lines: Vec::new(),
+            circles: Vec::new(),
+            labels: Vec::new(),
+            site_circle_indices: Vec::new(),
+            edge_line_indices: Vec::new(),
+            title: String::new(),
+            note: String::new(),
+            bbox: ([0.0, 0.0], [2.0, 2.0]),
+            site_count: 0,
+            bond_count: 0,
+        },
+    };
+    let inside_lbl = TextPrim {
+        pos: [1.0, 0.8],
+        text: String::from("3"),
+        color: [42, 48, 58, 225],
+        size_px: 10.5,
+    };
+    let outside_lbl = TextPrim {
+        pos: [3.0, 0.8],
+        text: String::from("a1"),
+        color: [24, 72, 145, 245],
+        size_px: 12.0,
+    };
+    let polys = match &poly_scene {
+        Scene2D::VectorScene { primitives } => &primitives.polygons,
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        render::scene_label_color(&poly_scene, polys, &inside_lbl, &studio),
+        to_color32(inside_lbl.color),
+        "label inside filled ring polygon must stay dark ink in Studio mode"
+    );
+    assert_eq!(
+        render::scene_label_color(&poly_scene, polys, &outside_lbl, &studio),
+        studio.remap_scene_ink(outside_lbl.color),
+        "label outside filled polygon must still lift on dark Studio canvas"
+    );
 }
 
 mod zoom_routing;

@@ -5,6 +5,7 @@ use papertilling_core::defect::combine_types::{CoreGalleryEntry, EquivalentSingl
 
 use crate::canvas2d::to_color32;
 use crate::scene2d::ScenePrimitives;
+use crate::theme::ThemeTokens;
 
 mod card;
 mod inspector;
@@ -20,7 +21,6 @@ pub const UNDER_SITE_RGBA: [u8; 4] = [0xc6, 0x28, 0x28, 255]; // #c62828 red
 pub const ODD_FACE_RGBA: [u8; 4] = [0xf2, 0xa3, 0x3a, 195]; // #f2a33a warm orange
 pub const SPLIT_FACE_RGBA: [u8; 4] = [0xf7, 0xd9, 0xa8, 195]; // #f7d9a8 light amber
 pub const CONFIG_FACE_RGBA: [u8; 4] = [0x8f, 0xb8, 0xe8, 195]; // #8fb8e8 blue
-pub const MATCH_BORDER_RGB: egui::Color32 = egui::Color32::from_rgb(0x2e, 0x7d, 0x32); // #2e7d32
 
 /// Completion cards shown when a core matches (Python `config.COMPLETION_PANELS`).
 pub const COMPLETION_PANELS: usize = 5;
@@ -130,6 +130,7 @@ pub fn show_core_panel(
     state: &mut CorePanelState,
     ui: &mut egui::Ui,
     compare_res: Option<&Result<EquivalentSingleReport, String>>,
+    tokens: &ThemeTokens,
 ) {
     ui.horizontal_wrapped(|ui| {
         ui.strong("Side-by-Side Core Gallery");
@@ -143,7 +144,7 @@ pub fn show_core_panel(
             legend_chip(ui, to_color32(SPLIT_FACE_RGBA), "Perfect ring");
             legend_chip(ui, to_color32(CHORD_RGBA), "Chord (-- #d81b60)");
             legend_chip(ui, to_color32(UNDER_SITE_RGBA), "Under-coord (○)");
-            legend_chip(ui, MATCH_BORDER_RGB, "MATCH");
+            legend_chip(ui, tokens.status_ok, "MATCH");
             ui.separator();
             ui.small("Show:");
             for fm in [CoreFilterMode::All, CoreFilterMode::VolterraOnly, CoreFilterMode::MatchingOnly] {
@@ -166,7 +167,7 @@ pub fn show_core_panel(
     let report = match res {
         Ok(rep) => rep,
         Err(err) => {
-            ui.colored_label(egui::Color32::from_rgb(176, 86, 18), format!("Core gallery status: {err}"));
+            ui.colored_label(tokens.status_warn, format!("Core gallery status: {err}"));
             return;
         }
     };
@@ -176,7 +177,7 @@ pub fn show_core_panel(
     let sel = select_cards(report, state.show_all_completions);
 
     ui.horizontal(|ui| {
-        let v_col = if report.equivalent { MATCH_BORDER_RGB } else { egui::Color32::from_rgb(196, 108, 12) };
+        let v_col = if report.equivalent { tokens.status_ok } else { tokens.status_warn };
         ui.colored_label(v_col, egui::RichText::new(&report.verdict).strong());
         if sel.hidden > 0 || state.show_all_completions {
             let n_comp = sel.completions.len() + sel.hidden;
@@ -189,7 +190,7 @@ pub fn show_core_panel(
     egui::ScrollArea::horizontal().id_salt("core_gallery_scroll").show(ui, |ui| {
         ui.horizontal(|ui| {
             if let Some(cfg_entry) = &report.config_core {
-                if draw_core_card(ui, cache, cfg_entry, "Configuration Core", false) {
+                if draw_core_card(ui, cache, cfg_entry, "Configuration Core", false, tokens) {
                     clicked_card = Some((cfg_entry, "Configuration Core", false));
                 }
                 if !sel.volterra.is_empty() || !sel.completions.is_empty() {
@@ -201,7 +202,7 @@ pub fn show_core_panel(
                 if state.filter == CoreFilterMode::MatchingOnly && !m {
                     continue;
                 }
-                if draw_core_card(ui, cache, entry, "Volterra", m) {
+                if draw_core_card(ui, cache, entry, "Volterra", m, tokens) {
                     clicked_card = Some((entry, "Volterra", m));
                 }
             }
@@ -214,7 +215,7 @@ pub fn show_core_panel(
                     if state.filter == CoreFilterMode::MatchingOnly && !m {
                         continue;
                     }
-                    if draw_core_card(ui, cache, entry, "Completion", m) {
+                    if draw_core_card(ui, cache, entry, "Completion", m, tokens) {
                         clicked_card = Some((entry, "Completion", m));
                     }
                 }
@@ -234,7 +235,7 @@ pub fn show_core_panel(
         state.inspector = Some(CoreInspectorModal::from_entry(entry, gtag, is_m));
     }
     if let Some(mut modal) = state.inspector.take()
-        && modal.show(ui.ctx())
+        && modal.show(ui.ctx(), tokens)
     {
         state.inspector = Some(modal);
     }
@@ -246,7 +247,14 @@ fn legend_chip(ui: &mut egui::Ui, color: egui::Color32, text: &str) {
     ui.small(text);
 }
 
-fn draw_core_card(ui: &mut egui::Ui, cache: &mut CardCache, entry: &CoreGalleryEntry, group_tag: &str, is_match: bool) -> bool {
+fn draw_core_card(
+    ui: &mut egui::Ui,
+    cache: &mut CardCache,
+    entry: &CoreGalleryEntry,
+    group_tag: &str,
+    is_match: bool,
+    tokens: &ThemeTokens,
+) -> bool {
     let card_w = 184.0_f32;
     let card_h = 204.0_f32;
     let (card_rect, resp) = ui.allocate_exact_size(egui::vec2(card_w, card_h), egui::Sense::click());
@@ -267,7 +275,7 @@ fn draw_core_card(ui: &mut egui::Ui, cache: &mut CardCache, entry: &CoreGalleryE
     }
     resp.on_hover_text(tip);
 
-    let bg = if is_match { egui::Color32::from_rgb(244, 251, 245) } else { egui::Color32::from_rgb(250, 251, 253) };
+    let bg = if is_match { tokens.bg_card_selected } else { tokens.bg_card };
     let painter = ui.painter_at(card_rect);
     painter.rect_filled(card_rect, 5.0, bg);
 
@@ -276,32 +284,32 @@ fn draw_core_card(ui: &mut egui::Ui, cache: &mut CardCache, entry: &CoreGalleryE
         egui::Align2::LEFT_TOP,
         &entry.name,
         egui::FontId::proportional(11.0),
-        egui::Color32::from_rgb(30, 38, 48),
+        tokens.text_primary,
     );
     if is_match {
         let badge = egui::Rect::from_min_size(egui::pos2(card_rect.right() - 52.0, card_rect.top() + 4.0), egui::vec2(46.0, 15.0));
-        painter.rect_filled(badge, 3.0, MATCH_BORDER_RGB);
-        painter.text(badge.center(), egui::Align2::CENTER_CENTER, "MATCH", egui::FontId::proportional(9.5), egui::Color32::WHITE);
+        painter.rect_filled(badge, 3.0, tokens.status_ok);
+        painter.text(badge.center(), egui::Align2::CENTER_CENTER, "MATCH", egui::FontId::proportional(9.5), tokens.text_on_accent);
     }
 
     let plot_rect = egui::Rect::from_min_max(
         egui::pos2(card_rect.left() + 6.0, card_rect.top() + 22.0),
         egui::pos2(card_rect.right() - 6.0, card_rect.bottom() - 28.0),
     );
-    paint_card_primitives(&ui.painter_at(plot_rect), plot_rect, cache.get(entry));
+    paint_card_primitives(&ui.painter_at(plot_rect), plot_rect, cache.get(entry), tokens);
 
     painter.text(
         egui::pos2(card_rect.left() + 6.0, card_rect.bottom() - 15.0),
         egui::Align2::LEFT_CENTER,
         card_subtitle(entry, group_tag),
         egui::FontId::proportional(9.5),
-        egui::Color32::from_rgb(76, 84, 96),
+        tokens.text_secondary,
     );
 
     let border = if is_match {
-        egui::Stroke::new(3.0, MATCH_BORDER_RGB)
+        egui::Stroke::new(3.0, tokens.status_ok)
     } else {
-        egui::Stroke::new(1.0, egui::Color32::from_gray(192))
+        egui::Stroke::new(1.0, tokens.border_subtle)
     };
     painter.rect_stroke(card_rect, 5.0, border, egui::StrokeKind::Inside);
     clicked

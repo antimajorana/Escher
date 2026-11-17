@@ -1,0 +1,235 @@
+use std::path::Path;
+
+use crate::export::{export_scene_full, export_scene_with_overlays};
+pub use crate::scene2d::Scene2D;
+use crate::scene2d::{ScenePrimitives, compile_scene};
+use crate::theme::ThemeTokens;
+
+pub mod circuit;
+mod cuts;
+mod draw_helpers;
+pub mod gauge_overlay;
+mod hit;
+mod input;
+mod render;
+#[cfg(test)]
+mod tests;
+
+pub use circuit::CanvasCircuitOverlay;
+pub use cuts::{CanvasCutRay, CanvasKinematicOverlay, CanvasReactionArrow};
+pub(crate) use draw_helpers::{draw_arrow_mid_egui, draw_dashed_egui, draw_overlays, marker_colors, to_color32};
+pub use gauge_overlay::CrystalOverlayData;
+pub(crate) use hit::take_keyboard_zoom_action;
+pub use hit::{
+    ViewTransform, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP_FACTOR, ZoomKeyAction,
+    input_zoom_factor, keyboard_zoom_action, zoom_by_factor_about,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkerKind {
+    DisclinationPlus,
+    DisclinationMinus,
+    Dislocation,
+}
+
+#[derive(Clone, Debug)]
+pub struct CanvasMarker {
+    pub index: usize,
+    pub pos: [f64; 2],
+    pub kind: MarkerKind,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CanvasInteraction {
+    /// A click (press and release without dragging) on empty canvas, in world coordinates.
+    pub clicked_world: Option<[f64; 2]>,
+    pub dragged_marker: Option<(usize, [f64; 2])>,
+    pub drag_released: bool,
+    pub hovered_world: Option<[f64; 2]>,
+    pub shift_held: bool,
+    /// A click that landed on a pin (its `CanvasMarker::index`); `clicked_world` is then `None`, so a click
+    /// on an existing pin never places a second defect on top of it.
+    pub clicked_marker: Option<usize>,
+    /// A click that landed on a vertex of the active Burgers circuit loop.
+    pub clicked_circuit_vertex: Option<usize>,
+}
+
+pub struct Canvas2D {
+    pub pan: egui::Vec2,
+    pub zoom: f32,
+    pub(super) fit_zoom: f32,
+    pub(super) world_center: [f32; 2],
+    pub(super) auto_fit_pending: bool,
+    pub(super) active_drag_pin: Option<usize>,
+    pub(super) scene: Scene2D,
+    pub(super) compiled: ScenePrimitives,
+    pub(super) export_markers: Vec<CanvasMarker>,
+    pub(super) cut_rays: Vec<CanvasCutRay>,
+    pub(super) kinematic_overlay: CanvasKinematicOverlay,
+    pub(super) circuit_overlay: Option<CanvasCircuitOverlay>,
+    pub(super) gauge_overlay: Option<CrystalOverlayData>,
+    pub(super) export_title: Option<String>,
+}
+
+impl Canvas2D {
+    pub fn new(scene: Scene2D) -> Self {
+        let compiled = compile_scene(&scene);
+        let (bmin, bmax) = compiled.bbox;
+        let world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
+        Self {
+            pan: egui::Vec2::ZERO,
+            zoom: 56.0,
+            fit_zoom: 56.0,
+            world_center,
+            auto_fit_pending: true,
+            active_drag_pin: None,
+            scene,
+            compiled,
+            export_markers: Vec::new(),
+            cut_rays: Vec::new(),
+            kinematic_overlay: CanvasKinematicOverlay::default(),
+            circuit_overlay: None,
+            gauge_overlay: None,
+            export_title: None,
+        }
+    }
+
+    pub fn set_scene(&mut self, scene: Scene2D, reset_view: bool) {
+        self.set_scene_with_title(scene, None, reset_view);
+    }
+
+    pub fn set_scene_with_title(&mut self, scene: Scene2D, export_title: Option<String>, reset_view: bool) {
+        self.export_markers.clear();
+        self.cut_rays.clear();
+        self.kinematic_overlay = CanvasKinematicOverlay::default();
+        self.circuit_overlay = None;
+        self.gauge_overlay = None;
+        self.export_title = export_title;
+        self.compiled = compile_scene(&scene);
+        self.scene = scene;
+        if reset_view {
+            let (bmin, bmax) = self.compiled.bbox;
+            self.world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
+            self.auto_fit_pending = true;
+            self.active_drag_pin = None;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        let (bmin, bmax) = self.compiled.bbox;
+        self.world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
+        self.pan = egui::Vec2::ZERO;
+        self.auto_fit_pending = true;
+        self.active_drag_pin = None;
+    }
+
+    pub fn zoom_at(&mut self, rect: egui::Rect, factor: f32, anchor: Option<egui::Pos2>) {
+        (self.pan, self.zoom) = zoom_by_factor_about(self.pan, self.zoom, factor, rect.center(), anchor);
+    }
+
+    pub fn counts(&self) -> (usize, usize) {
+        (self.compiled.site_count, self.compiled.bond_count)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scene(&self) -> &Scene2D {
+        &self.scene
+    }
+
+    pub fn export_to_path(&self, path: &Path) -> Result<String, String> {
+        if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() {
+            let mut prims = self.compiled.clone();
+            if let Some(ov) = &self.gauge_overlay {
+                gauge_overlay::append_gauge_export_prims(&mut prims, ov);
+            }
+            if let Some(circ) = &self.circuit_overlay {
+                circuit::append_circuit_export_prims(&mut prims, circ);
+            }
+            export_scene_with_overlays(&prims, &self.export_markers, self.export_title.as_deref(), path)
+        } else {
+            export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path)
+        }
+    }
+
+    pub(crate) fn set_circuit_overlay(&mut self, circuit: Option<CanvasCircuitOverlay>) {
+        self.circuit_overlay = circuit;
+    }
+
+    pub(crate) fn set_gauge_overlay(&mut self, ov: Option<CrystalOverlayData>) {
+        self.gauge_overlay = ov;
+        self.compiled = compile_scene(&self.scene);
+        if let Some(data) = &self.gauge_overlay {
+            gauge_overlay::apply_site_and_bond_colors(&mut self.compiled, data);
+        }
+    }
+
+    pub(crate) fn set_export_markers(&mut self, markers: &[CanvasMarker]) {
+        self.export_markers.clear();
+        self.export_markers.extend_from_slice(markers);
+    }
+
+    pub(crate) fn set_cut_rays(&mut self, rays: &[CanvasCutRay]) {
+        self.cut_rays.clear();
+        self.cut_rays.extend_from_slice(rays);
+    }
+
+    pub(crate) fn set_kinematic_overlay(&mut self, overlay: CanvasKinematicOverlay) {
+        self.kinematic_overlay = overlay;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cut_rays(&self) -> &[CanvasCutRay] {
+        &self.cut_rays
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kinematic_overlay(&self) -> &CanvasKinematicOverlay {
+        &self.kinematic_overlay
+    }
+
+    /// The world <-> screen map of the current view inside `rect`.
+    pub fn view_at(&self, rect: egui::Rect) -> ViewTransform {
+        ViewTransform { origin: rect.center() + self.pan, zoom: self.zoom, world_center: self.world_center }
+    }
+
+    pub fn world_to_screen_at(&self, rect: egui::Rect, p: [f32; 2]) -> egui::Pos2 {
+        self.view_at(rect).world_to_screen(p)
+    }
+
+    pub fn screen_to_world_at(&self, rect: egui::Rect, pos: egui::Pos2) -> [f64; 2] {
+        self.view_at(rect).screen_to_world(pos)
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        self.export_markers.clear();
+        let _ = self.show_inner(ui, &[], false, None, false, tokens);
+    }
+
+    pub fn show_interactive(
+        &mut self,
+        ui: &mut egui::Ui,
+        markers: &[CanvasMarker],
+        click_to_place: bool,
+        preview_world: Option<[f64; 2]>,
+        tokens: &ThemeTokens,
+    ) -> CanvasInteraction {
+        self.set_export_markers(markers);
+        self.show_inner(ui, markers, click_to_place, preview_world, true, tokens)
+    }
+
+    fn show_inner(
+        &mut self,
+        ui: &mut egui::Ui,
+        markers: &[CanvasMarker],
+        click_to_place: bool,
+        preview_world: Option<[f64; 2]>,
+        interactive: bool,
+        tokens: &ThemeTokens,
+    ) -> CanvasInteraction {
+        let (rect, has_hud, hud_rect, out) =
+            self.handle_canvas_input(ui, markers, click_to_place, interactive);
+        self.render_canvas(ui, rect, has_hud.then_some(hud_rect), markers, preview_world, tokens);
+        out
+    }
+}

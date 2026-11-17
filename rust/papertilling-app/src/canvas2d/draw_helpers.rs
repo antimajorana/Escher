@@ -1,32 +1,37 @@
 //! Shared drawing primitives for `Canvas2D` (`to_color32`, markers, overlays, dashed/arrow lines).
 
 use crate::canvas2d::MarkerKind;
+use crate::theme::ThemeTokens;
 
-pub(crate) fn marker_colors(kind: MarkerKind) -> (egui::Color32, egui::Color32) {
-    match kind {
-        MarkerKind::DisclinationPlus => (
-            egui::Color32::from_rgb(211, 47, 47),
-            egui::Color32::from_rgba_unmultiplied(211, 47, 47, 68),
-        ),
-        MarkerKind::DisclinationMinus => (
-            egui::Color32::from_rgb(25, 118, 210),
-            egui::Color32::from_rgba_unmultiplied(25, 118, 210, 68),
-        ),
-        MarkerKind::Dislocation => (
-            egui::Color32::from_rgb(237, 108, 2),
-            egui::Color32::from_rgba_unmultiplied(237, 108, 2, 68),
-        ),
-    }
+pub(crate) fn marker_colors(kind: MarkerKind, tokens: &ThemeTokens) -> (egui::Color32, egui::Color32) {
+    let base = match kind {
+        MarkerKind::DisclinationPlus => {
+            if tokens.is_light { egui::Color32::from_rgb(211, 47, 47) } else { tokens.status_err }
+        }
+        MarkerKind::DisclinationMinus => {
+            if tokens.is_light { egui::Color32::from_rgb(25, 118, 210) } else { tokens.accent_primary }
+        }
+        MarkerKind::Dislocation => {
+            if tokens.is_light { egui::Color32::from_rgb(184, 78, 0) } else { tokens.status_warn }
+        }
+    };
+    (base, egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 68))
 }
 
-pub(crate) fn draw_overlays(painter: &egui::Painter, rect: egui::Rect, title: &str, note: &str) {
+pub(crate) fn draw_overlays(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    title: &str,
+    note: &str,
+    tokens: &ThemeTokens,
+) {
     if !title.is_empty() {
         painter.text(
             rect.left_top() + egui::vec2(8.0, 6.0),
             egui::Align2::LEFT_TOP,
             title,
             egui::FontId::proportional(12.5),
-            egui::Color32::from_rgb(38, 48, 64),
+            tokens.text_primary,
         );
     }
     if !note.is_empty() {
@@ -36,9 +41,15 @@ pub(crate) fn draw_overlays(painter: &egui::Painter, rect: egui::Rect, title: &s
             rect.left_top() + egui::vec2(8.0, top_y),
             egui::pos2(rect.right() - 8.0, (rect.top() + top_y + banner_h).min(rect.bottom() - 4.0)),
         );
-        painter.rect_filled(banner, 4.0, egui::Color32::from_rgba_unmultiplied(255, 244, 214, 238));
-        painter.rect_stroke(banner, 4.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(218, 160, 48)), egui::StrokeKind::Inside);
-        painter.text(banner.left_center() + egui::vec2(8.0, 0.0), egui::Align2::LEFT_CENTER, note, egui::FontId::proportional(11.5), egui::Color32::from_rgb(124, 68, 10));
+        painter.rect_filled(banner, 4.0, tokens.bg_hud);
+        painter.rect_stroke(banner, 4.0, egui::Stroke::new(1.0, tokens.status_warn), egui::StrokeKind::Inside);
+        painter.text(
+            banner.left_center() + egui::vec2(8.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            note,
+            egui::FontId::proportional(11.5),
+            tokens.status_warn,
+        );
     }
 }
 

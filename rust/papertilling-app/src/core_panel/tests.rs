@@ -124,7 +124,7 @@ fn panel_draws_every_state_headless() {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 260.0))),
                 ..Default::default()
             };
-            let _ = ctx.run_ui(input, |ui| show_core_panel(&mut state, ui, case.as_ref()));
+            let _ = ctx.run_ui(input, |ui| show_core_panel(&mut state, ui, case.as_ref(), &ThemeTokens::paper()));
         }
     }
     // the 61-card gallery: only cards scrolled into view (about 900 / 190 of them) were compiled
@@ -134,7 +134,7 @@ fn panel_draws_every_state_headless() {
     state.cards.sync(&square_pair_report());
     assert!(state.cards.cards.is_empty());
     state.collapsed = true;
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| show_core_panel(&mut state, ui, Some(&Ok(many.clone()))));
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| show_core_panel(&mut state, ui, Some(&Ok(many.clone())), &ThemeTokens::paper()));
 }
 
 #[test]

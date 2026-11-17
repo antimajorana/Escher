@@ -2,6 +2,7 @@
 //! and live reaction arrows on `Canvas2D`.
 
 use crate::canvas2d::{Canvas2D, CanvasMarker, draw_dashed_egui};
+use crate::theme::ThemeTokens;
 
 /// World-space Volterra branch-cut ray (from defect core out to patch rim) and optional strip segment.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,14 +37,15 @@ pub(crate) fn draw_cut_rays(
     canvas: &Canvas2D,
     rect: egui::Rect,
     rays: &[CanvasCutRay],
+    tokens: &ThemeTokens,
 ) {
     for ray in rays {
         let col = if ray.is_half_wall {
-            egui::Color32::from_rgba_unmultiplied(214, 128, 0, 235)
+            tokens.cut_half_wall
         } else if ray.is_insertion {
-            egui::Color32::from_rgba_unmultiplied(0, 121, 107, 215)
+            tokens.cut_insertion
         } else {
-            egui::Color32::from_rgba_unmultiplied(123, 31, 162, 215)
+            tokens.cut_ray_line
         };
         let p0 = canvas.world_to_screen_at(rect, [ray.origin[0] as f32, ray.origin[1] as f32]);
         let p1 = canvas.world_to_screen_at(rect, [ray.end[0] as f32, ray.end[1] as f32]);
@@ -84,18 +86,24 @@ pub(crate) fn draw_kinematic_overlay(
     rect: egui::Rect,
     markers: &[CanvasMarker],
     ov: &CanvasKinematicOverlay,
+    tokens: &ThemeTokens,
 ) {
     for &(a, b, active) in &ov.glide_lines {
         let p0 = canvas.world_to_screen_at(rect, [a[0] as f32, a[1] as f32]);
         let p1 = canvas.world_to_screen_at(rect, [b[0] as f32, b[1] as f32]);
-        let alpha = if active { 220 } else { 115 };
+        let alpha = if active { tokens.glide_rail.a() } else { 115 };
         let width = if active { 2.4 } else { 1.3 };
-        let col = egui::Color32::from_rgba_unmultiplied(230, 145, 0, alpha);
+        let col = egui::Color32::from_rgba_unmultiplied(
+            tokens.glide_rail.r(),
+            tokens.glide_rail.g(),
+            tokens.glide_rail.b(),
+            alpha,
+        );
         draw_dashed_egui(painter, p0, p1, egui::Stroke::new(width, col), 8.0, 5.0);
     }
 
     if !ov.locked_pins.is_empty() {
-        let ring_col = egui::Color32::from_rgba_unmultiplied(55, 71, 79, 200);
+        let ring_col = tokens.locked_pin_ring;
         for m in markers {
             if ov.locked_pins.contains(&m.index) {
                 let sp = canvas.world_to_screen_at(rect, [m.pos[0] as f32, m.pos[1] as f32]);
@@ -105,11 +113,7 @@ pub(crate) fn draw_kinematic_overlay(
     }
 
     if let Some(rx) = &ov.reaction {
-        let col = if rx.valid {
-            egui::Color32::from_rgb(38, 138, 60)
-        } else {
-            egui::Color32::from_rgb(198, 40, 40)
-        };
+        let col = if rx.valid { tokens.status_ok } else { tokens.status_err };
         let p0 = canvas.world_to_screen_at(rect, [rx.from[0] as f32, rx.from[1] as f32]);
         let p1 = canvas.world_to_screen_at(rect, [rx.to[0] as f32, rx.to[1] as f32]);
         let st = egui::Stroke::new(2.6, col);
@@ -128,7 +132,7 @@ pub(crate) fn draw_kinematic_overlay(
             let font = egui::FontId::proportional(11.0);
             let galley = painter.layout_no_wrap(rx.label.clone(), font.clone(), col);
             let box_rect = egui::Rect::from_center_size(mid, galley.size() + egui::vec2(10.0, 5.0));
-            painter.rect_filled(box_rect, 4.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 236));
+            painter.rect_filled(box_rect, 4.0, tokens.bg_hud);
             painter.rect_stroke(box_rect, 4.0, egui::Stroke::new(1.0, col), egui::StrokeKind::Inside);
             painter.text(mid, egui::Align2::CENTER_CENTER, &rx.label, font, col);
         }
