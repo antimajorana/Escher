@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 import scipy.sparse as sp
-from scipy.sparse.linalg import eigsh, spsolve
+from scipy.sparse.linalg import LinearOperator, eigsh, splu
 
 from .. import _rust
 from ..legacy import fusion_framework as ff
@@ -243,6 +243,17 @@ def _fix_e2_gauge(P: np.ndarray, X_ref: np.ndarray) -> np.ndarray:
     return P_c @ R
 
 
+def _safe_splu(mat):
+    csc = mat.tocsc(copy=True)
+    csc.sum_duplicates()
+    csc.sort_indices()
+    if csc.indices.dtype != np.int32:
+        csc.indices = csc.indices.astype(np.int32)
+    if csc.indptr.dtype != np.int32:
+        csc.indptr = csc.indptr.astype(np.int32)
+    return splu(csc, permc_spec="MMD_AT_PLUS_A")
+
+
 def _hessian_min_eigs(P: np.ndarray, pairs: dict, k: int = 8) -> np.ndarray:
     V = pairs["V"]
     if V == 0:
@@ -255,7 +266,9 @@ def _hessian_min_eigs(P: np.ndarray, pairs: dict, k: int = 8) -> np.ndarray:
     if kk <= 0:
         return np.sort(np.linalg.eigvalsh(H_sp.toarray()))
     try:
-        vals = eigsh(H_sp, k=kk, sigma=-1e-4, which="LM", return_eigenvectors=False)
+        lu_shift = _safe_splu(H_sp + 1e-4 * sp.identity(n_dof, format="csc"))
+        op_inv = LinearOperator((n_dof, n_dof), matvec=lu_shift.solve, dtype=float)
+        vals = eigsh(H_sp, k=kk, sigma=-1e-4, OPinv=op_inv, which="LM", return_eigenvectors=False)
     except Exception:
         vals = eigsh(H_sp, k=kk, which="SM", return_eigenvectors=False)
     return np.sort(np.real(vals))
@@ -343,7 +356,7 @@ def relax_elastic_2d(d, *, lattice=None, max_iter: int = 150, gtol: float = 1e-1
                 mu, stepped = 1e-12, False
                 for _ in range(8):
                     try:
-                        dy = spsolve(H + mu * I_sp, -g)
+                        dy = _safe_splu(H + mu * I_sp).solve(-g)
                     except Exception:
                         dy = None
                     if dy is not None and np.all(np.isfinite(dy)) and float(g @ dy) < 0.0:
@@ -365,7 +378,10 @@ def relax_elastic_2d(d, *, lattice=None, max_iter: int = 150, gtol: float = 1e-1
             JTJ = (J.T @ J).tocsc()
             accepted = False
             for _ in range(20):
-                dy = spsolve(JTJ + lam * I_sp, -g)
+                try:
+                    dy = _safe_splu(JTJ + lam * I_sp).solve(-g)
+                except Exception:
+                    dy = np.full_like(g, np.nan)
                 if np.all(np.isfinite(dy)):
                     y2 = y + dy
                     r2, J2, es2, ea2 = gsv_residual_and_jacobian(y2, pairs)
