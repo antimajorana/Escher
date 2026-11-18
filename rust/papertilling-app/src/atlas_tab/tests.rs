@@ -12,6 +12,7 @@ use super::AtlasSubTab;
 use super::hyperbolic_scene::{HYP_PICK_RGBA, HYP_PICK_RGBA8, sheet_points};
 use super::hyperbolic_ui::{DiskProjection, HypPick, HyperbolicPanelState};
 use super::hyperbolic_view::{DiskIsometry, dist_from_origin, lorentz_centroid, poincare_to_klein};
+use super::space3d_geom::net_frame;
 use super::space3d_ui::Space3dPanelState;
 use super::space3d_view::pick_xy;
 use crate::app::{NavTab, PapertillingApp};
@@ -387,7 +388,7 @@ fn kittest_h2_picking_klein_toggle_drag_pan_and_inspector_readout() {
     h.state_mut().atlas.dirty = true;
     h.run_steps(3);
 
-    // Click central face in 2D disk -> synced 2D/3D highlight + readout.
+    // Click central face in 2D disk -> synced 2D/3D highlight + readout (including origin angle guard).
     let rect2 = h.state().canvas2d.last_rect;
     let origin_px = h.state().canvas2d.world_to_screen_at(rect2, [0.0, 0.0]);
     click(&mut h, origin_px);
@@ -397,6 +398,7 @@ fn kittest_h2_picking_klein_toggle_drag_pan_and_inspector_readout() {
     assert!(h.query_by_label_contains("Schläfli {7,3}").is_some());
     assert!(h.query_by_label_contains("Layer (generation): 0").is_some());
     assert!(h.query_by_label_contains("d(0,z) = 2 artanh|z| = 0.0000").is_some());
+    assert!(h.query_by_label_contains("Δφ = — (at view origin)").is_some());
 
     // Toggle Klein Chords: preserves pick and clears dirty.
     h.get_by_label("Klein Chords").click();
@@ -405,21 +407,28 @@ fn kittest_h2_picking_klein_toggle_drag_pan_and_inspector_readout() {
     assert_eq!(h.state().atlas.hyperbolic.picked, Some(HypPick::Face(0)));
     assert!(!h.state().atlas.dirty);
 
-    // Click vertex 0 on the 3D hyperboloid sheet -> synced vertex pick + Center on pick moves it to origin.
+    // Click vertex 1 on the 3D hyperboloid sheet -> non-zero d(0,z) & Δφ readout, and Center on pick moves it to origin.
     h.state_mut().view3d.apply_preset(CameraPreset::Top);
     h.run_steps(2);
     let hyp = h.state().atlas.hyperbolic.view.as_ref().unwrap().clone();
     let ptr = h.state().view3d.pointer().unwrap();
     let mvp = h.state().view3d.mvp_for_rect(ptr.rect);
     let pts3 = sheet_points(&hyp, h.state().view3d.mesh_data().center, h.state().view3d.mesh_data().radius);
-    let (sv, _) = project_point(&mvp, ptr.rect, pts3[0]).unwrap();
+    let (sv, _) = project_point(&mvp, ptr.rect, pts3[1]).unwrap();
     assert!(ptr.rect.contains(sv));
     click(&mut h, sv);
-    assert_eq!(h.state().atlas.hyperbolic.picked, Some(HypPick::Vertex(0)));
-    assert!(h.query_by_label_contains("Vertex #0").is_some());
+    assert_eq!(h.state().atlas.hyperbolic.picked, Some(HypPick::Vertex(1)));
+    assert!(h.query_by_label_contains("Vertex #1").is_some());
+    let pi = core::f64::consts::PI;
+    let r0 = ((pi / 7.0 + pi / 3.0).cos() / (pi / 7.0 - pi / 3.0).cos()).sqrt();
+    let want_d = format!("d(0,z) = 2 artanh|z| = {:.4}", 2.0 * r0.atanh());
+    let want_phi = format!("Δφ = arg z = {:+.2}°", (2.0 * pi / 7.0).to_degrees());
+    assert!(h.query_by_label_contains(&want_d).is_some(), "missing {want_d}");
+    assert!(h.query_by_label_contains(&want_phi).is_some(), "missing {want_phi}");
     h.get_by_label("Center on pick").click();
     h.run_steps(3);
-    assert!(h.state().atlas.hyperbolic.picked_view_point().unwrap()[0].abs() < 1e-6);
+    let centered = h.state().atlas.hyperbolic.picked_view_point().unwrap();
+    assert!(centered[0].hypot(centered[1]) < 1e-6, "{centered:?}");
 
     // Drag across the 2D disk -> Mobius pan updates `hyperbolic.pan`, keeps `canvas2d.pan == ZERO`.
     let pan_before = h.state().atlas.hyperbolic.pan;
@@ -436,4 +445,67 @@ fn kittest_h2_picking_klein_toggle_drag_pan_and_inspector_readout() {
     assert_ne!(h.state().atlas.hyperbolic.pan, pan_before);
     assert_eq!(h.state().canvas2d.pan, egui::Vec2::ZERO);
     assert!(!h.state().atlas.dirty);
+}
+
+#[test]
+fn net_frame_matches_all_canonical_nets_and_defect_block_origin() {
+    use papertilling_core::space3d::nets3d::build_net_3d;
+    let mod1_dist = |a: f64, b: f64| {
+        let d = (a - b).rem_euclid(1.0);
+        d.min(1.0 - d)
+    };
+    let check_motif = |net: CanonicalNet3d, motif: &[[f64; 3]]| {
+        let patch = build_net_3d(net, LineDefect3d::None);
+        let fr = net_frame(net, LineDefect3d::None);
+        assert_eq!(patch.positions.len(), 8 * motif.len(), "{net:?}");
+        for p in &patch.positions {
+            let f = fr.fractional(*p);
+            assert!(
+                motif.iter().any(|m| (0..3).all(|k| mod1_dist(f[k], m[k]) < 1e-6)),
+                "{net:?}: unexpected fractional {f:?}"
+            );
+        }
+    };
+    for net in CanonicalNet3d::ALL {
+        match net {
+            CanonicalNet3d::SimpleCubic => check_motif(net, &[[0.0, 0.0, 0.0]]),
+            CanonicalNet3d::BCC => check_motif(net, &[[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]]),
+            CanonicalNet3d::FCC => check_motif(net, &[[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [0.0, 0.5, 0.5]]),
+            CanonicalNet3d::Diamond => check_motif(net, &[
+                [0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [0.0, 0.5, 0.5],
+                [0.25, 0.25, 0.25], [0.75, 0.75, 0.25], [0.75, 0.25, 0.75], [0.25, 0.75, 0.75],
+            ]),
+            CanonicalNet3d::HCP => check_motif(net, &[[1.0 / 3.0, 2.0 / 3.0, 0.25], [2.0 / 3.0, 1.0 / 3.0, 0.75]]),
+            CanonicalNet3d::Tetragonal123 => {
+                assert!((net_frame(net, LineDefect3d::None).lat[2][2] - 1.15).abs() < 1e-12);
+                check_motif(net, &[[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]]);
+            }
+            CanonicalNet3d::Rutile136 => {
+                assert!((net_frame(net, LineDefect3d::None).lat[2][2] - 0.72).abs() < 1e-12);
+                check_motif(net, &[
+                    [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0.3, 0.3, 0.0],
+                    [0.7, 0.7, 0.0], [0.8, 0.2, 0.5], [0.2, 0.8, 0.5],
+                ]);
+            }
+            CanonicalNet3d::Perovskite => check_motif(net, &[
+                [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 0.5],
+            ]),
+            CanonicalNet3d::Pyrochlore => check_motif(net, &[
+                [0.0, 0.0, 0.0], [0.25, 0.25, 0.0], [0.25, 0.0, 0.25], [0.0, 0.25, 0.25], [0.5, 0.5, 0.5],
+            ]),
+            CanonicalNet3d::BetaQuartz => {
+                assert!((net_frame(net, LineDefect3d::None).lat[2][2] - 1.35).abs() < 1e-12);
+                check_motif(net, &[[0.5, 0.0, 0.0], [0.0, 0.5, 1.0 / 3.0], [0.5, 0.5, 2.0 / 3.0]]);
+            }
+        }
+    }
+    // Defect blocks use nx = ny = 3 (mid = 1.5), leaving xy coordinates intact for a screw dislocation along z.
+    let fr = net_frame(CanonicalNet3d::Rutile136, LineDefect3d::ScrewDislocationZ);
+    assert_eq!(fr.origin, [-1.5, -1.5, -0.72]);
+    let screw = build_net_3d(CanonicalNet3d::Rutile136, LineDefect3d::ScrewDislocationZ);
+    let xy_motif = [[0.0, 0.0], [0.5, 0.5], [0.3, 0.3], [0.7, 0.7], [0.8, 0.2], [0.2, 0.8]];
+    for p in &screw.positions {
+        let f = fr.fractional(*p);
+        assert!(xy_motif.iter().any(|m| mod1_dist(f[0], m[0]) < 1e-6 && mod1_dist(f[1], m[1]) < 1e-6), "{f:?}");
+    }
 }

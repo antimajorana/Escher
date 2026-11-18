@@ -91,11 +91,11 @@ impl Space3dPanelState {
     pub fn ensure_net(&mut self) -> &Net3dPatch {
         let key = self.net_key();
         if self.view.net.as_ref().is_none_or(|(k, _)| *k != key) {
-            self.view.net = Some((key, build_net_3d(key.0, key.1)));
+            self.view.net = None;
             self.view.picked = None;
             self.view.hovered = None;
         }
-        &self.view.net.as_ref().expect("built above").1
+        &self.view.net.get_or_insert_with(|| (key, build_net_3d(key.0, key.1))).1
     }
 
     pub fn frame(&self) -> NetFrame {

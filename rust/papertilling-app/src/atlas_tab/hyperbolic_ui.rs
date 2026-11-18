@@ -205,13 +205,15 @@ impl HyperbolicPanelState {
         if let Err(e) = self.ensure_tiling() {
             self.status = e;
             self.view = None;
+        }
+        let Some(cache) = self.cache.as_ref() else {
             return (
                 empty_scene("Non-hyperbolic (p, q)", &self.status),
                 GpuMeshData { radius: 1.0, ..Default::default() },
                 self.status.clone(),
             );
-        }
-        let base = &self.cache.as_ref().expect("built above").base;
+        };
+        let base = &cache.base;
         self.status = format!(
             "{} | κ(D) = {:.4} ({:?}) | PSU(1,1) |Tr/2|={:.3}",
             base.symbol_label, base.curvature_kappa, base.geometry_kind, base.psu11_half_trace

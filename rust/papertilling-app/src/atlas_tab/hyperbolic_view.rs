@@ -5,7 +5,7 @@
 //! Conventions: complex numbers are `[re, im]`; the Poincare point `z` has Klein image `k = 2 z / (1 + |z|^2)` and
 //! hyperboloid image `(2 z, 1 + |z|^2) / (1 - |z|^2)`; `d(0, z) = 2 artanh |z|` (curvature -1).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use papertilling_core::hyperbolic::{HyperbolicTiling, to_hyperboloid, to_klein};
 
@@ -123,34 +123,45 @@ pub fn point_in_convex(poly: &[C], p: C) -> bool {
     !(pos && neg)
 }
 
+fn for_each_face_key(f: &[usize], share_vertex: bool, mut visit: impl FnMut((usize, usize))) {
+    if share_vertex {
+        for &u in f {
+            visit((u, u));
+        }
+    } else if f.len() >= 2 {
+        for k in 0..f.len() {
+            let (a, b) = (f[k], f[(k + 1) % f.len()]);
+            visit((a.min(b), a.max(b)));
+        }
+    }
+}
+
 /// Generation (layer) of each face: graph distance from face 0 in the patch's face adjacency (faces sharing an edge;
 /// for the kagome style, whose faces are the midpoint polygons of the `{p,q}` faces, sharing a vertex). This is the
 /// reflection depth at which the core's breadth-first construction reached the face.
 pub fn face_generations(faces: &[Vec<usize>], share_vertex: bool) -> Vec<usize> {
-    let edges = |f: &[usize]| -> Vec<(usize, usize)> {
-        (0..f.len()).map(|k| (f[k].min(f[(k + 1) % f.len()]), f[k].max(f[(k + 1) % f.len()]))).collect()
-    };
-    let adjacent = |i: usize, j: usize| {
-        if share_vertex {
-            faces[i].iter().any(|u| faces[j].contains(u))
-        } else {
-            let ej = edges(&faces[j]);
-            edges(&faces[i]).iter().any(|e| ej.contains(e))
-        }
-    };
     let mut gens = vec![usize::MAX; faces.len()];
     if faces.is_empty() {
         return gens;
     }
+    let mut by_key: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    for (fi, f) in faces.iter().enumerate() {
+        for_each_face_key(f, share_vertex, |key| by_key.entry(key).or_default().push(fi));
+    }
     gens[0] = 0;
     let mut queue = VecDeque::from([0]);
     while let Some(i) = queue.pop_front() {
-        for j in 0..faces.len() {
-            if gens[j] == usize::MAX && adjacent(i, j) {
-                gens[j] = gens[i] + 1;
-                queue.push_back(j);
+        let next_gen = gens[i] + 1;
+        for_each_face_key(&faces[i], share_vertex, |key| {
+            if let Some(nbrs) = by_key.get(&key) {
+                for &j in nbrs {
+                    if gens[j] == usize::MAX {
+                        gens[j] = next_gen;
+                        queue.push_back(j);
+                    }
+                }
             }
-        }
+        });
     }
     gens
 }
