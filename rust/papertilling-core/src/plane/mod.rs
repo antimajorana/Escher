@@ -9,6 +9,9 @@ pub mod draw;
 pub mod family;
 pub mod groups;
 pub mod groups_data;
+pub mod inflation;
+#[cfg(test)]
+mod inflation_tests;
 pub mod live_search;
 pub mod loci;
 pub mod planarity;

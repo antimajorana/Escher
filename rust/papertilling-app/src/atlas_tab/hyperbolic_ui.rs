@@ -3,6 +3,7 @@
 
 use std::f64::consts::PI;
 
+use papertilling_core::hyperbolic::inflation::{vertex_completion_counts_budget, ShellCounts};
 use papertilling_core::hyperbolic::{build_hyperbolic_tiling, HyperbolicStyle};
 
 use crate::mesh3d::atlas_mesh::mesh_from_hyperboloid;
@@ -24,7 +25,20 @@ pub struct HyperbolicPanelState {
     pub wedge_delta: i32,
     pub disk_proj: DiskProjection,
     pub status: String,
+    /// Effective `{p, q}` whose shell table the inspector shows.
+    pub shell_key: Option<(usize, usize)>,
+    /// Uncapped BDF vertex-completion shell counts, at most [`SHELL_CACHE_MAX`] `{p, q}` keys
+    /// (oldest dropped first), so Regular <-> Dual toggles and revisits do not recompute.
+    pub shell_cache: Vec<((usize, usize), Result<ShellCounts, String>)>,
+    /// Which shells the drawn patch contains (from the tiling's `growth_rule`).
+    pub drawn_patch_note: String,
 }
+
+/// Shells and face budget of the inspector's shell table (interactive, so kept small).
+const SHELL_TABLE_MAX_N: usize = 6;
+const SHELL_TABLE_FACE_BUDGET: usize = 20_000;
+/// Number of `{p, q}` shell tables kept in [`HyperbolicPanelState::shell_cache`].
+const SHELL_CACHE_MAX: usize = 16;
 
 impl Default for HyperbolicPanelState {
     fn default() -> Self {
@@ -36,6 +50,9 @@ impl Default for HyperbolicPanelState {
             wedge_delta: 0,
             disk_proj: DiskProjection::Poincare,
             status: String::new(),
+            shell_key: None,
+            shell_cache: Vec::new(),
+            drawn_patch_note: String::new(),
         }
     }
 }
@@ -100,13 +117,70 @@ impl HyperbolicPanelState {
             self.p, self.q, self.layers, self.wedge_delta
         ));
         ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
+        self.show_shell_table(ui);
+    }
+
+    /// BDF vertex completion `S_{n+1} = S_n + U(S_n)` from one p-gon (arXiv:1805.02665, Sec. IV-V):
+    /// exact counts from the uncapped counter, not from the drawn (capped) patch.
+    fn show_shell_table(&self, ui: &mut egui::Ui) {
+        let Some(((p, q), res)) = self.shell_key.and_then(|k| self.shell_cache.iter().find(|(c, _)| *c == k)) else {
+            return;
+        };
+        ui.separator();
+        ui.strong(format!("Vertex completion shells, {{{p},{q}}}, one {p}-gon seed"));
+        let counts = match res {
+            Ok(c) => c,
+            Err(e) => {
+                ui.small(e);
+                return;
+            }
+        };
+        egui::Grid::new("hyp_shell_table").num_columns(4).spacing([10.0, 2.0]).striped(true).show(ui, |ui| {
+            for h in ["n", "|S_n|", "a_n", "a_n/a_{n-1}"] {
+                ui.small(egui::RichText::new(h).strong());
+            }
+            ui.end_row();
+            for s in &counts.shells {
+                ui.small(s.n.to_string());
+                ui.small(s.cumulative.to_string());
+                ui.small(s.shell.to_string());
+                ui.small(s.ratio.map_or("-".to_string(), |r| format!("{r:.5}")));
+                ui.end_row();
+            }
+        });
+        ui.small(format!(
+            "λ+ = γ + √(γ²−1) = {:.5}, γ = ((p−2)(q−2)−2)/2: BDF Eq. 10–11 give it as the growth eigenvalue of the \
+             boundary under vertex completion. That the shell ratio a_n/a_{{n-1}} approaches it is observed in this \
+             table, not a formula from the paper; λ+ is not a count formula.",
+            counts.lambda_plus
+        ));
+        if let Some(stop) = &counts.stopped {
+            ui.small(format!("Table stops early: {stop}"));
+        }
+        if self.style == HyperbolicStyle::RectifiedKagome {
+            ui.small("Kagome: counts are of the underlying {p,q} p-gons.");
+        }
+        if self.wedge_delta != 0 {
+            ui.small("Wedge core Δp ≠ 0: the drawn patch is edge-BFS; this table does not describe it.");
+        }
+        ui.small(format!("Drawn patch: {}", self.drawn_patch_note));
     }
 
     pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {
+        let (pe, qe) = if self.style == HyperbolicStyle::DualQP { (self.q, self.p) } else { (self.p, self.q) };
+        if !self.shell_cache.iter().any(|(k, _)| *k == (pe, qe)) {
+            let res = vertex_completion_counts_budget(pe, qe, SHELL_TABLE_MAX_N, SHELL_TABLE_FACE_BUDGET);
+            if self.shell_cache.len() >= SHELL_CACHE_MAX {
+                self.shell_cache.drain(..1); // drop the oldest table
+            }
+            self.shell_cache.push(((pe, qe), res));
+        }
+        self.shell_key = Some((pe, qe));
         let hyp = match build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.wedge_delta) {
             Ok(h) => h,
             Err(e) => {
                 self.status = e;
+                self.drawn_patch_note.clear();
                 return (
                     Scene2D::VectorScene {
                         primitives: ScenePrimitives {
@@ -128,6 +202,7 @@ impl HyperbolicPanelState {
                 );
             }
         };
+        self.drawn_patch_note = hyp.growth_rule.clone();
         self.status = format!(
             "{} | κ(D) = {:.4} ({:?}) | PSU(1,1) |Tr/2|={:.3}",
             hyp.symbol_label, hyp.curvature_kappa, hyp.geometry_kind, hyp.psu11_half_trace
