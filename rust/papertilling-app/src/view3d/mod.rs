@@ -22,6 +22,7 @@ mod export_png;
 #[cfg(test)]
 mod export_png_tests;
 mod offscreen;
+mod pick;
 mod wire_quads;
 #[cfg(test)]
 mod orbit_tests;
@@ -37,6 +38,10 @@ use gpu::View3dCallback;
 pub use export_png::Export3dInfo;
 pub use legend::{ColorLegend3d, Legend3dMap};
 pub use offscreen::OffscreenGpuContext;
+pub use pick::{pick_nearest, project_point};
+use pick::View3dPointer;
+#[cfg(test)]
+pub use camera::CameraPreset;
 use legend::{draw_legend_3d, legend_rect_3d, zoom_hud_rect_3d};
 
 pub struct View3dState {
@@ -57,6 +62,8 @@ pub struct View3dState {
     /// Size (points) of the viewport the last `show` drew, its physical pixels per point, and the egui pass it ran
     /// in: the 3D PNG export's size is that of the on-screen pixels times the PNG scale.
     last_view: Option<(egui::Vec2, f32, u64)>,
+    /// Viewport rect and free (non-overlay, non-drag) hover / click positions of the last `show` (`pick`).
+    pointer: Option<View3dPointer>,
     /// `(viewport, zoom HUD, legend)` rects of the last `show` (tests only).
     #[cfg(test)]
     pub(crate) last_layout: Option<(egui::Rect, Option<egui::Rect>, Option<egui::Rect>)>,
@@ -83,6 +90,7 @@ impl Default for View3dState {
             overlay_caption: String::new(),
             legend: None,
             last_view: None,
+            pointer: None,
             #[cfg(test)]
             last_layout: None,
             #[cfg(test)]
@@ -145,6 +153,7 @@ impl View3dState {
         let blockers: Vec<egui::Rect> =
             [hud_opt, gizmo_opt].into_iter().flatten().chain(preset_buttons.iter().map(|b| b.1)).collect();
         self.handle_camera_input(ui, rect, &response, &blockers);
+        self.record_pointer(ui, rect, &response);
         let gizmo_hover = gizmo_opt.and_then(|g| {
             let g_resp = ui.interact(g, response.id.with("axis_gizmo"), egui::Sense::click());
             let hit = g_resp.hover_pos().and_then(|p| gizmo_hit(&self.rotation(), g, p));

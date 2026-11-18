@@ -2,12 +2,12 @@
 //! and `#123 P4/mmm` vs `#136 P4_2/mnm` forced `4_2` screw-dispiration visualizer.
 
 use papertilling_core::bieberbach::BieberbachSummary;
-use papertilling_core::space3d::nets3d::{build_net_3d, CanonicalNet3d, LineDefect3d};
+use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d};
 use papertilling_core::space3d::{analyze_space_group_3d, list_space_groups_3d};
 
-use crate::mesh3d::atlas_mesh::mesh_from_net3d;
+use super::space3d_view::Space3dView;
 use crate::mesh3d::GpuMeshData;
-use crate::scene2d::{CirclePrim, LinePrim, Scene2D, ScenePrimitives, compute_bbox};
+use crate::scene2d::Scene2D;
 use crate::theme::ThemeTokens;
 
 pub struct Space3dPanelState {
@@ -16,6 +16,8 @@ pub struct Space3dPanelState {
     pub selected_net: CanonicalNet3d,
     pub selected_defect: LineDefect3d,
     pub summary: Option<BieberbachSummary>,
+    /// Cell / axes / slab / depth-cue options and the picked site.
+    pub view: Space3dView,
     cached_sg: u16,
 }
 
@@ -27,6 +29,7 @@ impl Default for Space3dPanelState {
             selected_net: CanonicalNet3d::Rutile136,
             selected_defect: LineDefect3d::ScrewDispiration42_136,
             summary: analyze_space_group_3d(136).ok(),
+            view: Space3dView::default(),
             cached_sg: 136,
         }
     }
@@ -100,6 +103,7 @@ impl Space3dPanelState {
                     }
                 }
             });
+        self.show_view_controls(ui);
         dirty
     }
 
@@ -129,55 +133,12 @@ impl Space3dPanelState {
         ui.strong("Active 3D Net & Defect");
         ui.small(format!("Net: {}", self.selected_net.label()));
         ui.small(format!("Line defect: {}", self.selected_defect.label()));
+        self.show_pick_readout(ui, tokens);
     }
 
-    pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {
+    /// Scenes of the current net with the view options (`rot`: the 3D camera rotation, for the depth cue).
+    pub fn build_scenes(&mut self, rot: &[[f32; 4]; 4]) -> (Scene2D, GpuMeshData, String) {
         self.ensure_cached();
-        let net = build_net_3d(self.selected_net, self.selected_defect);
-        let mesh = mesh_from_net3d(&net);
-        let circles: Vec<CirclePrim> = net
-            .positions
-            .iter()
-            .enumerate()
-            .map(|(i, p)| CirclePrim {
-                center: [p[0] as f32, p[1] as f32],
-                radius_world: 0.055,
-                min_px: 2.5,
-                max_px: 8.5,
-                fill: match net.site_kinds[i] % 3 {
-                    0 => [42, 92, 168, 255],
-                    1 => [214, 92, 52, 255],
-                    _ => [42, 148, 96, 255],
-                },
-                stroke: ([255, 255, 255, 255], 0.8),
-            })
-            .collect();
-        let lines: Vec<LinePrim> = net
-            .bonds
-            .iter()
-            .map(|&(u, v, bk)| LinePrim {
-                a: [net.positions[u][0] as f32, net.positions[u][1] as f32],
-                b: [net.positions[v][0] as f32, net.positions[v][1] as f32],
-                color: if bk == 1 { [224, 58, 32, 255] } else { [44, 62, 88, 190] },
-                width: if bk == 1 { 2.4 } else { 1.3 },
-                dashed: false,
-                arrow_mid: false,
-            })
-            .collect();
-        let pts: Vec<[f32; 2]> = circles.iter().map(|c| c.center).collect();
-        let prim = ScenePrimitives {
-            polygons: Vec::new(),
-            lines,
-            circles,
-            labels: Vec::new(),
-            site_circle_indices: Vec::new(),
-            edge_line_indices: Vec::new(),
-            title: format!("3D Net (xy-projection): {}", net.name),
-            note: net.defect_label.clone(),
-            bbox: compute_bbox(pts.into_iter()),
-            site_count: net.positions.len(),
-            bond_count: net.bonds.len(),
-        };
-        (Scene2D::VectorScene { primitives: prim }, mesh, net.info)
+        self.build_view_scenes(rot)
     }
 }

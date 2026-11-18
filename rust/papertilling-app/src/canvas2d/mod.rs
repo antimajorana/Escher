@@ -58,6 +58,8 @@ pub struct CanvasInteraction {
     pub clicked_marker: Option<usize>,
     /// A click that landed on a vertex of the active Burgers circuit loop.
     pub clicked_circuit_vertex: Option<usize>,
+    /// With `Canvas2D::drag_reports_world`: this frame's drag as `(from, to)` world points instead of a view pan.
+    pub drag_world: Option<([f64; 2], [f64; 2])>,
 }
 
 pub struct Canvas2D {
@@ -77,6 +79,11 @@ pub struct Canvas2D {
     /// Gallery symmetry / Voronoi overlay: `under` merged into `compiled`, `over` painted and exported last.
     pub(super) gallery_overlay: Option<crate::scene2d::overlays::GalleryOverlay>,
     pub(super) export_title: Option<String>,
+    /// Off by default: a background drag pans the view. On (set only around one interactive `show` by a caller that
+    /// moves the content itself), the drag is reported in `CanvasInteraction::drag_world` and the view stays.
+    pub(crate) drag_reports_world: bool,
+    #[cfg(test)]
+    pub(crate) last_rect: egui::Rect,
 }
 
 impl Canvas2D {
@@ -100,6 +107,9 @@ impl Canvas2D {
             gauge_overlay: None,
             gallery_overlay: None,
             export_title: None,
+            drag_reports_world: false,
+            #[cfg(test)]
+            last_rect: egui::Rect::NOTHING,
         }
     }
 
@@ -282,6 +292,10 @@ impl Canvas2D {
     ) -> CanvasInteraction {
         let (rect, has_hud, hud_rect, out) =
             self.handle_canvas_input(ui, markers, click_to_place, interactive);
+        #[cfg(test)]
+        {
+            self.last_rect = rect;
+        }
         self.render_canvas(ui, rect, has_hud.then_some(hud_rect), markers, preview_world, tokens);
         out
     }

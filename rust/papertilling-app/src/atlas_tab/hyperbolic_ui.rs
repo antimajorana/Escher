@@ -1,19 +1,39 @@
 //! Hyperbolic `H^2` `{p, q}` tilings, `(p.q.p.q)` kagome, Poincare geodesics, Klein chords,
 //! 3D Minkowski hyperboloid bowl, wedge disclinations, and `kappa(D) < 0` inspector.
+//!
+//! Interactive view (rendering only; the tiling is cached and rebuilt only when `p, q`, style, layers or wedge
+//! change): a hyperbolic pan (a disk isometry applied to the 2D disk and the 3D sheet, so the picture stays a valid
+//! `{p,q}` tiling), a view zoom of the 2D disk, and face / vertex picking with a readout (`hyperbolic_pick`).
 
-use std::f64::consts::PI;
+use papertilling_core::hyperbolic::{HyperbolicStyle, HyperbolicTiling, build_hyperbolic_tiling};
 
-use papertilling_core::hyperbolic::{build_hyperbolic_tiling, HyperbolicStyle};
-
-use crate::mesh3d::atlas_mesh::mesh_from_hyperboloid;
+use super::hyperbolic_scene::{disk_scene, empty_scene, sheet_mesh};
+use super::hyperbolic_view::{DiskIsometry, face_generations, vertex_generations, view_tiling};
 use crate::mesh3d::GpuMeshData;
-use crate::scene2d::{compute_bbox, ring_tint_rgba, CirclePrim, LinePrim, PolyPrim, Scene2D, ScenePrimitives};
+use crate::scene2d::Scene2D;
 use crate::theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiskProjection {
     Poincare,
     Klein,
+}
+
+/// A picked element of the patch: a face or a vertex (indices into `HyperbolicTiling::faces` / `poincare_pts`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HypPick {
+    Face(usize),
+    Vertex(usize),
+}
+
+type TilingKey = (usize, usize, HyperbolicStyle, usize, i32);
+
+/// The origin-frame tiling of a key with its face and vertex generations.
+pub struct CachedTiling {
+    pub key: TilingKey,
+    pub base: HyperbolicTiling,
+    pub face_gen: Vec<usize>,
+    pub vertex_gen: Vec<usize>,
 }
 
 pub struct HyperbolicPanelState {
@@ -24,6 +44,17 @@ pub struct HyperbolicPanelState {
     pub wedge_delta: i32,
     pub disk_proj: DiskProjection,
     pub status: String,
+    /// Hyperbolic pan: the isometry taking the tiling's own frame to the view.
+    pub pan: DiskIsometry,
+    /// View scale of the 2D disk (1 = the unit disk fills the view).
+    pub disk_zoom: f32,
+    pub picked: Option<HypPick>,
+    pub hovered: Option<HypPick>,
+    /// A view option (pan, zoom) or the pick changed: refresh the scenes without resetting the 2D view.
+    pub view_changed: bool,
+    pub(super) cache: Option<CachedTiling>,
+    /// The panned tiling of the last build (what is drawn and picked).
+    pub(super) view: Option<HyperbolicTiling>,
 }
 
 impl Default for HyperbolicPanelState {
@@ -36,6 +67,13 @@ impl Default for HyperbolicPanelState {
             wedge_delta: 0,
             disk_proj: DiskProjection::Poincare,
             status: String::new(),
+            pan: DiskIsometry::IDENTITY,
+            disk_zoom: 1.0,
+            picked: None,
+            hovered: None,
+            view_changed: false,
+            cache: None,
+            view: None,
         }
     }
 }
@@ -85,10 +123,50 @@ impl HyperbolicPanelState {
                 dirty |= ui.selectable_value(&mut self.wedge_delta, d, format!("{d:+}")).changed();
             }
         });
+        self.show_view_controls(ui);
         dirty
     }
 
-    pub fn show_inspector(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+    fn show_view_controls(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.strong("Disk View: Hyperbolic Pan, Zoom & Picking");
+        ui.small("Drag the disk: hyperbolic pan (Mobius). Click: pick a face or vertex.");
+        let mut changed = false;
+        // one step = hyperbolic distance 0.25 (Poincare radius tanh(0.125))
+        let r = 0.125_f64.tanh();
+        ui.horizontal(|ui| {
+            ui.small("Pan:");
+            for (lbl, d) in [("←", [-r, 0.0]), ("→", [r, 0.0]), ("↑", [0.0, r]), ("↓", [0.0, -r])] {
+                if ui.small_button(lbl).clicked() {
+                    // move the content by `d`: the view origin's content goes to `d`
+                    self.pan = self.pan.then(DiskIsometry::from_origin(d));
+                    changed = true;
+                }
+            }
+            if ui.small_button("Reset").on_hover_text("Undo the hyperbolic pan and zoom").clicked() {
+                self.pan = DiskIsometry::IDENTITY;
+                self.disk_zoom = 1.0;
+                changed = true;
+            }
+        });
+        changed |= ui.add(egui::Slider::new(&mut self.disk_zoom, 0.5..=4.0).logarithmic(true).text("Disk zoom")).changed();
+        ui.horizontal(|ui| {
+            if self.picked.is_some()
+                && ui.small_button("Center on pick").clicked()
+                && let Some(z) = self.picked_view_point()
+            {
+                self.pan = self.pan.then(DiskIsometry::to_origin(z));
+                changed = true;
+            }
+            if self.picked.is_some() && ui.small_button("Clear pick").clicked() {
+                self.picked = None;
+                changed = true;
+            }
+        });
+        self.view_changed |= changed;
+    }
+
+    pub fn show_inspector(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         ui.strong("Hyperbolic H² Metric & Status");
         let is_hyperbolic = (self.p.saturating_sub(2)) * (self.q.saturating_sub(2)) > 4;
         if !self.status.is_empty() {
@@ -100,132 +178,49 @@ impl HyperbolicPanelState {
             self.p, self.q, self.layers, self.wedge_delta
         ));
         ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
+        self.show_pick_readout(ui, tokens);
+    }
+
+    fn key(&self) -> TilingKey {
+        (self.p, self.q, self.style, self.layers, self.wedge_delta)
+    }
+
+    /// Build (or reuse) the origin-frame tiling of the current key; a new key clears the pick.
+    fn ensure_tiling(&mut self) -> Result<(), String> {
+        let key = self.key();
+        if self.cache.as_ref().is_some_and(|c| c.key == key) {
+            return Ok(());
+        }
+        self.cache = None;
+        self.picked = None;
+        self.hovered = None;
+        let base = build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.wedge_delta)?;
+        let face_gen = face_generations(&base.faces, self.style == HyperbolicStyle::RectifiedKagome);
+        let vertex_gen = vertex_generations(base.poincare_pts.len(), &base.faces, &face_gen);
+        self.cache = Some(CachedTiling { key, base, face_gen, vertex_gen });
+        Ok(())
     }
 
     pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {
-        let hyp = match build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.wedge_delta) {
-            Ok(h) => h,
-            Err(e) => {
-                self.status = e;
-                return (
-                    Scene2D::VectorScene {
-                        primitives: ScenePrimitives {
-                            polygons: Vec::new(),
-                            lines: Vec::new(),
-                            circles: Vec::new(),
-                            labels: Vec::new(),
-                            site_circle_indices: Vec::new(),
-                            edge_line_indices: Vec::new(),
-                            title: "Non-hyperbolic (p, q)".to_string(),
-                            note: self.status.clone(),
-                            bbox: ([-1.0, -1.0], [1.0, 1.0]),
-                            site_count: 0,
-                            bond_count: 0,
-                        },
-                    },
-                    GpuMeshData { radius: 1.0, ..Default::default() },
-                    self.status.clone(),
-                );
-            }
-        };
+        if let Err(e) = self.ensure_tiling() {
+            self.status = e;
+            self.view = None;
+            return (
+                empty_scene("Non-hyperbolic (p, q)", &self.status),
+                GpuMeshData { radius: 1.0, ..Default::default() },
+                self.status.clone(),
+            );
+        }
+        let base = &self.cache.as_ref().expect("built above").base;
         self.status = format!(
             "{} | κ(D) = {:.4} ({:?}) | PSU(1,1) |Tr/2|={:.3}",
-            hyp.symbol_label, hyp.curvature_kappa, hyp.geometry_kind, hyp.psu11_half_trace
+            base.symbol_label, base.curvature_kappa, base.geometry_kind, base.psu11_half_trace
         );
-
-        let mut lines = Vec::new();
-        // Unit boundary circle S^1_infinity:
-        let rim = 72usize;
-        for k in 0..rim {
-            let t0 = 2.0 * PI * (k as f64) / (rim as f64);
-            let t1 = 2.0 * PI * ((k + 1) as f64) / (rim as f64);
-            lines.push(LinePrim {
-                a: [t0.cos() as f32, t0.sin() as f32],
-                b: [t1.cos() as f32, t1.sin() as f32],
-                color: [110, 130, 160, 180],
-                width: 1.2,
-                dashed: true,
-                arrow_mid: false,
-            });
-        }
-
-        let pts_2d = match self.disk_proj {
-            DiskProjection::Poincare => &hyp.poincare_pts,
-            DiskProjection::Klein => &hyp.klein_pts,
-        };
-        let polygons: Vec<PolyPrim> = hyp
-            .faces
-            .iter()
-            .enumerate()
-            .filter_map(|(fi, f)| {
-                let p_f: Vec<[f32; 2]> = f.iter().filter_map(|&u| pts_2d.get(u).map(|p| [p[0] as f32, p[1] as f32])).collect();
-                (p_f.len() >= 3).then(|| PolyPrim {
-                    fill: if fi == 0 && hyp.wedge_delta != 0 {
-                        [245, 130, 96, 150]
-                    } else {
-                        ring_tint_rgba(f.len())
-                    },
-                    stroke: None,
-                    points: p_f,
-                })
-            })
-            .collect();
-
-        match self.disk_proj {
-            DiskProjection::Poincare => {
-                for arc in &hyp.edge_arcs {
-                    for w in arc.windows(2) {
-                        lines.push(LinePrim {
-                            a: [w[0][0] as f32, w[0][1] as f32],
-                            b: [w[1][0] as f32, w[1][1] as f32],
-                            color: [32, 48, 76, 230],
-                            width: 1.4,
-                            dashed: false,
-                            arrow_mid: false,
-                        });
-                    }
-                }
-            }
-            DiskProjection::Klein => {
-                for &(u, v) in &hyp.edges {
-                    lines.push(LinePrim {
-                        a: [pts_2d[u][0] as f32, pts_2d[u][1] as f32],
-                        b: [pts_2d[v][0] as f32, pts_2d[v][1] as f32],
-                        color: [32, 48, 76, 230],
-                        width: 1.4,
-                        dashed: false,
-                        arrow_mid: false,
-                    });
-                }
-            }
-        }
-        let circles: Vec<CirclePrim> = pts_2d
-            .iter()
-            .map(|p| CirclePrim {
-                center: [p[0] as f32, p[1] as f32],
-                radius_world: 0.018,
-                min_px: 1.5,
-                max_px: 5.5,
-                fill: [28, 78, 152, 230],
-                stroke: ([255, 255, 255, 220], 0.5),
-            })
-            .collect();
-
-        let prim = ScenePrimitives {
-            polygons,
-            lines,
-            circles,
-            labels: Vec::new(),
-            site_circle_indices: Vec::new(),
-            edge_line_indices: Vec::new(),
-            title: format!("Hyperbolic {} ({:?})", hyp.symbol_label, self.disk_proj),
-            note: format!("κ(D) = {:.4}, faces = {}, vertices = {}", hyp.curvature_kappa, hyp.faces.len(), hyp.poincare_pts.len()),
-            bbox: compute_bbox([(-1.05, -1.05), (1.05, 1.05)].into_iter().map(|(x, y)| [x, y])),
-            site_count: hyp.poincare_pts.len(),
-            bond_count: hyp.edges.len(),
-        };
-        let mesh = mesh_from_hyperboloid(&hyp);
+        let hyp = view_tiling(base, self.pan);
+        let scene = disk_scene(&hyp, self.disk_proj, f64::from(self.disk_zoom), self.picked);
+        let mesh = sheet_mesh(&hyp, self.picked);
         let cap = format!("Hyperboloid H² {} ({} faces)", hyp.symbol_label, hyp.faces.len());
-        (Scene2D::VectorScene { primitives: prim }, mesh, cap)
+        self.view = Some(hyp);
+        (scene, mesh, cap)
     }
 }

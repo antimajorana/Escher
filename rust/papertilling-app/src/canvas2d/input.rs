@@ -88,6 +88,15 @@ impl Canvas2D {
                 } else {
                     self.active_drag_pin = None;
                 }
+            } else if self.drag_reports_world
+                && response.dragged_by(egui::PointerButton::Primary)
+                && !out.shift_held
+            {
+                // The caller moves the content itself (Atlas H² Mobius pan): report the drag, keep the view.
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let from = pos - response.drag_delta();
+                    out.drag_world = Some((self.screen_to_world_at(rect, from), self.screen_to_world_at(rect, pos)));
+                }
             } else {
                 self.pan += response.drag_delta();
             }

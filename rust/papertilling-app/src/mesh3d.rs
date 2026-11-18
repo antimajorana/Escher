@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use papertilling_core::types::{SurfaceCover3D, SurfaceMesh};
 
 pub mod atlas_mesh;
+pub mod atlas_net_view;
 pub mod color_scales;
 mod geom;
 mod rp2;
