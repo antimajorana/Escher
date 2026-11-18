@@ -276,6 +276,7 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
     assert_eq!(c_app.active_tab, NavTab::Combine);
     assert!(c_app.session.pending_combine.is_none());
     assert!(c_app.combine.override_item.is_none());
+    assert!(c_app.combine.json_status.is_empty(), "{}", c_app.combine.json_status);
     assert_eq!(c_app.combine.specs, c_src.combine.specs);
     assert_eq!(c_app.combine.opts.manual_radius, 10.0);
     assert_eq!(c_app.combine.opts.core_radius, 3);
@@ -293,6 +294,30 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
     let oblique = p_app.backend.find_named("oblique").unwrap().clone();
     p_app.select_lattice_and_sync(oblique);
     assert!(p_app.capture_session().combine.is_none());
+
+    // 5) Spectral 3D colour modes reset to FaceRingSize with cleared overlays and a note.
+    for mode in ["SpectralLdos", "SpectralCharge"] {
+        let mut s_app = app();
+        s_app.defects.inspectors.spectrum.color_overlay = crate::spectrum_worker::SpectrumColorOverlay::LdosMultiplet;
+        s_app.defects.inspectors.overlay_mode = crate::canvas2d::gauge_overlay::CrystalOverlayMode::SpectralLdos;
+        let mut st_spec = s_app.capture_session();
+        st_spec.defects.color_mode = Some(String::from(mode));
+        let notes = s_app.apply_session(&st_spec, None);
+        assert!(
+            notes.iter().any(|n| n.contains("3D spectral colouring reset to ring size")),
+            "{mode}: {notes:?}"
+        );
+        assert_eq!(s_app.defects.sheet_opts.color_mode, crate::mesh3d::Sheet3dColorMode::FaceRingSize);
+        assert_eq!(s_app.defects.inspectors.spectrum.color_overlay, crate::spectrum_worker::SpectrumColorOverlay::None);
+        assert_eq!(s_app.defects.inspectors.overlay_mode, crate::canvas2d::gauge_overlay::CrystalOverlayMode::Standard);
+    }
+
+    // 6) Unlocked export ("Save Session As...") leaves no stray .lock sidecar.
+    let dir = crate::session::tests::TempDir::new();
+    let exported = dir.0.join("user_save.json");
+    c_app.save_session_to(&exported, false).unwrap();
+    assert!(exported.is_file());
+    assert!(!dir.0.join("user_save.json.lock").exists());
 }
 
 #[test]

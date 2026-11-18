@@ -3,9 +3,11 @@
 //!
 //! Restore order: Gallery tab, lattice (re-resolved from the catalogues by alias key / named key, never from a stored
 //! recipe), slider values through `SliderState` (clamped and snapped), Gallery view state, per-tab settings, then the
-//! stored tab through `switch_tab`, so only that tab starts its normal (async) builds. The camera comes last because
-//! tab switches may set meshes. Every out-of-range or unknown value falls back to the current (default) value and
-//! adds a note shown in the status bar.
+//! stored tab through `switch_tab`, so only that tab runs its normal build (synchronous catalogue / lattice / surface
+//! / Atlas prep, followed by background builds on Defects and Combine). The camera comes last because tab switches
+//! may set meshes. Out-of-range numeric values (sliders, radius, layout, h/k, genus, camera) clamp silently and
+//! `null` parameters are skipped; unknown variants, missing lattices, out-of-range defect indices, unsupported PNG
+//! scale, Combine mismatches and spectral colour resets add status-bar notes.
 
 use std::path::{Path, PathBuf};
 
@@ -418,16 +420,19 @@ impl PapertillingApp {
         }
         match parse_named(&Sheet3dColorMode::ALL, s.color_mode.as_deref()) {
             Some(c) => {
-                d.sheet_opts.color_mode = c;
-                let _ = d.inspectors.on_sheet_color_changed(c);
-                if !matches!(c, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge) {
-                    d.inspectors.spectrum.color_overlay = SpectrumColorOverlay::None;
-                    if matches!(
+                let spectral = matches!(c, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge);
+                d.sheet_opts.color_mode = if spectral { Sheet3dColorMode::FaceRingSize } else { c };
+                d.inspectors.spectrum.color_overlay = SpectrumColorOverlay::None;
+                if spectral
+                    || matches!(
                         d.inspectors.overlay_mode,
                         CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge
-                    ) {
-                        d.inspectors.overlay_mode = CrystalOverlayMode::Standard;
-                    }
+                    )
+                {
+                    d.inspectors.overlay_mode = CrystalOverlayMode::Standard;
+                }
+                if spectral {
+                    notes.push(String::from("3D spectral colouring reset to ring size (recompute in Spectrum panel)"));
                 }
             }
             None if s.color_mode.is_some() => notes.push(String::from("unknown 3D colour mode (kept current)")),
@@ -447,6 +452,7 @@ impl PapertillingApp {
         match self.combine.load_notebook_json(&cfg, &self.backend, &mut self.canvas2d) {
             Ok(_) => {
                 self.combine.override_item = None;
+                self.combine.json_status.clear();
                 self.combine_seen = item_key(&item);
                 self.combine.sync_to_canvas(&item, &mut self.canvas2d, true);
                 self.combine.sync_view3d(&item, &mut self.view3d);
@@ -486,8 +492,12 @@ impl PapertillingApp {
         }
     }
 
-    pub(crate) fn save_session_to(&self, path: &Path) -> Result<(), String> {
-        session::save_session_file(path, &self.capture_session())
+    pub(crate) fn save_session_to(&self, path: &Path, lock: bool) -> Result<(), String> {
+        if lock {
+            session::save_session_file(path, &self.capture_session())
+        } else {
+            session::save_session_file_unlocked(path, &self.capture_session())
+        }
     }
 
     /// Save the OS-config session (on exit). Returns whether a file was written.
@@ -498,7 +508,7 @@ impl PapertillingApp {
         if std::fs::create_dir_all(dir).is_err() {
             return false;
         }
-        self.save_session_to(&path).is_ok()
+        self.save_session_to(&path, true).is_ok()
     }
 
     /// The Top Bar "Session" menu: save / open a session file anywhere (dialogs are skipped in smoke-test mode).
@@ -509,7 +519,8 @@ impl PapertillingApp {
                 self.finish_gallery_moves();
                 let dlg = rfd::FileDialog::new().set_title("Save session").set_file_name(session::SESSION_FILENAME).add_filter("Session", &["json"]);
                 if let Some(path) = dlg.save_file() {
-                    self.export_status = match self.save_session_to(&path) {
+                    let lock = self.session.path.as_deref() == Some(path.as_path());
+                    self.export_status = match self.save_session_to(&path, lock) {
                         Ok(()) => format!("Session saved to {}", path.display()),
                         Err(e) => format!("Session save error: {e}"),
                     };

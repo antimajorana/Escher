@@ -250,7 +250,7 @@ fn failed_saves_leave_the_old_file_intact_and_create_nothing() {
     let before = std::fs::read(&path).unwrap();
 
     // the write itself fails half-way: old file unchanged, staging file removed
-    let failed = save_session_json_with(&path, |f| {
+    let failed = save_session_json_with(&path, true, |f| {
         f.write_all(b"{\"schema_version\": 1, \"the")?;
         Err(io::Error::other("injected write failure"))
     });
@@ -270,4 +270,20 @@ fn failed_saves_leave_the_old_file_intact_and_create_nothing() {
     assert!(save_session_file(&missing, &sample_state()).is_err());
     assert!(!dir.0.join("gone").exists());
     assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn invalid_utf8_file_is_corrupt_and_unlocked_save_leaves_no_lock_sidecar() {
+    let dir = TempDir::new();
+    let bad = dir.0.join("bad.json");
+    std::fs::write(&bad, b"\xff\xfe{\"schema_version\": 1}").unwrap();
+    let err = load_session_file(&bad).unwrap_err();
+    assert!(matches!(err, SessionError::Corrupt(_)), "{err:?}");
+    assert!(err.may_overwrite());
+
+    let exported = dir.0.join("exported.json");
+    let st = sample_state();
+    save_session_file_unlocked(&exported, &st).unwrap();
+    assert_eq!(load_session_file(&exported).unwrap(), Some((st, 0)));
+    assert_eq!(dir.names(), ["bad.json", "exported.json"]);
 }

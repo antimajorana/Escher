@@ -273,11 +273,13 @@ pub fn parse_session(raw: &str) -> Result<(SessionState, u32), SessionError> {
     Ok((state?, dropped))
 }
 
-/// Read `path`: `Ok(None)` when there is no file yet.
+/// Read `path`: `Ok(None)` when there is no file yet. Invalid UTF-8 (`InvalidData`) is treated as `Corrupt`
+/// so a garbled session file falls back and may be replaced on exit rather than blocking exit saves forever.
 pub fn load_session_file(path: &Path) -> Result<Option<(SessionState, u32)>, SessionError> {
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => return Err(SessionError::Corrupt(e.to_string())),
         Err(e) => return Err(SessionError::Io(e.to_string())),
     };
     parse_session(&raw).map(Some)
@@ -287,17 +289,30 @@ pub fn load_session_file(path: &Path) -> Result<Option<(SessionState, u32)>, Ses
 /// exist (a missing folder is an error and nothing is created); an existing file is replaced only when the new
 /// content is fully written and flushed.
 pub fn save_session_file(path: &Path, state: &SessionState) -> Result<(), String> {
+    save_session_with_lock(path, state, true)
+}
+
+/// Write `state` to `path` atomically without leaving a `.lock` sidecar (for "Save Session As..." exports).
+pub fn save_session_file_unlocked(path: &Path, state: &SessionState) -> Result<(), String> {
+    save_session_with_lock(path, state, false)
+}
+
+fn save_session_with_lock(path: &Path, state: &SessionState, use_lock: bool) -> Result<(), String> {
     let json = state.to_json_pretty()?;
-    save_session_json_with(path, |file| file.write_all(json.as_bytes()))
+    save_session_json_with(path, use_lock, |file| file.write_all(json.as_bytes()))
 }
 
 /// [`save_session_file`] with the writer supplied by the caller (tests inject a failing write).
-pub(crate) fn save_session_json_with(path: &Path, write: impl FnOnce(&mut std::fs::File) -> io::Result<()>) -> Result<(), String> {
+pub(crate) fn save_session_json_with(
+    path: &Path,
+    use_lock: bool,
+    write: impl FnOnce(&mut std::fs::File) -> io::Result<()>,
+) -> Result<(), String> {
     let parent = crate::aliases::parent_dir(path);
     if !parent.is_dir() {
         return Err(format!("{}: folder does not exist", parent.display()));
     }
-    let _lock = lock_sidecar(path, "session")?;
+    let _lock = use_lock.then(|| lock_sidecar(path, "session")).transpose()?;
     replace_atomically(path, write).map_err(|e| format!("{}: {e}", path.display()))
 }
 
