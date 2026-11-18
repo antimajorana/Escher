@@ -35,6 +35,7 @@ impl PapertillingApp {
                     self.canvas2d.reset();
                     self.view3d.reset();
                 }
+                self.show_presets_menu(ui);
                 ui.menu_button("Export", |ui| {
                     if ui.button("Export SVG / PNG...").clicked() && !self.smoke_test {
                         ui.close();

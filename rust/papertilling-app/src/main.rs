@@ -23,6 +23,7 @@ mod live_ops;
 mod live_ops_ao;
 mod live_plane;
 mod mesh3d;
+mod presets;
 mod scene2d;
 mod scene_crystal;
 mod spectrum_ui;

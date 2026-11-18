@@ -14,6 +14,9 @@ use crate::theme::StudioTheme;
 use crate::view3d::{OffscreenGpuContext, View3dState};
 
 mod export3d;
+mod preset_apply;
+#[cfg(test)]
+mod preset_tests;
 #[cfg(test)]
 mod export3d_tests;
 #[cfg(test)]
@@ -121,6 +124,8 @@ pub struct PapertillingApp {
     pub(crate) combine: CombineTabState,
     pub(crate) atlas: crate::atlas_tab::AtlasTabState,
     pub(crate) switcher: crate::ui::lattice_switcher::LatticeSwitcher,
+    /// Follow-up work of the last preset waiting on a tab's background worker (Combine pins or Defects spectrum).
+    pub(crate) preset_pending: Option<preset_apply::PendingPreset>,
 }
 
 impl PapertillingApp {
@@ -190,6 +195,7 @@ impl PapertillingApp {
             combine,
             atlas,
             switcher: Default::default(),
+            preset_pending: None,
         }
     }
 
@@ -204,6 +210,7 @@ impl PapertillingApp {
         }
         let ctx = ui.ctx().clone();
         self.poll_export_3d();
+        self.pump_preset_pending(Some(&ctx));
         self.gallery.thumbs.begin_frame(ctx.cumulative_pass_nr());
         self.handle_switcher_shortcut(&ctx);
         if self.switcher.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
