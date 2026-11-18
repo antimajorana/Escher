@@ -81,12 +81,33 @@ impl PapertillingApp {
             && !cap.contains("unavailable");
 
         if ready {
+            if self.last_smoke_stage == 11 && self.smoke_reported {
+                // already reported; the window is closing (the 3D view is no longer drawn, so no second export)
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return true;
+            }
             if self.last_smoke_stage == 11 {
+                // the real offscreen 3D PNG path (render, readback, compose, encode, write, decode)
+                let export3d = match self.smoke_export_3d(ctx.cumulative_pass_nr()) {
+                    Ok(Some(info)) => {
+                        let fmt = self.offscreen_gpu.as_ref().map(|g| (g.target_format, g.color_format()));
+                        let (swap, tex) = fmt.map_or((String::new(), String::new()), |(a, b)| (format!("{a:?}"), format!("{b:?}")));
+                        format!("{}x{}(swapchain={swap},texture={tex})", info.w, info.h)
+                    }
+                    Ok(None) => String::from("skipped"),
+                    Err(err) => {
+                        self.smoke_outcome.store(2, Ordering::Release);
+                        self.smoke_reported = true;
+                        eprintln!("PAPERTILLING_SMOKE_FAIL stage=export3d error={err}");
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        return true;
+                    }
+                };
                 self.smoke_outcome.store(1, Ordering::Release);
                 if !self.smoke_reported {
                     self.smoke_reported = true;
                     println!(
-                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=12 (surfaces,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,atlas-h2)",
+                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=12 (surfaces,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,atlas-h2) export3d={export3d}",
                         self.adapter_name, self.backend_name, self.view3d.counters.uploads()
                     );
                 }

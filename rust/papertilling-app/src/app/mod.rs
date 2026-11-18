@@ -11,8 +11,11 @@ use crate::defects_tab::DefectsTabState;
 use crate::gallery_tab::GalleryTabState;
 use crate::surfaces_tab::SurfacesTabState;
 use crate::theme::StudioTheme;
-use crate::view3d::View3dState;
+use crate::view3d::{OffscreenGpuContext, View3dState};
 
+mod export3d;
+#[cfg(test)]
+mod export3d_tests;
 #[cfg(test)]
 mod rename_tests;
 mod smoke;
@@ -98,6 +101,10 @@ pub struct PapertillingApp {
     pub(crate) export_status: String,
     /// Pixel scale of a 2D PNG export (1, 2 or 4: 1024, 2048 or 4096 px a side), chosen in the Export menu.
     pub(crate) png_scale: u8,
+    /// GPU handles for the offscreen 3D PNG export (`None` headless).
+    pub(crate) offscreen_gpu: Option<OffscreenGpuContext>,
+    /// The 3D PNG being composited and written on a worker thread (joined when dropped).
+    pub(crate) export3d_job: Option<export3d::Export3dJob>,
     pub(crate) theme: StudioTheme,
     pub(crate) left_rail_width: f32,
     pub(crate) right_inspector_open: bool,
@@ -165,6 +172,8 @@ impl PapertillingApp {
             active_tab,
             export_status: String::from("Ready (SVG / high-DPI PNG)"),
             png_scale: 2,
+            offscreen_gpu: None,
+            export3d_job: None,
             theme: StudioTheme::Paper,
             left_rail_width: 300.0,
             right_inspector_open: true,
@@ -194,6 +203,7 @@ impl PapertillingApp {
             return true;
         }
         let ctx = ui.ctx().clone();
+        self.poll_export_3d();
         self.gallery.thumbs.begin_frame(ctx.cumulative_pass_nr());
         self.handle_switcher_shortcut(&ctx);
         if self.switcher.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {

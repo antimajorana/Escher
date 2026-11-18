@@ -91,16 +91,17 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             theme::typography::register_fonts(&cc.egui_ctx);
             theme::StudioTheme::Paper.apply(&cc.egui_ctx);
-            let (adapter_name, backend_name) = if let Some(rs) = &cc.wgpu_render_state {
+            let (adapter_name, backend_name, offscreen) = if let Some(rs) = &cc.wgpu_render_state {
                 view3d::init_view3d_resources(rs);
                 let info = rs.adapter.get_info();
-                (info.name, format!("{:?}", info.backend))
+                (info.name, format!("{:?}", info.backend), Some(view3d::OffscreenGpuContext::from_render_state(rs)))
             } else {
-                (String::from("none"), String::from("none"))
+                (String::from("none"), String::from("none"), None)
             };
             Ok(Box::new(
                 PapertillingApp::new(smoke_test, adapter_name, backend_name)
-                    .with_smoke_outcome(smoke_for_app),
+                    .with_smoke_outcome(smoke_for_app)
+                    .with_offscreen_gpu(offscreen),
             ))
         }),
     );

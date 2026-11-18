@@ -18,6 +18,11 @@ mod gpu;
 #[cfg(test)]
 mod interaction_tests;
 mod legend;
+mod export_png;
+#[cfg(test)]
+mod export_png_tests;
+mod offscreen;
+mod wire_quads;
 #[cfg(test)]
 mod orbit_tests;
 #[cfg(test)]
@@ -29,7 +34,9 @@ use camera::{DIST_MAX, DIST_MIN};
 use gizmo::{button_label, draw_gizmo, gizmo_hit, gizmo_rect_3d, preset_button_rects, preset_for_axis, preset_tooltip};
 pub use gpu::{DEPTH_BITS, GpuFrameCounters, init_view3d_resources};
 use gpu::View3dCallback;
+pub use export_png::Export3dInfo;
 pub use legend::{ColorLegend3d, Legend3dMap};
+pub use offscreen::OffscreenGpuContext;
 use legend::{draw_legend_3d, legend_rect_3d, zoom_hud_rect_3d};
 
 pub struct View3dState {
@@ -47,6 +54,9 @@ pub struct View3dState {
     mesh_data: Arc<GpuMeshData>,
     overlay_caption: String,
     legend: Option<ColorLegend3d>,
+    /// Size (points) of the viewport the last `show` drew, its physical pixels per point, and the egui pass it ran
+    /// in: the 3D PNG export's size is that of the on-screen pixels times the PNG scale.
+    last_view: Option<(egui::Vec2, f32, u64)>,
     /// `(viewport, zoom HUD, legend)` rects of the last `show` (tests only).
     #[cfg(test)]
     pub(crate) last_layout: Option<(egui::Rect, Option<egui::Rect>, Option<egui::Rect>)>,
@@ -72,6 +82,7 @@ impl Default for View3dState {
             mesh_data: Arc::new(GpuMeshData::default()),
             overlay_caption: String::new(),
             legend: None,
+            last_view: None,
             #[cfg(test)]
             last_layout: None,
             #[cfg(test)]
@@ -125,6 +136,7 @@ impl View3dState {
     pub fn show(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         let available = ui.available_size().max(egui::vec2(64.0, 64.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
+        self.last_view = Some((rect.size(), ui.ctx().pixels_per_point(), ui.ctx().cumulative_pass_nr()));
         let hud_opt = zoom_hud_rect_3d(rect);
         let has_hud = hud_opt.is_some();
         let hud_rect = hud_opt.unwrap_or(egui::Rect::NOTHING);

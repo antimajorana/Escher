@@ -44,9 +44,18 @@ impl PapertillingApp {
                         ui.label("PNG scale:");
                         for (s, tip) in [(1_u8, "1024 x 1024 px"), (2, "2048 x 2048 px"), (4, "4096 x 4096 px")] {
                             ui.selectable_value(&mut self.png_scale, s, format!("{s}x"))
-                                .on_hover_text(format!("2D PNG export at {s}x pixel density: {tip}, same composition"));
+                                .on_hover_text(format!("PNG export at {s}x pixel density (2D: {tip}; 3D: the viewport's on-screen pixels x {s}), same composition"));
                         }
                     });
+                    if ui
+                        .button("Export 3D PNG...")
+                        .on_hover_text("The 3D view as on screen (caption, legend), at the PNG scale")
+                        .clicked()
+                        && !self.smoke_test
+                    {
+                        ui.close();
+                        self.export_3d_png_dialog(&ui.ctx().clone());
+                    }
                     if ui.button("Export .obj (3D)...").clicked() && !self.smoke_test {
 
                         ui.close();

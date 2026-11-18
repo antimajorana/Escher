@@ -76,14 +76,19 @@ pub(crate) fn legend_rect_3d(rect: egui::Rect) -> Option<egui::Rect> {
     ))
 }
 
-fn fmt_v(v: f64) -> String {
+pub(super) fn fmt_v(v: f64) -> String {
     if v.abs() >= 0.01 || v == 0.0 { format!("{v:.3}") } else { format!("{v:.1e}") }
+}
+
+/// Title of the legend box (a √-scaled bar says so).
+pub(super) fn legend_title(leg: &ColorLegend3d) -> String {
+    if leg.map == Legend3dMap::SequentialSqrt { format!("{} (√-scale)", leg.title) } else { leg.title.clone() }
 }
 
 pub(crate) fn draw_legend_3d(painter: &egui::Painter, box_r: egui::Rect, leg: &ColorLegend3d, tokens: &ThemeTokens) {
     painter.rect_filled(box_r, 5.0, tokens.bg_hud);
     painter.rect_stroke(box_r, 5.0, egui::Stroke::new(1.0, tokens.border_strong), egui::StrokeKind::Inside);
-    let title = if leg.map == Legend3dMap::SequentialSqrt { format!("{} (√-scale)", leg.title) } else { leg.title.clone() };
+    let title = legend_title(leg);
     painter.text(
         box_r.left_top() + egui::vec2(7.0, 4.0),
         egui::Align2::LEFT_TOP,
