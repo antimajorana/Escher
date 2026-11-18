@@ -8,6 +8,15 @@ fn frame(app: &mut PapertillingApp, ctx: &egui::Context) {
     });
 }
 
+/// Switch to `tab` and draw a few frames so the 3D view counts as shown; returns the next pass number.
+fn shown(app: &mut PapertillingApp, ctx: &egui::Context, tab: NavTab) -> u64 {
+    app.switch_tab(tab);
+    for _ in 0..3 {
+        frame(app, ctx);
+    }
+    ctx.cumulative_pass_nr()
+}
+
 #[test]
 fn export_3d_png_is_refused_on_the_gallery_and_while_dirty_or_busy() {
     let t0 = std::time::Instant::now();
@@ -17,21 +26,71 @@ fn export_3d_png_is_refused_on_the_gallery_and_while_dirty_or_busy() {
     let msg = app.export_3d_png_refusal(ctx.cumulative_pass_nr()).expect("Gallery has no 3D view");
     assert!(msg.contains("Open Surfaces"), "{msg}");
 
-    app.switch_tab(NavTab::Defects);
+    let now = shown(&mut app, &ctx, NavTab::Defects);
     app.defects.wait_idle(&mut app.canvas2d);
     assert!(!app.defects.is_busy());
     app.defects.view3d_dirty = true;
-    let msg = app.export_3d_png_refusal(0).expect("stale 3D sheet");
+    let msg = app.export_3d_png_refusal(now).expect("stale 3D sheet");
     assert!(msg.contains("3D sheet to update"), "{msg}");
     app.defects.stale = true;
-    let msg = app.export_3d_png_refusal(0).expect("defect build running");
+    let msg = app.export_3d_png_refusal(now).expect("defect build running");
     assert!(msg.contains("defect build"), "{msg}");
+    // a 2D-only view never clears view3d_dirty: the guidance must be to show the 3D view, not to wait
+    let msg = app.export_3d_png_refusal(now + 5).expect("3D view not shown");
+    assert!(msg.contains("Show the 3D view"), "{msg}");
 
-    app.switch_tab(NavTab::Combine);
+    let now = shown(&mut app, &ctx, NavTab::Combine);
     app.combine.dragging = true;
-    let msg = app.export_3d_png_refusal(0).expect("pins moving");
+    let msg = app.export_3d_png_refusal(now).expect("pins moving");
     assert!(msg.contains("Finish moving pins"), "{msg}");
     eprintln!("# time guards {:?}", t0.elapsed());
+}
+
+#[test]
+fn export_3d_png_waits_for_a_pending_spectrum() {
+    let ctx = egui::Context::default();
+    let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
+    let now = shown(&mut app, &ctx, NavTab::Defects);
+    app.defects.wait_idle(&mut app.canvas2d);
+    app.defects.view3d_dirty = false;
+    app.defects.stale = false;
+    assert_eq!(app.export_3d_png_state_refusal(now), None, "precondition: allowed when idle");
+    let crystal = app.defects.last_crystal.clone();
+    app.defects.inspectors.spectrum.submit_crystal(&crystal, None, None);
+    assert!(app.defects.inspectors.spectrum.is_busy());
+    let msg = app.export_3d_png_state_refusal(now).expect("spectrum pending");
+    assert!(msg.contains("spectrum"), "{msg}");
+}
+
+#[test]
+fn only_png_file_names_are_accepted_for_the_3d_export() {
+    use super::export3d::png_path;
+    use std::path::PathBuf;
+    assert_eq!(png_path(PathBuf::from("view")).unwrap(), PathBuf::from("view.png"));
+    assert_eq!(png_path(PathBuf::from("a/view.PNG")).unwrap(), PathBuf::from("a/view.PNG"));
+    for bad in ["view.svg", "view.jpg", "view.obj"] {
+        let err = png_path(PathBuf::from(bad)).expect_err(bad);
+        assert!(err.contains(".png"), "{err}");
+    }
+}
+
+#[test]
+fn a_running_3d_export_blocks_2d_and_obj_exports() {
+    let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let job = Export3dJob::spawn(None, move || {
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(5));
+        String::from("Exported 3D 10x10 PNG at 1x (x.png)")
+    })
+    .unwrap();
+    app.export3d_job = Some(job);
+    app.export_dialog();
+    assert_eq!(app.export_status, "A 3D PNG export is still being written.");
+    app.export_status.clear();
+    app.export_obj_dialog();
+    assert_eq!(app.export_status, "A 3D PNG export is still being written.");
+    drop(tx);
+    app.export3d_job = None;
 }
 
 #[test]

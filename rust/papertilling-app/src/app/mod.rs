@@ -324,6 +324,11 @@ impl PapertillingApp {
     }
 
     pub(crate) fn export_dialog(&mut self) {
+        if self.export3d_job.is_some() {
+            // its finishing status would otherwise overwrite this export's result
+            self.export_status = String::from("A 3D PNG export is still being written.");
+            return;
+        }
         self.finish_gallery_moves();
         if self.active_tab == NavTab::Defects && self.defects.is_busy() {
             self.export_status = String::from("Wait for the defect build before exporting.");
@@ -360,6 +365,11 @@ impl PapertillingApp {
     }
 
     pub(crate) fn export_obj_dialog(&mut self) {
+        if self.export3d_job.is_some() {
+            // its finishing status would otherwise overwrite this export's result
+            self.export_status = String::from("A 3D PNG export is still being written.");
+            return;
+        }
         self.finish_gallery_moves();
         if self.active_tab == NavTab::Gallery {
             self.export_status =

@@ -29,8 +29,24 @@ impl PapertillingApp {
         if self.export3d_job.is_some() {
             return refuse("A 3D PNG export is still being written.");
         }
+        if self.active_tab == NavTab::Gallery {
+            return refuse("Open Surfaces, Defects, Combine, or Atlas to export a 3D PNG.");
+        }
+        // before the stale-view guards: a 2D-only view never clears view3d_dirty, so "wait" would never resolve
+        if self.view3d.shown_view_size(pass_nr).is_none() {
+            return refuse("Show the 3D view before exporting a 3D PNG.");
+        }
+        // a pending spectrum / relaxation would leave the previous result's colours and colorbar in the picture
+        let pending_colours = match self.active_tab {
+            NavTab::Defects => self.defects.inspectors.spectrum.is_busy(),
+            NavTab::Combine => self.combine.inspectors.spectrum.is_busy(),
+            NavTab::Surfaces => self.surfaces.spectrum.is_busy() || self.surfaces.elastic.is_busy(),
+            _ => false,
+        };
+        if pending_colours {
+            return refuse("Wait for the spectrum / relaxation to finish before exporting the 3D PNG.");
+        }
         match self.active_tab {
-            NavTab::Gallery => return refuse("Open Surfaces, Defects, Combine, or Atlas to export a 3D PNG."),
             NavTab::Defects if self.defects.is_busy() => return refuse("Wait for the defect build before exporting the 3D PNG."),
             NavTab::Defects if self.defects.view3d_dirty => {
                 return refuse("Wait for the 3D sheet to update before exporting the 3D PNG.");
@@ -46,9 +62,6 @@ impl PapertillingApp {
         }
         if !self.view3d.has_geometry() {
             return refuse("No 3D mesh to export as PNG.");
-        }
-        if self.view3d.shown_view_size(pass_nr).is_none() {
-            return refuse("Show the 3D view before exporting a 3D PNG.");
         }
         None
     }
@@ -81,6 +94,13 @@ impl PapertillingApp {
             .set_file_name(default_name)
             .add_filter("PNG image", &["png"]);
         if let Some(path) = dialog.save_file() {
+            let path = match png_path(path) {
+                Ok(p) => p,
+                Err(msg) => {
+                    self.export_status = msg;
+                    return;
+                }
+            };
             let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
             let Some(gpu) = self.offscreen_gpu.as_ref() else {
                 self.export_status = String::from("3D PNG export error: the wgpu renderer is not available.");
@@ -185,3 +205,13 @@ pub(crate) fn export_3d_status(info: Export3dInfo, scale: u8, name: &str) -> Str
     let fit = if info.clamped { "; scaled down to fit the size limit" } else { "" };
     format!("Exported 3D {}x{} PNG at {scale}x ({name}{fit})", info.w, info.h)
 }
+
+/// The chosen file as a PNG path: no extension gets ".png", any other extension is refused (as the 2D export does).
+pub(crate) fn png_path(path: std::path::PathBuf) -> Result<std::path::PathBuf, String> {
+    match path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()) {
+        None => Ok(path.with_extension("png")),
+        Some(e) if e == "png" => Ok(path),
+        Some(other) => Err(format!("cannot export the 3D view as a .{other} file: choose a .png file name")),
+    }
+}
+
