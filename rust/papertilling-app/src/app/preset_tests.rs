@@ -11,7 +11,8 @@ use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d};
 
 use super::{NavTab, PapertillingApp};
 use crate::atlas_tab::AtlasSubTab;
-use crate::atlas_tab::hyperbolic_ui::DiskProjection;
+use crate::atlas_tab::hyperbolic_ui::{DiskProjection, HypPick};
+use crate::atlas_tab::hyperbolic_view::DiskIsometry;
 use crate::backend::WallKindUi;
 use crate::canvas2d::Scene2D;
 use crate::defects_tab::DefectSubTab;
@@ -104,10 +105,12 @@ fn snapshot(app: &PapertillingApp) -> String {
         NavTab::Atlas => {
             let a = &app.atlas;
             format!(
-                "{:?} {} {:?} {:?} {} {} {:?} {} {} {:?}",
+                "{:?} {} {:?} {:?} {:?} {} {} {:?} {} {} {:?} {:?} {} {:?} {:?}",
                 a.sub_tab, a.space3d.selected_sg, a.space3d.selected_net, a.space3d.selected_defect,
+                (a.space3d.view.show_cell, a.space3d.view.show_axes, a.space3d.view.z_slice_range, a.space3d.view.depth_cue, a.space3d.view.picked),
                 a.hyperbolic.p, a.hyperbolic.q, a.hyperbolic.style, a.hyperbolic.layers,
-                a.hyperbolic.wedge_delta, a.hyperbolic.disk_proj
+                a.hyperbolic.wedge_delta, a.hyperbolic.disk_proj, a.hyperbolic.pan, a.hyperbolic.disk_zoom,
+                a.hyperbolic.picked, a.hyperbolic.hovered
             )
         }
     };
@@ -209,6 +212,12 @@ fn check_known_answers(name: &str, app: &PapertillingApp) {
                 (AtlasSubTab::SpaceGroups3D, 136, CanonicalNet3d::Rutile136, LineDefect3d::ScrewDispiration42_136),
                 "{name}"
             );
+            assert!(
+                !sp.view.show_cell && !sp.view.show_axes && !sp.view.depth_cue
+                    && sp.view.z_slice_range == [0.0, 1.0]
+                    && sp.view.picked.is_none() && sp.view.hovered.is_none(),
+                "{name}: Space3dView reset"
+            );
             let s = sp.summary.as_ref().expect("#136 analysed");
             // P4_2/mnm has a 4_2 screw axis and an n glide: nonsymmorphic
             assert!(format!("{}", s.number) == "136" && !s.is_split, "{name}");
@@ -220,6 +229,9 @@ fn check_known_answers(name: &str, app: &PapertillingApp) {
                 (AtlasSubTab::HyperbolicH2, 7, 3, HyperbolicStyle::RegularPQ, 2, 0, DiskProjection::Poincare),
                 "{name}"
             );
+            assert_eq!(hy.pan, DiskIsometry::IDENTITY, "{name}: pan reset");
+            assert_eq!(hy.disk_zoom, 1.0, "{name}: zoom reset");
+            assert!(hy.picked.is_none() && hy.hovered.is_none(), "{name}: picks reset");
             assert!(app.atlas.hyperbolic.status.contains("κ(D) = -"), "{name}: {}", app.atlas.hyperbolic.status);
         }
         _ => panic!("no known answer for {name}"),
@@ -237,9 +249,19 @@ fn check_tab(tab: NavTab) {
         let a = &mut h.state_mut().atlas;
         (a.space3d.selected_sg, a.space3d.selected_net, a.space3d.selected_defect) =
             (221, CanonicalNet3d::SimpleCubic, LineDefect3d::None);
+        a.space3d.view.show_cell = true;
+        a.space3d.view.show_axes = true;
+        a.space3d.view.depth_cue = true;
+        a.space3d.view.z_slice_range = [0.2, 0.8];
+        a.space3d.view.picked = Some(0);
+        a.space3d.view.hovered = Some(1);
         (a.hyperbolic.p, a.hyperbolic.q, a.hyperbolic.layers, a.hyperbolic.wedge_delta) = (5, 4, 3, 1);
         a.hyperbolic.style = HyperbolicStyle::DualQP;
         a.hyperbolic.disk_proj = DiskProjection::Klein;
+        a.hyperbolic.pan = DiskIsometry::from_origin([0.3, 0.0]);
+        a.hyperbolic.disk_zoom = 2.5;
+        a.hyperbolic.picked = Some(HypPick::Face(0));
+        a.hyperbolic.hovered = Some(HypPick::Vertex(0));
         cases.reverse();
     }
     for (name, want_tab, key, group) in cases {

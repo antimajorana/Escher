@@ -216,3 +216,30 @@ fn defects_preset_resets_sheet_opts_circuit_and_spectrum() {
     assert!(matches!(d.inspectors.overlay_mode, CrystalOverlayMode::SpectralLdos));
     assert!(matches!(d.inspectors.spectrum.color_overlay, SpectrumColorOverlay::LdosMultiplet));
 }
+
+#[test]
+fn combine_preset_clears_pending_combine_from_session_restore() {
+    let mut h = harness();
+    h.run_steps(2);
+    // Build a 1-pin Combine configuration for `square`, then simulate a session restore while on Gallery.
+    apply(&mut h, "Combine: square dislocation dipole");
+    user_pins(&mut h);
+    let cfg = {
+        let app = h.state();
+        let item = app.gallery.active_item();
+        app.combine.to_notebook_json(item)
+    };
+    assert_eq!(cfg.defects.len(), 1);
+    h.state_mut().switch_tab(NavTab::Gallery);
+    h.state_mut().session.pending_combine = Some(cfg);
+
+    apply(&mut h, "Combine: square dislocation dipole");
+    let app = h.state();
+    assert!(app.session.pending_combine.is_none(), "preset must discard deferred session Combine restore");
+    let bs: Vec<[f64; 2]> = app.combine.specs.iter().map(|s| match s {
+        DefectSpec::Dislocation { b, .. } => *b,
+        _ => panic!("dislocations only"),
+    }).collect();
+    assert_eq!(bs.len(), 2, "preset dipole kept instead of 1-pin session restore");
+    assert!((bs[0][0] + bs[1][0]).abs() < 1e-12 && (bs[0][1] + bs[1][1]).abs() < 1e-12);
+}

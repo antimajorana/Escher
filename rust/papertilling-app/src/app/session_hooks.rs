@@ -190,6 +190,7 @@ impl PapertillingApp {
     /// Apply `st` (see the module documentation for the order); returns the notes on values that fell back.
     pub(crate) fn apply_session(&mut self, st: &SessionState, ctx: Option<&egui::Context>) -> Vec<String> {
         let mut notes = Vec::new();
+        self.preset_pending = None;
         self.session.combine_note = None;
         self.switch_tab(NavTab::Gallery);
         match parse_named(&THEMES, st.theme.as_deref()) {

@@ -79,6 +79,7 @@ impl PapertillingApp {
             None => None,
         };
         self.preset_pending = None;
+        self.session.pending_combine = None;
         self.canvas2d.reset();
         self.view3d.reset();
         self.switch_tab(NavTab::Gallery);
@@ -167,6 +168,7 @@ impl PapertillingApp {
                     let s = &mut self.atlas.space3d;
                     (s.selected_sg, s.selected_net, s.selected_defect) = (number, net, defect);
                     s.filter.clear();
+                    s.view = Default::default();
                     s.ensure_cached();
                 }
                 AtlasScene::Hyperbolic { p, q, style, layers } => {
@@ -174,6 +176,11 @@ impl PapertillingApp {
                     let h = &mut self.atlas.hyperbolic;
                     (h.p, h.q, h.style, h.layers, h.wedge_delta) = (p, q, style, layers, 0);
                     h.disk_proj = crate::atlas_tab::hyperbolic_ui::DiskProjection::Poincare;
+                    h.pan = Default::default();
+                    h.disk_zoom = 1.0;
+                    h.picked = None;
+                    h.hovered = None;
+                    h.view_changed = false;
                 }
             },
         }
