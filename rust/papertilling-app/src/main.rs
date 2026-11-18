@@ -25,6 +25,7 @@ mod live_plane;
 mod mesh3d;
 mod scene2d;
 mod scene_crystal;
+mod session;
 mod spectrum_ui;
 mod spectrum_worker;
 mod surfaces_elastic;
@@ -98,11 +99,12 @@ fn main() -> ExitCode {
             } else {
                 (String::from("none"), String::from("none"), None)
             };
-            Ok(Box::new(
-                PapertillingApp::new(smoke_test, adapter_name, backend_name)
-                    .with_smoke_outcome(smoke_for_app)
-                    .with_offscreen_gpu(offscreen),
-            ))
+            let mut app = PapertillingApp::new(smoke_test, adapter_name, backend_name)
+                .with_smoke_outcome(smoke_for_app)
+                .with_offscreen_gpu(offscreen);
+            // restores `session.json` from the OS config folder (never in smoke-test mode)
+            app.load_session_at_start(&cc.egui_ctx);
+            Ok(Box::new(app))
         }),
     );
 

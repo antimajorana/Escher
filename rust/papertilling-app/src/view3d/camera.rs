@@ -66,8 +66,13 @@ impl CameraPreset {
 
 /// Scale `offset` back onto the disc `|offset| <= OFFSET_MAX`.
 fn clamp_offset(offset: egui::Vec2) -> egui::Vec2 {
-    let len = offset.length();
-    if len > OFFSET_MAX { offset * (OFFSET_MAX / len) } else { offset }
+    let len = f64::from(offset.x).hypot(f64::from(offset.y));
+    if len > f64::from(OFFSET_MAX) {
+        let s = f64::from(OFFSET_MAX) / len;
+        egui::vec2((f64::from(offset.x) * s) as f32, (f64::from(offset.y) * s) as f32)
+    } else {
+        offset
+    }
 }
 
 impl View3dState {
@@ -75,6 +80,31 @@ impl View3dState {
         (self.yaw, self.pitch, self.distance) = (0.55, 0.35, DIST_DEFAULT);
         self.z_up = false;
         self.camera_offset = egui::Vec2::ZERO;
+    }
+
+    /// Set the camera from stored values (session restore). `None` or a non-finite value keeps the current one; a
+    /// yaw outside (-pi, pi] is wrapped into it, the pitch is clamped to [-pi/2, pi/2], the distance to
+    /// [`DIST_MIN`, `DIST_MAX`] and the pan offset to length [`OFFSET_MAX`].
+    pub(crate) fn restore_camera(&mut self, yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, offset: Option<[f32; 2]>, z_up: Option<bool>) {
+        use core::f32::consts::{PI, TAU};
+        if let Some(y) = yaw.filter(|v| v.is_finite()) {
+            self.yaw = if y > -PI && y <= PI { y } else {
+                let w = y.rem_euclid(TAU);
+                if w > PI { w - TAU } else { w }
+            };
+        }
+        if let Some(p) = pitch.filter(|v| v.is_finite()) {
+            self.pitch = p.clamp(-HALF_PI, HALF_PI);
+        }
+        if let Some(d) = distance.filter(|v| v.is_finite()) {
+            self.distance = d.clamp(DIST_MIN, DIST_MAX);
+        }
+        if let Some([x, y]) = offset.filter(|o| o.iter().all(|v| v.is_finite())) {
+            self.camera_offset = clamp_offset(egui::vec2(x, y));
+        }
+        if let Some(z) = z_up {
+            self.z_up = z;
+        }
     }
 
     /// Apply an axis preset: frame and angles from [`CameraPreset::orientation`], pan cleared, distance kept.
