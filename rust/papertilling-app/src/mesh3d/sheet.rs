@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use papertilling_core::defect::sheet3d::{Sheet3DResult, validate_sheet_crystal};
 use papertilling_core::types::BuiltCrystal;
 
-use crate::canvas2d::gauge_overlay::perceptual_heat_scale;
+use super::color_scales::SheetColorScales;
 use super::geom::{
     append_icosahedron, append_octahedron, blend_normal, compute_smooth_vertex_normals, cone_rgba,
     mean_chord_len, polygon_centroid_idx, push_wire, tri_normal,
@@ -51,39 +51,19 @@ pub fn mesh_from_sheet3d_with_spectral(
     let site_r = (avg_bond * 0.095).clamp(0.011, 0.032);
     let cone_r = (avg_bond * 0.185).clamp(0.024, 0.058);
 
-    let site_tot_e: Vec<f64> = (0..n)
-        .map(|u| {
-            sheet.site_gsv_energy.get(u).copied().unwrap_or(0.0)
-                + sheet.site_bend_energy.get(u).copied().unwrap_or(0.0)
-        })
-        .collect();
-    let e_cnt = crystal.edges.len();
-    let bond_tot_e: Vec<f64> = (0..e_cnt)
-        .map(|i| {
-            sheet.bond_gsv_energy.get(i).copied().unwrap_or(0.0)
-                + sheet.bond_bend_energy.get(i).copied().unwrap_or(0.0)
-        })
-        .collect();
-
-    let mut site_shear = vec![0.0_f64; n];
-    let mut site_sh_cnt = vec![0_usize; n];
-    for (i, &(u, v)) in crystal.edges.iter().enumerate() {
-        let sh = sheet.bond_shear_strain.get(i).copied().unwrap_or(0.0).abs();
-        if u < n { site_shear[u] += sh; site_sh_cnt[u] += 1; }
-        if v < n { site_shear[v] += sh; site_sh_cnt[v] += 1; }
-    }
-    for (s, c) in site_shear.iter_mut().zip(site_sh_cnt) {
-        if c > 0 { *s /= c as f64; }
-    }
-
-    let omega_span = sheet.vertex_omega.iter().map(|w| w.abs()).fold(0.0_f64, f64::max).max(0.25);
-    let (e_site_scale, _) = perceptual_heat_scale(&site_tot_e);
-    let (e_bond_scale, _) = perceptual_heat_scale(&bond_tot_e);
-    let (sh_site_scale, _) = perceptual_heat_scale(&site_shear);
-    let (sh_bond_scale, _) = perceptual_heat_scale(&sheet.bond_shear_strain);
-    let spec_vmax = spectral_scalar
-        .map(|(v, _)| v.iter().map(|x| x.abs()).fold(0.0_f64, f64::max).max(1e-6))
-        .unwrap_or(1.0);
+    // One source for every colour normalisation (shared with the 3D colorbar legend).
+    let SheetColorScales {
+        site_tot_e,
+        bond_tot_e,
+        site_shear,
+        omega_span,
+        e_site_scale,
+        e_bond_scale,
+        sh_site_scale,
+        sh_bond_scale,
+        spec_vmax,
+        z_half_span,
+    } = SheetColorScales::new(crystal, sheet, spectral_scalar);
 
     let site_vis_rgba = |u: usize, fallback: [f32; 4]| -> [f32; 4] {
         match (opts.color_mode, spectral_scalar) {
@@ -133,7 +113,6 @@ pub fn mesh_from_sheet3d_with_spectral(
 
     let orientable = !crystal.is_non_orientable;
     let alpha = if orientable { 0.88 } else { 0.74 };
-    let z_half_span = sheet.xyz.iter().map(|p| p[2].abs()).fold(0.0_f64, f64::max).max(0.22 * sheet.mean_bond_len);
     let smooth_normals = compute_smooth_vertex_normals(&pts, &sheet.faces);
 
     for (fi, face) in sheet.faces.iter().enumerate() {
@@ -222,7 +201,7 @@ pub fn mesh_from_sheet3d_with_spectral(
     }
 }
 
-fn renderable(crystal: &BuiltCrystal, sheet: &Sheet3DResult, opts: &Sheet3dViewOpts) -> bool {
+pub(super) fn renderable(crystal: &BuiltCrystal, sheet: &Sheet3DResult, opts: &Sheet3dViewOpts) -> bool {
     validate_sheet_crystal(crystal).is_ok()
         && sheet.has_finite_geometry()
         && sheet.xyz.len() == crystal.pos.len()

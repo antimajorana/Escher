@@ -9,7 +9,7 @@ use crate::backend::{
     AppBackend, CatalogueItemUi, SurfaceBuildParamsUi, SurfaceCellVerdictUi, SurfaceTargetUi,
     VerdictKindUi,
 };
-use crate::canvas2d::gauge_overlay::{CrystalOverlayData, color_sites_scalar};
+use crate::canvas2d::overlay_legend::spectral_overlay_data;
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::export_obj::export_surface_obj;
 use crate::live_ops;
@@ -211,12 +211,9 @@ impl SurfacesTabState {
             gpu.center[2],
         );
         view3d.set_mesh(gpu, caption);
+        view3d.set_legend(self.elastic.color_legend(spec_ref));
         if let Some((vals, div)) = spec_ref {
-            let ov = CrystalOverlayData {
-                site_rgba: Some(color_sites_scalar(vals, div)),
-                ..Default::default()
-            };
-            canvas.set_gauge_overlay(Some(ov));
+            canvas.set_gauge_overlay(Some(spectral_overlay_data(vals, div)));
         } else {
             canvas.set_gauge_overlay(None);
         }

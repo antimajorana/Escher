@@ -1,17 +1,22 @@
 use std::path::Path;
 
-use crate::export::{export_scene_full, export_scene_with_overlays};
+use crate::export::{ExportLegend, export_scene_full, export_scene_layers};
 pub use crate::scene2d::Scene2D;
 use crate::scene2d::{ScenePrimitives, compile_scene};
 use crate::theme::ThemeTokens;
 
 pub mod circuit;
+mod gallery_paint;
 mod cuts;
 mod draw_helpers;
 pub mod gauge_overlay;
+pub mod overlay_legend;
+pub mod overlay_scales;
 mod hit;
 mod input;
 mod render;
+#[cfg(test)]
+mod gallery_overlay_tests;
 #[cfg(test)]
 mod tests;
 
@@ -69,6 +74,8 @@ pub struct Canvas2D {
     pub(super) kinematic_overlay: CanvasKinematicOverlay,
     pub(super) circuit_overlay: Option<CanvasCircuitOverlay>,
     pub(super) gauge_overlay: Option<CrystalOverlayData>,
+    /// Gallery symmetry / Voronoi overlay: `under` merged into `compiled`, `over` painted and exported last.
+    pub(super) gallery_overlay: Option<crate::scene2d::overlays::GalleryOverlay>,
     pub(super) export_title: Option<String>,
 }
 
@@ -91,6 +98,7 @@ impl Canvas2D {
             kinematic_overlay: CanvasKinematicOverlay::default(),
             circuit_overlay: None,
             gauge_overlay: None,
+            gallery_overlay: None,
             export_title: None,
         }
     }
@@ -105,6 +113,7 @@ impl Canvas2D {
         self.kinematic_overlay = CanvasKinematicOverlay::default();
         self.circuit_overlay = None;
         self.gauge_overlay = None;
+        self.gallery_overlay = None;
         self.export_title = export_title;
         self.compiled = compile_scene(&scene);
         self.scene = scene;
@@ -138,7 +147,7 @@ impl Canvas2D {
     }
 
     pub fn export_to_path(&self, path: &Path) -> Result<String, String> {
-        if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() {
+        if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() || self.gallery_overlay.is_some() {
             let mut prims = self.compiled.clone();
             if let Some(ov) = &self.gauge_overlay {
                 gauge_overlay::append_gauge_export_prims(&mut prims, ov);
@@ -146,7 +155,15 @@ impl Canvas2D {
             if let Some(circ) = &self.circuit_overlay {
                 circuit::append_circuit_export_prims(&mut prims, circ);
             }
-            export_scene_with_overlays(&prims, &self.export_markers, self.export_title.as_deref(), path)
+            let title = self.export_title.as_deref();
+            let legend = self.gauge_overlay.as_ref().and_then(ExportLegend::from_overlay);
+            // over layer as two layers so the rotation symbols sit on the mirror / glide lines (as on the canvas)
+            let tops: Vec<crate::scene2d::ScenePrimitives> = self.gallery_overlay.as_ref().map_or_else(Vec::new, |g| {
+                let lines = crate::scene2d::ScenePrimitives { lines: g.over.lines.clone(), bbox: g.over.bbox, ..Default::default() };
+                let symbols = crate::scene2d::ScenePrimitives { polygons: g.over.polygons.clone(), bbox: g.over.bbox, ..Default::default() };
+                vec![lines, symbols]
+            });
+            export_scene_layers(&prims, &tops, &self.export_markers, title, legend.as_ref(), path)
         } else {
             export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path)
         }
@@ -154,6 +171,39 @@ impl Canvas2D {
 
     pub(crate) fn set_circuit_overlay(&mut self, circuit: Option<CanvasCircuitOverlay>) {
         self.circuit_overlay = circuit;
+    }
+
+    /// Show the Gallery overlay (`None` clears it); the scene is recompiled with the Voronoi layer underneath.
+    pub(crate) fn set_gallery_overlay(&mut self, ov: Option<crate::scene2d::overlays::GalleryOverlay>) {
+        self.compiled = compile_scene(&self.scene);
+        if let Some(data) = &self.gauge_overlay {
+            gauge_overlay::apply_site_and_bond_colors(&mut self.compiled, data);
+        }
+        if let Some(g) = &ov {
+            let mut polys = g.under.polygons.clone();
+            polys.append(&mut self.compiled.polygons);
+            self.compiled.polygons = polys;
+            // the overlay window can reach past the drawn sites: fit (canvas and export) covers both
+            let (lo, hi) = self.compiled.bbox;
+            let mut corners = vec![lo, hi];
+            if !g.under.polygons.is_empty() {
+                corners.extend([g.under.bbox.0, g.under.bbox.1]);
+            }
+            if !g.over.polygons.is_empty() || !g.over.lines.is_empty() {
+                corners.extend([g.over.bbox.0, g.over.bbox.1]);
+            }
+            self.compiled.bbox = crate::scene2d::compute_bbox(corners.into_iter());
+            if self.auto_fit_pending {
+                let (bmin, bmax) = self.compiled.bbox;
+                self.world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
+            }
+        }
+        self.gallery_overlay = ov;
+    }
+
+    /// Why the Gallery overlay could not be built (if any), for the inspector.
+    pub(crate) fn gallery_overlay_note(&self) -> Option<&str> {
+        self.gallery_overlay.as_ref().and_then(|g| g.note.as_deref())
     }
 
     pub(crate) fn set_gauge_overlay(&mut self, ov: Option<CrystalOverlayData>) {

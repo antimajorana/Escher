@@ -9,6 +9,7 @@ use super::geom::{
     append_icosahedron, append_octahedron, blend_normal, compute_smooth_vertex_normals, cone_rgba,
     mean_chord_len, polygon_centroid_idx, push_wire, tint_towards, tri_normal,
 };
+use super::color_scales::{buckle_span, spectral_vmax};
 use super::sheet_colors::{diverging_rgba, height_rgba, sequential_heat_rgba, strain_rgba};
 use super::{GpuMeshData, Vertex3d, face_size_rgba, normalise};
 
@@ -89,12 +90,8 @@ pub fn elastic_surface_gpu_mesh(
         }
     }
 
-    let spec_vmax = spectral_scalar
-        .map(|(vals, _)| vals.iter().map(|v| v.abs()).fold(0.0_f64, f64::max).max(1e-6))
-        .unwrap_or(1.0);
-    let buckle_span = el_res
-        .map(|r| r.radial_buckling.iter().map(|v| v.abs()).fold(0.0_f64, f64::max).max(0.02))
-        .unwrap_or(0.05);
+    let spec_vmax = spectral_scalar.map_or(1.0, |(vals, _)| spectral_vmax(vals));
+    let buckle_span = buckle_span(el_res);
 
     let site_color_of = |u: usize, fallback: [f32; 4]| -> [f32; 4] {
         match (color_mode, el_res, spectral_scalar) {

@@ -8,8 +8,9 @@ use papertilling_core::types::{BuiltCrystal, Cell2D, Frame2D};
 use crate::canvas2d::Canvas2D;
 use crate::canvas2d::circuit::{CanvasCircuitOverlay, CircuitTargetMode, CircuitUiState};
 use crate::canvas2d::gauge_overlay::{
-    CrystalOverlayData, CrystalOverlayMode, SeamConnectionMark, color_sites_scalar,
+    CrystalOverlayData, CrystalOverlayMode, SeamConnectionMark,
 };
+use crate::canvas2d::overlay_legend::{seam_legend_chips, spectral_overlay_data};
 use crate::mesh3d::{Sheet3dColorMode, Sheet3dViewOpts};
 use crate::spectrum_ui::show_spectrum_panel;
 use crate::spectrum_worker::{SpectrumColorOverlay, SpectrumPanelState};
@@ -136,7 +137,7 @@ impl DefectInspectors {
             CrystalOverlayMode::Standard => None,
             CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge => {
                 let (vals, div) = self.spectrum.active_scalar_overlay()?;
-                Some(CrystalOverlayData { site_rgba: Some(color_sites_scalar(&vals, div)), ..Default::default() })
+                Some(spectral_overlay_data(&vals, div))
             }
             CrystalOverlayMode::SeamConnections => {
                 let mut seams = Vec::new();
@@ -156,10 +157,11 @@ impl DefectInspectors {
                         } else {
                             (false, String::from("wall"))
                         };
-                        seams.push(SeamConnectionMark { a: crystal.pos[u], b: crystal.pos[v], label: lbl, det_neg });
+                        seams.push(SeamConnectionMark { a: crystal.pos[u], b: crystal.pos[v], label: lbl, det_neg, has_ge: e.seam.is_some() });
                     }
                 }
-                Some(CrystalOverlayData { seams, ..Default::default() })
+                let chips = seam_legend_chips(&seams);
+                Some(CrystalOverlayData { seams, chips, ..Default::default() })
             }
             CrystalOverlayMode::GsvEnergyShear
             | CrystalOverlayMode::BondStretchStrain

@@ -9,9 +9,9 @@ use crate::plane::cell::{canon_bond, mat2_inv, mat2_vec};
 use crate::types::Cell2D;
 
 #[derive(Clone, Copy)]
-struct ClipVert {
-    pos: [f64; 2],
-    owner: Option<(usize, i32, i32)>,
+pub(crate) struct ClipVert {
+    pub(crate) pos: [f64; 2],
+    pub(crate) owner: Option<(usize, i32, i32)>,
 }
 
 fn lerp2(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
@@ -72,89 +72,112 @@ pub fn voronoi_bonds(
     a2: [f64; 2],
     tol: f64,
 ) -> Vec<(usize, usize, [i32; 2])> {
-    let n = frac_pts.len();
-    if n == 0 {
-        return Vec::new();
-    }
-    let Ok(rb) = ReducedBasis2D::reduce(a1, a2) else {
+    let Some(pc) = PeriodicVoronoi::build(frac_pts, a1, a2) else {
         return Vec::new();
     };
-    let (wrapped, floors) = rb.wrap_sites(frac_pts);
-    let cart_pts: Vec<[f64; 2]> = wrapped
-        .iter()
-        .map(|f| [f[0] * rb.b1[0] + f[1] * rb.b2[0], f[0] * rb.b1[1] + f[1] * rb.b2[1]])
-        .collect();
-    let (m1_max, m2_max, r_box) = rb.covering_shift_bounds();
-    let l0 = (rb.area() / (n as f64)).sqrt().max(1e-30);
-    let min_d2 = (1e-6 * l0).powi(2);
-    let clip_eps = 1e-11 * l0 * l0;
-    let ridge_tol = tol.abs() * l0;
-
-    type VoronoiNbr = (f64, [f64; 2], (usize, i32, i32));
+    let ridge_tol = tol.abs() * pc.l0;
     let mut bonds: BTreeSet<(usize, usize, i32, i32)> = BTreeSet::new();
-    let mut nbrs: Vec<VoronoiNbr> = Vec::new();
-
-    for (i, &pi) in cart_pts.iter().enumerate().take(n) {
-        nbrs.clear();
-        for (j, &pj) in cart_pts.iter().enumerate().take(n) {
-            for m1 in -m1_max..=m1_max {
-                for m2 in -m2_max..=m2_max {
-                    if j == i && m1 == 0 && m2 == 0 {
-                        continue;
-                    }
-                    let q = [
-                        pj[0] + f64::from(m1) * rb.b1[0] + f64::from(m2) * rb.b2[0],
-                        pj[1] + f64::from(m1) * rb.b1[1] + f64::from(m2) * rb.b2[1],
-                    ];
-                    let dx = q[0] - pi[0];
-                    let dy = q[1] - pi[1];
-                    let d2 = dx * dx + dy * dy;
-                    if d2 > min_d2 {
-                        nbrs.push((d2, q, (j, m1, m2)));
-                    }
-                }
-            }
-        }
-        nbrs.sort_by(|a, b| a.0.total_cmp(&b.0));
-
-        let mut poly = vec![
-            ClipVert { pos: [pi[0] - r_box, pi[1] - r_box], owner: None },
-            ClipVert { pos: [pi[0] + r_box, pi[1] - r_box], owner: None },
-            ClipVert { pos: [pi[0] + r_box, pi[1] + r_box], owner: None },
-            ClipVert { pos: [pi[0] - r_box, pi[1] + r_box], owner: None },
-        ];
-
-        for &(d2, q, owner) in &nbrs {
-            let r_max = poly
-                .iter()
-                .map(|v| (v.pos[0] - pi[0]).hypot(v.pos[1] - pi[1]))
-                .fold(0.0_f64, f64::max);
-            let cut_limit = 2.0 * r_max + 1e-5 * l0;
-            if d2 > cut_limit * cut_limit {
-                break;
-            }
-            let mid = [0.5 * (pi[0] + q[0]), 0.5 * (pi[1] + q[1])];
-            let normal = [q[0] - pi[0], q[1] - pi[1]];
-            poly = clip_half_plane(&poly, mid, normal, owner, clip_eps);
-            if poly.len() < 3 {
-                break;
-            }
-        }
-
+    for (i, poly) in pc.polys.iter().enumerate() {
         let plen = poly.len();
         for k in 0..plen {
             let Some((j, m1, m2)) = poly[k].owner else { continue };
             let next_pos = poly[(k + 1) % plen].pos;
             let len = (next_pos[0] - poly[k].pos[0]).hypot(next_pos[1] - poly[k].pos[1]);
             if len > ridge_tol {
-                let n_orig = rb.map_shift_to_orig(floors[i], floors[j], [m1, m2]);
+                let n_orig = pc.rb.map_shift_to_orig(pc.floors[i], pc.floors[j], [m1, m2]);
                 let cb = canon_bond(i, j, n_orig[0], n_orig[1], 0);
                 bonds.insert((cb.i, cb.j, cb.n1, cb.n2));
             }
         }
     }
-
     bonds.into_iter().map(|(i, j, n1, n2)| (i, j, [n1, n2])).collect()
+}
+
+/// Per-site clipped Voronoi polygons in the reduced, floor-wrapped Cartesian frame (shared by
+/// `voronoi_bonds` and `voronoi_cells`).
+pub(crate) struct PeriodicVoronoi {
+    pub(crate) rb: ReducedBasis2D,
+    pub(crate) floors: Vec<[i32; 2]>,
+    /// Wrapped Cartesian site positions (`polys[i]` surrounds `cart_pts[i]`).
+    pub(crate) cart_pts: Vec<[f64; 2]>,
+    /// Characteristic spacing `sqrt(area / n)`.
+    pub(crate) l0: f64,
+    /// Counter-clockwise clipped polygon of each site; `owner` names the neighbour across the edge
+    /// starting at that vertex.
+    pub(crate) polys: Vec<Vec<ClipVert>>,
+}
+
+impl PeriodicVoronoi {
+    pub(crate) fn build(frac_pts: &[[f64; 2]], a1: [f64; 2], a2: [f64; 2]) -> Option<Self> {
+        let n = frac_pts.len();
+        if n == 0 {
+            return None;
+        }
+        let rb = ReducedBasis2D::reduce(a1, a2).ok()?;
+        let (wrapped, floors) = rb.wrap_sites(frac_pts);
+        let cart_pts: Vec<[f64; 2]> = wrapped
+            .iter()
+            .map(|f| [f[0] * rb.b1[0] + f[1] * rb.b2[0], f[0] * rb.b1[1] + f[1] * rb.b2[1]])
+            .collect();
+        let (m1_max, m2_max, r_box) = rb.covering_shift_bounds();
+        let l0 = (rb.area() / (n as f64)).sqrt().max(1e-30);
+        let min_d2 = (1e-6 * l0).powi(2);
+        let clip_eps = 1e-11 * l0 * l0;
+
+        type VoronoiNbr = (f64, [f64; 2], (usize, i32, i32));
+        let mut polys: Vec<Vec<ClipVert>> = Vec::with_capacity(n);
+        let mut nbrs: Vec<VoronoiNbr> = Vec::new();
+
+        for (i, &pi) in cart_pts.iter().enumerate().take(n) {
+            nbrs.clear();
+            for (j, &pj) in cart_pts.iter().enumerate().take(n) {
+                for m1 in -m1_max..=m1_max {
+                    for m2 in -m2_max..=m2_max {
+                        if j == i && m1 == 0 && m2 == 0 {
+                            continue;
+                        }
+                        let q = [
+                            pj[0] + f64::from(m1) * rb.b1[0] + f64::from(m2) * rb.b2[0],
+                            pj[1] + f64::from(m1) * rb.b1[1] + f64::from(m2) * rb.b2[1],
+                        ];
+                        let dx = q[0] - pi[0];
+                        let dy = q[1] - pi[1];
+                        let d2 = dx * dx + dy * dy;
+                        if d2 > min_d2 {
+                            nbrs.push((d2, q, (j, m1, m2)));
+                        }
+                    }
+                }
+            }
+            nbrs.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+            let mut poly = vec![
+                ClipVert { pos: [pi[0] - r_box, pi[1] - r_box], owner: None },
+                ClipVert { pos: [pi[0] + r_box, pi[1] - r_box], owner: None },
+                ClipVert { pos: [pi[0] + r_box, pi[1] + r_box], owner: None },
+                ClipVert { pos: [pi[0] - r_box, pi[1] + r_box], owner: None },
+            ];
+
+            for &(d2, q, owner) in &nbrs {
+                let r_max = poly
+                    .iter()
+                    .map(|v| (v.pos[0] - pi[0]).hypot(v.pos[1] - pi[1]))
+                    .fold(0.0_f64, f64::max);
+                let cut_limit = 2.0 * r_max + 1e-5 * l0;
+                if d2 > cut_limit * cut_limit {
+                    break;
+                }
+                let mid = [0.5 * (pi[0] + q[0]), 0.5 * (pi[1] + q[1])];
+                let normal = [q[0] - pi[0], q[1] - pi[1]];
+                poly = clip_half_plane(&poly, mid, normal, owner, clip_eps);
+                if poly.len() < 3 {
+                    break;
+                }
+            }
+            polys.push(poly);
+        }
+        Some(Self { rb, floors, cart_pts, l0, polys })
+    }
 }
 
 /// Extract periodic Voronoi/Delaunay bonds directly from fractionalized `Cell2D` basis positions.

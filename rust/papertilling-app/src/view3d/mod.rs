@@ -10,12 +10,17 @@ mod camera;
 mod gpu;
 #[cfg(test)]
 mod interaction_tests;
+mod legend;
+#[cfg(test)]
+mod legend_tests;
 
 pub use camera::DIST_DEFAULT;
 #[cfg(test)]
 use camera::{DIST_MAX, DIST_MIN};
 pub use gpu::{DEPTH_BITS, GpuFrameCounters, init_view3d_resources};
 use gpu::View3dCallback;
+pub use legend::{ColorLegend3d, Legend3dMap};
+use legend::{draw_legend_3d, legend_rect_3d, zoom_hud_rect_3d};
 
 pub struct View3dState {
     pub yaw: f32,
@@ -27,6 +32,10 @@ pub struct View3dState {
     mesh_generation: u64,
     mesh_data: Arc<GpuMeshData>,
     overlay_caption: String,
+    legend: Option<ColorLegend3d>,
+    /// `(viewport, zoom HUD, legend)` rects of the last `show` (tests only).
+    #[cfg(test)]
+    pub(crate) last_layout: Option<(egui::Rect, Option<egui::Rect>, Option<egui::Rect>)>,
 }
 
 impl Default for View3dState {
@@ -40,15 +49,30 @@ impl Default for View3dState {
             mesh_generation: 1,
             mesh_data: Arc::new(GpuMeshData::default()),
             overlay_caption: String::new(),
+            legend: None,
+            #[cfg(test)]
+            last_layout: None,
         }
     }
 }
 
 impl View3dState {
+    /// Replace the mesh and caption; clears the colour legend (a tab that colours by a scalar sets it again with
+    /// [`Self::set_legend`] right after, so no other tab's legend outlives its mesh).
     pub fn set_mesh(&mut self, mesh: GpuMeshData, caption: impl Into<String>) {
         self.mesh_generation = self.mesh_generation.wrapping_add(1);
         self.mesh_data = Arc::new(mesh);
         self.overlay_caption = caption.into();
+        self.legend = None;
+    }
+
+    /// Colorbar of the current scalar colour mode (`None` for categorical colouring such as face ring size).
+    pub fn set_legend(&mut self, legend: Option<ColorLegend3d>) {
+        self.legend = legend;
+    }
+
+    pub fn legend(&self) -> Option<&ColorLegend3d> {
+        self.legend.as_ref()
     }
 
     pub fn mesh_generation(&self) -> u64 {
@@ -75,11 +99,9 @@ impl View3dState {
     pub fn show(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         let available = ui.available_size().max(egui::vec2(64.0, 64.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
-        let has_hud = rect.width() >= 190.0 && rect.height() >= 80.0;
-        let hud_rect = egui::Rect::from_min_max(
-            rect.right_bottom() - egui::vec2(164.0, 30.0),
-            rect.right_bottom() - egui::vec2(6.0, 6.0),
-        );
+        let hud_opt = zoom_hud_rect_3d(rect);
+        let has_hud = hud_opt.is_some();
+        let hud_rect = hud_opt.unwrap_or(egui::Rect::NOTHING);
         self.handle_camera_input(ui, rect, &response, has_hud, hud_rect);
 
         let painter = ui.painter_at(rect);
@@ -127,6 +149,14 @@ impl View3dState {
                 egui::FontId::proportional(11.0),
                 tokens.text_muted,
             );
+        }
+        let legend_rect = self.legend().filter(|_| self.has_geometry()).and_then(|_| legend_rect_3d(rect));
+        if let (Some(leg), Some(box_r)) = (self.legend(), legend_rect) {
+            draw_legend_3d(&painter, box_r, leg, tokens);
+        }
+        #[cfg(test)]
+        {
+            self.last_layout = Some((rect, hud_opt, legend_rect));
         }
         painter.rect_stroke(
             rect,

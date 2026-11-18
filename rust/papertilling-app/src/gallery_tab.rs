@@ -54,6 +54,8 @@ pub struct GalleryTabState {
     pending_moves: Vec<(String, f64)>,
     pub repeat: i32,
     pub show_unit_cell: bool,
+    /// View only: ITA symmetry elements / Voronoi cells over the drawn patch.
+    pub overlays: crate::scene2d::overlays::GalleryOverlayToggles,
     pub readout: DSymbolReadoutUi,
     /// `base_item` at the slider values (what the other tabs use).
     active_item: CatalogueItemUi,
@@ -113,6 +115,7 @@ impl GalleryTabState {
             pending_moves: Vec::new(),
             repeat: 3,
             show_unit_cell: true,
+            overlays: Default::default(),
             readout: t.readout,
             active_item: item.clone(),
             cell: t.cell,
@@ -344,11 +347,24 @@ impl GalleryTabState {
 
     fn draw_cell(&self, cell: Cell2D, canvas: &mut Canvas2D, reset_view: bool) {
         let title = format!("{} ({})", self.active_item.display_with_orig(), self.active_item.group);
+        let overlay = self.overlays.any().then(|| {
+            let it = &self.active_item;
+            crate::scene2d::overlays::build_gallery_overlay(&cell, &it.group, it.frame, self.repeat, self.overlays)
+        });
         canvas.set_scene_with_title(
             Scene2D::PeriodicCell { cell, repeat: self.repeat, show_unit_cell: self.show_unit_cell },
             Some(title),
             reset_view,
         );
+        if overlay.is_some() {
+            canvas.set_gallery_overlay(overlay);
+        }
+    }
+
+    /// View only: which scientific overlays are drawn (symmetry elements, Voronoi cells).
+    pub fn set_overlays(&mut self, overlays: crate::scene2d::overlays::GalleryOverlayToggles, canvas: &mut Canvas2D) {
+        self.overlays = overlays;
+        self.sync_scene(canvas, false);
     }
 
     /// Draw the current lattice again from the stored item and the slider values (e.g. back on the Gallery tab).

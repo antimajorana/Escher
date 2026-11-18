@@ -34,6 +34,18 @@ impl GalleryTabState {
         if ui.checkbox(&mut show, "Show unit cell (a1, a2)").changed() {
             self.set_show_unit_cell(show, canvas);
         }
+        let mut ov = self.overlays;
+        let sym = ui
+            .checkbox(&mut ov.symmetry, "ITA symmetry (m / g / Cn)")
+            .on_hover_text("Mirrors (solid red), glides (dashed blue, chevrons along the glide), 2/3/4/6-fold centres \
+                            (lens / triangle / square / hexagon); hover a centre for its Wyckoff position");
+        let vor = ui.checkbox(&mut ov.voronoi, "Voronoi cells").on_hover_text("Voronoi cell of every site (the Delaunay dual)");
+        if sym.changed() || vor.changed() {
+            self.set_overlays(ov, canvas);
+        }
+        if let Some(note) = canvas.gallery_overlay_note() {
+            ui.colored_label(tokens.status_warn, note);
+        }
 
         ui.separator();
         self.readout_lines(ui, tokens);

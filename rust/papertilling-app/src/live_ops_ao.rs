@@ -7,10 +7,8 @@ use papertilling_core::defect::gsv_elastic::{Elastic2DResult, gsv_diagnostics_2d
 use papertilling_core::plane::draw::relax_preview;
 use papertilling_core::types::{BuiltCrystal, Cell2D, Frame2D};
 
-use crate::canvas2d::gauge_overlay::{
-    CrystalOverlayData, CrystalOverlayMode, OverlayColorbar, PlaquetteBadge,
-    color_diverging_strain, color_heat_perceptual, perceptual_heat_scale,
-};
+use crate::canvas2d::gauge_overlay::{CrystalOverlayData, CrystalOverlayMode, PlaquetteBadge, perceptual_heat_scale};
+use crate::canvas2d::overlay_scales::{bond_strain_overlay, perceptual_colorbar};
 use crate::mesh3d::sheet_colors::{rgba_u8, sequential_heat_rgba};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -102,68 +100,28 @@ pub fn build_ao_crystal_overlay(
     match mode {
         CrystalOverlayMode::GsvEnergyShear => {
             let diag = gsv_diagnostics_2d(crystal, &crystal.pos).ok()?;
-            let (site_cols, _smax) = color_heat_perceptual(&diag.site_gsv_energy);
+            let (site_cols, legend) = perceptual_colorbar(&diag.site_gsv_energy, "Site GSV E (√; bonds own scale)");
             let (bond_cols, _bmax) = heat_bonds(&diag.bond_gsv_energy);
-            let vmax = diag.site_gsv_energy.iter().copied().fold(0.0_f64, f64::max);
             Some(CrystalOverlayData {
                 site_rgba: Some(site_cols),
                 bond_rgba: Some(bond_cols),
-                legend: Some(OverlayColorbar {
-                    title: String::from("GSV E (stretch+shear, √-scale)"),
-                    min_val: 0.0,
-                    max_val: vmax,
-                    diverging: false,
-                    sqrt_scale: true,
-                }),
+                legend: Some(legend),
                 note_suffix: Some(format!("AO E_tot={:.4} (E_shear={:.4})", diag.total_energy, diag.shear_energy)),
                 ..Default::default()
             })
         }
         CrystalOverlayMode::BondStretchStrain => {
             let diag = gsv_diagnostics_2d(crystal, &crystal.pos).ok()?;
-            let (bond_cols, vmax) = color_diverging_strain(&diag.bond_strain, 1e-3);
-            let mut site_eps = vec![0.0_f64; crystal.pos.len()];
-            let mut site_cnt = vec![0_usize; crystal.pos.len()];
-            for (idx, &(u, v)) in crystal.edges.iter().enumerate() {
-                let e = diag.bond_strain.get(idx).copied().unwrap_or(0.0);
-                if u < site_eps.len() { site_eps[u] += e; site_cnt[u] += 1; }
-                if v < site_eps.len() { site_eps[v] += e; site_cnt[v] += 1; }
-            }
-            for (s, c) in site_eps.iter_mut().zip(site_cnt) {
-                if c > 0 { *s /= c as f64; }
-            }
-            let site_cols: Vec<[u8; 4]> = site_eps
-                .iter()
-                .map(|&v| rgba_u8(crate::mesh3d::sheet_colors::diverging_rgba(v, vmax, 1.0)))
-                .collect();
-            Some(CrystalOverlayData {
-                site_rgba: Some(site_cols),
-                bond_rgba: Some(bond_cols),
-                legend: Some(OverlayColorbar {
-                    title: String::from("Bond stretch ε=(l-l₀)/l₀"),
-                    min_val: -vmax,
-                    max_val: vmax,
-                    diverging: true,
-                    sqrt_scale: false,
-                }),
-                ..Default::default()
-            })
+            Some(bond_strain_overlay(crystal.pos.len(), &crystal.edges, &diag.bond_strain))
         }
         CrystalOverlayMode::VertexAngleShear => {
             let diag = gsv_diagnostics_2d(crystal, &crystal.pos).ok()?;
-            let (site_cols, _smax) = color_heat_perceptual(&diag.site_shear);
+            let (site_cols, legend) = perceptual_colorbar(&diag.site_shear, "Site shear E (√; bonds: |γ|)");
             let (bond_cols, _bmax) = heat_bonds(&diag.bond_shear_strain);
-            let vmax = diag.site_shear.iter().copied().fold(0.0_f64, f64::max);
             Some(CrystalOverlayData {
                 site_rgba: Some(site_cols),
                 bond_rgba: Some(bond_cols),
-                legend: Some(OverlayColorbar {
-                    title: String::from("Vertex shear energy (√-scale)"),
-                    min_val: 0.0,
-                    max_val: vmax,
-                    diverging: false,
-                    sqrt_scale: true,
-                }),
+                legend: Some(legend),
                 ..Default::default()
             })
         }
@@ -213,7 +171,8 @@ pub fn build_ao_crystal_overlay(
                     improper: p.det_sign < 0,
                 });
             }
-            Some(CrystalOverlayData { badges, ..Default::default() })
+            let chips = crate::canvas2d::overlay_legend::flux_legend_chips(&badges);
+            Some(CrystalOverlayData { badges, chips, ..Default::default() })
         }
         _ => None,
     }

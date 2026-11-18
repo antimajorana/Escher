@@ -124,6 +124,12 @@ impl SurfaceElasticState {
         (gpu, suffix)
     }
 
+    /// 3D colorbar of the colouring `build_gpu_mesh` applies (same relaxed result, mode and spectral values).
+    pub fn color_legend(&self, spectral_scalar: Option<(&[f64], bool)>) -> Option<crate::view3d::ColorLegend3d> {
+        let use_el = if self.shape_mode == SurfaceShapeMode::ElasticFvK { self.last_result.as_ref() } else { None };
+        crate::mesh3d::color_scales::surface_color_legend(use_el, self.color_mode, spectral_scalar)
+    }
+
     /// Render the `3D Shape`, `kappa_b`, colouring, and FvK readout controls inside `Surfaces`.
     /// Returns `(need_solve, need_resync_view3d)`.
     pub fn show_controls(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) -> (bool, bool) {

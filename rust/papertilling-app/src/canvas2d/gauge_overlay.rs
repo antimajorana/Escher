@@ -1,6 +1,9 @@
 //! 2D Ariza-Ortiz discrete gauge & metric elasticity overlays (GSV shear/energy,
 //! bond stretch, vertex shear, plaquette flux `R_f`/`alpha_f`/Wyckoff, Volterra seams, and spectral coloring).
 
+use crate::canvas2d::overlay_legend::{
+    LegendChip, badge_category, colorbar_rgba, draw_categorical_legend, overlay_legend_rect, seam_category,
+};
 use crate::canvas2d::{Canvas2D, draw_dashed_egui};
 use crate::mesh3d::sheet_colors::{diverging_rgba, rgba_u8, sequential_heat_rgba, strain_rgba};
 use crate::scene2d::{CirclePrim, LinePrim, ScenePrimitives, TextPrim};
@@ -59,6 +62,8 @@ pub struct SeamConnectionMark {
     pub b: [f64; 2],
     pub label: String,
     pub det_neg: bool,
+    /// The bond carries a seam group element g_e (false: a wall crossing without one).
+    pub has_ge: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -68,6 +73,9 @@ pub struct OverlayColorbar {
     pub max_val: f64,
     pub diverging: bool,
     pub sqrt_scale: bool,
+    /// Bar coloured with the bond-stretch map `strain_rgba` (saturating at its argument ±0.08) over
+    /// `[min_val, max_val]` instead of `diverging_rgba` / `sequential_heat_rgba`.
+    pub strain_map: bool,
 }
 
 /// Optional per-site, per-bond, plaquette-flux, seam, and colorbar overlays on 2D crystals + SVG/PNG.
@@ -78,6 +86,8 @@ pub struct CrystalOverlayData {
     pub badges: Vec<PlaquetteBadge>,
     pub seams: Vec<SeamConnectionMark>,
     pub legend: Option<OverlayColorbar>,
+    /// Categorical legend (one chip per painted badge / seam category); drawn when `legend` is `None`.
+    pub chips: Vec<LegendChip>,
     pub note_suffix: Option<String>,
 }
 
@@ -184,7 +194,7 @@ pub(crate) fn apply_site_and_bond_colors(prims: &mut ScenePrimitives, ov: &Cryst
 /// Append seams and plaquette flux badges once during SVG/PNG export (never called on live `self.compiled`).
 pub(crate) fn append_gauge_export_prims(prims: &mut ScenePrimitives, ov: &CrystalOverlayData) {
     for s in &ov.seams {
-        let col = if s.det_neg { [186, 45, 118, 240] } else { [0, 131, 143, 235] };
+        let col = seam_category(s).export_rgba();
         prims.lines.push(LinePrim {
             a: [s.a[0] as f32, s.a[1] as f32],
             b: [s.b[0] as f32, s.b[1] as f32],
@@ -203,13 +213,7 @@ pub(crate) fn append_gauge_export_prims(prims: &mut ScenePrimitives, ov: &Crysta
         }
     }
     for b in &ov.badges {
-        let col = if b.improper {
-            [142, 36, 170, 235]
-        } else if b.is_rotation {
-            [198, 40, 40, 235]
-        } else {
-            [230, 81, 0, 235]
-        };
+        let col = badge_category(b).export_rgba();
         let p = [b.center[0] as f32, b.center[1] as f32];
         prims.circles.push(CirclePrim {
             center: p,
@@ -228,6 +232,15 @@ pub(crate) fn append_gauge_export_prims(prims: &mut ScenePrimitives, ov: &Crysta
     }
 }
 
+/// `box_r` unchanged if it misses `inset`, else lifted to end 8 px above it (`None` if it no longer fits).
+pub(crate) fn legend_clear_of(box_r: egui::Rect, inset: egui::Rect, rect: egui::Rect) -> Option<egui::Rect> {
+    if !box_r.intersects(inset) {
+        return Some(box_r);
+    }
+    let lifted = box_r.translate(egui::vec2(0.0, inset.top() - 8.0 - box_r.bottom()));
+    (lifted.top() >= rect.top() + 60.0).then_some(lifted)
+}
+
 pub(crate) fn draw_gauge_overlays(
     painter: &egui::Painter,
     canvas: &Canvas2D,
@@ -237,11 +250,7 @@ pub(crate) fn draw_gauge_overlays(
 ) {
     let to_sc = |p: [f64; 2]| canvas.world_to_screen_at(rect, [p[0] as f32, p[1] as f32]);
     for s in &ov.seams {
-        let col = if s.det_neg {
-            if tokens.is_light { egui::Color32::from_rgb(186, 45, 118) } else { egui::Color32::from_rgb(244, 114, 182) }
-        } else {
-            tokens.cut_insertion
-        };
+        let col = seam_category(s).live_color(tokens);
         let (p0, p1) = (to_sc(s.a), to_sc(s.b));
         draw_dashed_egui(painter, p0, p1, egui::Stroke::new(2.8, col), 5.0, 3.0);
         if !s.label.is_empty() {
@@ -250,24 +259,31 @@ pub(crate) fn draw_gauge_overlays(
         }
     }
     for b in &ov.badges {
-        let col = if b.improper {
-            tokens.cut_ray_line
-        } else if b.is_rotation {
-            tokens.status_err
-        } else {
-            tokens.status_warn
-        };
+        let col = badge_category(b).live_color(tokens);
         let sp = to_sc(b.center);
         painter.circle_filled(sp, 11.5, egui::Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 38));
         painter.circle_stroke(sp, 11.5, egui::Stroke::new(1.8, col));
         painter.text(sp + egui::vec2(0.0, -14.5), egui::Align2::CENTER_CENTER, &b.label, egui::FontId::proportional(10.0), col);
     }
-    if let Some(leg) = &ov.legend
-        && let Some(box_r) = colorbar_legend_rect(rect)
+    let Some(mut box_r) = overlay_legend_rect(rect, ov) else { return };
+    // the circuit reference inset is painted later at the bottom right: lift the legend above it if they meet
+    if canvas.circuit_overlay.as_ref().is_some_and(|c| c.result.ref_path.len() >= 2)
+        && let Some(inset) = super::circuit::reference_inset_rect(rect)
     {
-        draw_colorbar_legend(painter, box_r, leg, tokens);
+        let Some(r) = legend_clear_of(box_r, inset, rect) else { return };
+        box_r = r;
+    }
+    #[cfg(test)]
+    painter.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(LEGEND_RECT_TEST_ID), (rect, box_r)));
+    match &ov.legend {
+        Some(leg) => draw_colorbar_legend(painter, box_r, leg, tokens),
+        None => draw_categorical_legend(painter, box_r, &ov.chips, tokens),
     }
 }
+
+/// egui temp-data key of `(canvas rect, legend rect)` of the last drawn 2D legend (tests only).
+#[cfg(test)]
+pub(crate) const LEGEND_RECT_TEST_ID: &str = "papertilling.canvas2d.legend_rect";
 
 pub(crate) fn colorbar_legend_rect(rect: egui::Rect) -> Option<egui::Rect> {
     let stack_above_hud = rect.width() < 360.0;
@@ -304,12 +320,7 @@ fn draw_colorbar_legend(
     let steps = 24usize;
     let dx = bar.width() / (steps as f32);
     for i in 0..steps {
-        let t = (i as f64 + 0.5) / (steps as f64);
-        let c = if leg.diverging {
-            rgba_u8(diverging_rgba(2.0 * t - 1.0, 1.0, 1.0))
-        } else {
-            rgba_u8(sequential_heat_rgba(t, 1.0, 1.0))
-        };
+        let c = colorbar_rgba(leg, (i as f64 + 0.5) / (steps as f64));
         let seg = egui::Rect::from_min_max(
             egui::pos2(bar.left() + (i as f32) * dx, bar.top()),
             egui::pos2(bar.left() + ((i + 1) as f32) * dx + 0.5, bar.bottom()),

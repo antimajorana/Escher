@@ -2,7 +2,7 @@ use papertilling_core::types::{BuiltCrystal, Cell2D, SurfaceMesh};
 
 use crate::scene_crystal::compile_crystal_patch;
 
-mod overlays;
+pub(crate) mod overlays;
 pub(crate) mod periodic;
 mod surface_net;
 
@@ -61,7 +61,7 @@ pub struct TextPrim {
     pub size_px: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ScenePrimitives {
     pub polygons: Vec<PolyPrim>,
     pub lines: Vec<LinePrim>,

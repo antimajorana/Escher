@@ -285,12 +285,9 @@ impl DefectsTabState {
         } else {
             (&self.last_crystal, &self.last_sheet)
         };
-        let gpu = mesh_from_sheet3d_with_spectral(
-            c,
-            s,
-            &self.sheet_opts,
-            self.inspectors.spectral_3d_for(self.sheet_opts.color_mode),
-        );
+        let spectral = self.inspectors.spectral_3d_for(self.sheet_opts.color_mode);
+        let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, spectral);
+        let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, spectral);
         let mut cap = sheet3d_caption(&self.readout.title, s, &self.sheet_opts);
         if self.is_busy() {
             cap.push_str(" | previous result — stale");
@@ -298,6 +295,7 @@ impl DefectsTabState {
             cap.push_str(&format!(" | previous result — failed: {err}"));
         }
         view3d.set_mesh(gpu, cap);
+        view3d.set_legend(legend);
         self.view3d_dirty = false;
     }
 

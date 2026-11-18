@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 use crate::canvas2d::{CanvasMarker, MarkerKind, Scene2D};
 use crate::scene2d::{ScenePrimitives, compile_scene};
 
-#[path = "export_font.rs"]
+#[path = "../export_font.rs"]
 mod font;
-#[path = "export_raster.rs"]
+#[path = "../export_raster.rs"]
 mod raster;
+mod legend;
 
+pub use legend::ExportLegend;
 use raster::Raster;
 
 const SVG_SIZE: u32 = 960;
@@ -50,6 +52,29 @@ pub(crate) fn export_scene_with_overlays(
     title_override: Option<&str>,
     path: &Path,
 ) -> Result<String, String> {
+    export_prims(prims, &[], markers, title_override, None, path)
+}
+
+/// As [`export_scene_with_overlays`], with an optional legend box and `top` drawn over the base layer.
+pub(crate) fn export_scene_layers(
+    prims: &ScenePrimitives,
+    tops: &[ScenePrimitives],
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    legend: Option<&ExportLegend>,
+    path: &Path,
+) -> Result<String, String> {
+    export_prims(prims, tops, markers, title_override, legend, path)
+}
+
+fn export_prims(
+    prims: &ScenePrimitives,
+    tops: &[ScenePrimitives],
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    legend: Option<&ExportLegend>,
+    path: &Path,
+) -> Result<String, String> {
     let ext = path.extension().map(|s| s.to_string_lossy().to_ascii_lowercase());
     let (target, is_svg): (PathBuf, bool) = match ext.as_deref() {
         Some("svg") => (path.to_path_buf(), true),
@@ -59,17 +84,18 @@ pub(crate) fn export_scene_with_overlays(
     };
     let name = target.file_name().map_or_else(|| target.display().to_string(), |s| s.to_string_lossy().into_owned());
     if is_svg {
-        let svg = render_prims_svg(prims, markers, title_override, SVG_SIZE, SVG_SIZE);
+        let svg = svg_with_legend(prims, tops, markers, title_override, legend, SVG_SIZE, SVG_SIZE);
         std::fs::write(&target, svg).map_err(|e| format!("{}: {e}", target.display()))?;
         Ok(format!("Exported SVG ({name})"))
     } else {
-        let png_bytes = encode_prims_png(prims, markers, title_override, PNG_SIZE, PNG_SIZE)?;
+        let png_bytes = encode_layers_png(prims, tops, markers, title_override, legend, PNG_SIZE, PNG_SIZE)?;
         std::fs::write(&target, png_bytes).map_err(|e| format!("{}: {e}", target.display()))?;
         Ok(format!("Exported high-DPI PNG ({name})"))
     }
 }
 
-/// World -> picture map, the same fit as the canvas (title / note band on top).
+/// World -> picture map, the same fit as the canvas (title / note band on top, `bottom_pad` px below: 36, or
+/// the legend band when a legend is exported so the legend box never covers the picture).
 struct Transform {
     wc: [f32; 2],
     sc: [f32; 2],
@@ -77,14 +103,14 @@ struct Transform {
 }
 
 impl Transform {
-    fn new(prims: &ScenePrimitives, width: u32, height: u32) -> Self {
+    fn new(prims: &ScenePrimitives, width: u32, height: u32, bottom_pad: f32) -> Self {
         let (bmin, bmax) = prims.bbox;
         let wc = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
         let span_x = (bmax[0] - bmin[0]).max(0.5);
         let span_y = (bmax[1] - bmin[1]).max(0.5);
         let top_pad = if !prims.note.is_empty() { 76.0 } else if !prims.title.is_empty() { 48.0 } else { 36.0 };
         let avail_w = (width as f32 - 64.0).max(32.0);
-        let avail_h = (height as f32 - top_pad - 36.0).max(32.0);
+        let avail_h = (height as f32 - top_pad - bottom_pad).max(32.0);
         let scale = (avail_w / span_x).min(avail_h / span_y);
         Self { wc, sc: [width as f32 * 0.5, top_pad + avail_h * 0.5], scale }
     }
@@ -147,6 +173,7 @@ pub fn render_scene_svg_with_title(
     render_prims_svg(&compile_scene(scene), markers, title_override, width, height)
 }
 
+#[cfg(test)]
 pub(crate) fn render_prims_svg(
     base_prims: &ScenePrimitives,
     markers: &[CanvasMarker],
@@ -154,16 +181,200 @@ pub(crate) fn render_prims_svg(
     width: u32,
     height: u32,
 ) -> String {
+    svg_with_legend(base_prims, &[], markers, title_override, None, width, height)
+}
+
+#[cfg(test)]
+/// [`render_prims_svg`] with `legend` as a final `<g id="legend">` group, the picture fitted above it.
+pub(crate) fn render_prims_svg_with_legend(
+    base_prims: &ScenePrimitives,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    legend: &ExportLegend,
+    width: u32,
+    height: u32,
+) -> String {
+    svg_with_legend(base_prims, &[], markers, title_override, Some(legend), width, height)
+}
+
+fn svg_with_legend(
+    base_prims: &ScenePrimitives,
+    tops: &[ScenePrimitives],
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    legend: Option<&ExportLegend>,
+    width: u32,
+    height: u32,
+) -> String {
     let mut prims = base_prims.clone();
     if let Some(t) = title_override.filter(|t| !t.is_empty()) {
         prims.title = t.to_string();
     }
-    let tf = Transform::new(&prims, width, height);
+    let tf = Transform::new(&prims, width, height, legend::bottom_pad(legend, height));
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">\n<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>\n",
         hex_rgb(BACKGROUND)
     );
 
+    svg_layer(&mut out, &prims, &tf);
+    for t in tops {
+        svg_layer(&mut out, t, &tf);
+    }
+
+    for m in markers {
+        let Some([x, y]) = tf.map64(m.pos) else { continue };
+        let c = marker_colors(m.kind);
+        let col = hex_rgb([c[0], c[1], c[2], 255]);
+        let _ = writeln!(out, "<circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"13.5\" fill=\"{col}\" fill-opacity=\"0.27\"/>");
+        let _ = writeln!(out, "<circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"9.5\" fill=\"{col}\" stroke=\"#ffffff\" stroke-width=\"1.8\"/>");
+        let _ = writeln!(
+            out,
+            "<text x=\"{x:.2}\" y=\"{y:.2}\" text-anchor=\"middle\" dominant-baseline=\"central\" font-family=\"sans-serif\" font-size=\"10.5\" fill=\"#ffffff\">{}</text>",
+            m.index + 1
+        );
+        if !m.label.is_empty() {
+            let _ = writeln!(
+                out,
+                "<text x=\"{x:.2}\" y=\"{:.2}\" text-anchor=\"middle\" dominant-baseline=\"central\" font-family=\"sans-serif\" font-size=\"10.5\" fill=\"{col}\">{}</text>",
+                y - 15.5,
+                xml_escape(&m.label)
+            );
+        }
+    }
+
+    if !prims.title.is_empty() {
+        let _ = writeln!(
+            out,
+            "<text x=\"16\" y=\"22\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"bold\" fill=\"{}\">{}</text>",
+            hex_rgb(TITLE),
+            xml_escape(&prims.title)
+        );
+    }
+    if !prims.note.is_empty() {
+        let y_box = if prims.title.is_empty() { 10 } else { 32 };
+        let _ = writeln!(
+            out,
+            "<rect x=\"16\" y=\"{y_box}\" width=\"{}\" height=\"26\" rx=\"4\" fill=\"{}\" fill-opacity=\"{:.2}\" stroke=\"{}\" stroke-width=\"1\"/>\n<text x=\"26\" y=\"{}\" font-family=\"sans-serif\" font-size=\"12\" fill=\"{}\">{}</text>",
+            width.saturating_sub(32),
+            hex_rgb(NOTE_FILL),
+            opacity(NOTE_FILL[3]),
+            hex_rgb(NOTE_BORDER),
+            y_box + 17,
+            hex_rgb(NOTE_TEXT),
+            xml_escape(&prims.note)
+        );
+    }
+
+    if let Some(l) = legend {
+        legend::svg_legend(&mut out, l, height);
+    }
+    out.push_str("</svg>\n");
+    out
+}
+
+#[cfg(test)]
+pub fn encode_scene_png(scene: &Scene2D, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    encode_scene_png_with_markers(scene, &[], width, height)
+}
+
+/// PNG of the scene (`width` x `height`, RGBA 8-bit); `Err` for a size out of range (no panic, no huge buffer).
+#[cfg(test)]
+pub fn encode_scene_png_with_markers(scene: &Scene2D, markers: &[CanvasMarker], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    encode_scene_png_with_title(scene, markers, None, width, height)
+}
+
+#[cfg(test)]
+pub fn encode_scene_png_with_title(
+    scene: &Scene2D,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    encode_prims_png(&compile_scene(scene), markers, title_override, width, height)
+}
+
+#[cfg(test)]
+pub(crate) fn encode_prims_png(
+    base_prims: &ScenePrimitives,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    encode_prims_png_with_legend(base_prims, markers, title_override, None, width, height)
+}
+
+#[cfg(test)]
+/// [`encode_prims_png`] with an optional legend box drawn last (none: the same pixels as without).
+pub(crate) fn encode_prims_png_with_legend(
+    base_prims: &ScenePrimitives,
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    legend: Option<&ExportLegend>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    encode_layers_png(base_prims, &[], markers, title_override, legend, width, height)
+}
+
+/// PNG of `base_prims` with the `tops` layers drawn over it in order (e.g. Gallery symmetry elements over the sites).
+pub(crate) fn encode_layers_png(
+    base_prims: &ScenePrimitives,
+    tops: &[ScenePrimitives],
+    markers: &[CanvasMarker],
+    title_override: Option<&str>,
+    legend: Option<&ExportLegend>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    let mut img = Raster::new(width, height, BACKGROUND)?;
+    let mut prims = base_prims.clone();
+    if let Some(t) = title_override.filter(|t| !t.is_empty()) {
+        prims.title = t.to_string();
+    }
+    let tf = Transform::new(&prims, width, height, legend::bottom_pad(legend, height));
+
+    raster_layer(&mut img, &prims, &tf);
+    for t in tops {
+        raster_layer(&mut img, t, &tf);
+    }
+
+    for m in markers {
+        let Some(p) = tf.map64(m.pos) else { continue };
+        let c = marker_colors(m.kind);
+        img.circle(p, 13.5, [c[0], c[1], c[2], 68], ([0, 0, 0, 0], 0.0));
+        img.circle(p, 9.5, [c[0], c[1], c[2], 255], ([255, 255, 255, 255], 1.8));
+        img.text(p, &(m.index + 1).to_string(), 10.5, [255, 255, 255, 255], (0.5, 0.5));
+        img.text([p[0], p[1] - 15.5], &m.label, 10.5, [c[0], c[1], c[2], 255], (0.5, 0.5));
+    }
+
+    if !prims.title.is_empty() {
+        img.text([16.0, 10.0], &prims.title, 14.0, TITLE, (0.0, 0.0));
+    }
+    if !prims.note.is_empty() {
+        let y0 = if prims.title.is_empty() { 10 } else { 30 };
+        img.rect((16, y0, width as i32 - 16, y0 + 24), NOTE_FILL, NOTE_BORDER);
+        img.text([26.0, y0 as f32 + 12.0], &prims.note, 12.0, NOTE_TEXT, (0.0, 0.5));
+    }
+    if let Some(l) = legend {
+        legend::raster_legend(&mut img, l, height);
+    }
+
+    let mut buf = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut buf, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+        writer.write_image_data(&img.rgba).map_err(|e| e.to_string())?;
+        writer.finish().map_err(|e| e.to_string())?;
+    }
+    Ok(buf)
+}
+
+/// Polygons, lines, circles and labels of one layer, in that order.
+fn svg_layer(out: &mut String, prims: &ScenePrimitives, tf: &Transform) {
     for poly in &prims.polygons {
         let pts: Option<Vec<[f32; 2]>> = poly.points.iter().map(|&p| tf.map(p)).collect();
         let Some(pts) = pts.filter(|v| v.len() >= 3) else { continue };
@@ -226,91 +437,10 @@ pub(crate) fn render_prims_svg(
             xml_escape(&lbl.text)
         );
     }
-
-    for m in markers {
-        let Some([x, y]) = tf.map64(m.pos) else { continue };
-        let c = marker_colors(m.kind);
-        let col = hex_rgb([c[0], c[1], c[2], 255]);
-        let _ = writeln!(out, "<circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"13.5\" fill=\"{col}\" fill-opacity=\"0.27\"/>");
-        let _ = writeln!(out, "<circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"9.5\" fill=\"{col}\" stroke=\"#ffffff\" stroke-width=\"1.8\"/>");
-        let _ = writeln!(
-            out,
-            "<text x=\"{x:.2}\" y=\"{y:.2}\" text-anchor=\"middle\" dominant-baseline=\"central\" font-family=\"sans-serif\" font-size=\"10.5\" fill=\"#ffffff\">{}</text>",
-            m.index + 1
-        );
-        if !m.label.is_empty() {
-            let _ = writeln!(
-                out,
-                "<text x=\"{x:.2}\" y=\"{:.2}\" text-anchor=\"middle\" dominant-baseline=\"central\" font-family=\"sans-serif\" font-size=\"10.5\" fill=\"{col}\">{}</text>",
-                y - 15.5,
-                xml_escape(&m.label)
-            );
-        }
-    }
-
-    if !prims.title.is_empty() {
-        let _ = writeln!(
-            out,
-            "<text x=\"16\" y=\"22\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"bold\" fill=\"{}\">{}</text>",
-            hex_rgb(TITLE),
-            xml_escape(&prims.title)
-        );
-    }
-    if !prims.note.is_empty() {
-        let y_box = if prims.title.is_empty() { 10 } else { 32 };
-        let _ = writeln!(
-            out,
-            "<rect x=\"16\" y=\"{y_box}\" width=\"{}\" height=\"26\" rx=\"4\" fill=\"{}\" fill-opacity=\"{:.2}\" stroke=\"{}\" stroke-width=\"1\"/>\n<text x=\"26\" y=\"{}\" font-family=\"sans-serif\" font-size=\"12\" fill=\"{}\">{}</text>",
-            width.saturating_sub(32),
-            hex_rgb(NOTE_FILL),
-            opacity(NOTE_FILL[3]),
-            hex_rgb(NOTE_BORDER),
-            y_box + 17,
-            hex_rgb(NOTE_TEXT),
-            xml_escape(&prims.note)
-        );
-    }
-
-    out.push_str("</svg>\n");
-    out
 }
 
-#[cfg(test)]
-pub fn encode_scene_png(scene: &Scene2D, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    encode_scene_png_with_markers(scene, &[], width, height)
-}
-
-/// PNG of the scene (`width` x `height`, RGBA 8-bit); `Err` for a size out of range (no panic, no huge buffer).
-#[cfg(test)]
-pub fn encode_scene_png_with_markers(scene: &Scene2D, markers: &[CanvasMarker], width: u32, height: u32) -> Result<Vec<u8>, String> {
-    encode_scene_png_with_title(scene, markers, None, width, height)
-}
-
-#[cfg(test)]
-pub fn encode_scene_png_with_title(
-    scene: &Scene2D,
-    markers: &[CanvasMarker],
-    title_override: Option<&str>,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
-    encode_prims_png(&compile_scene(scene), markers, title_override, width, height)
-}
-
-pub(crate) fn encode_prims_png(
-    base_prims: &ScenePrimitives,
-    markers: &[CanvasMarker],
-    title_override: Option<&str>,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
-    let mut img = Raster::new(width, height, BACKGROUND)?;
-    let mut prims = base_prims.clone();
-    if let Some(t) = title_override.filter(|t| !t.is_empty()) {
-        prims.title = t.to_string();
-    }
-    let tf = Transform::new(&prims, width, height);
-
+/// Polygons, lines, circles and labels of one layer, in that order.
+fn raster_layer(img: &mut Raster, prims: &ScenePrimitives, tf: &Transform) {
     for poly in &prims.polygons {
         let pts: Option<Vec<[f32; 2]>> = poly.points.iter().map(|&p| tf.map(p)).collect();
         let Some(pts) = pts.filter(|v| v.len() >= 3) else { continue };
@@ -351,37 +481,8 @@ pub(crate) fn encode_prims_png(
             img.text(p, &lbl.text, lbl.size_px, lbl.color, (0.5, 0.5));
         }
     }
-
-    for m in markers {
-        let Some(p) = tf.map64(m.pos) else { continue };
-        let c = marker_colors(m.kind);
-        img.circle(p, 13.5, [c[0], c[1], c[2], 68], ([0, 0, 0, 0], 0.0));
-        img.circle(p, 9.5, [c[0], c[1], c[2], 255], ([255, 255, 255, 255], 1.8));
-        img.text(p, &(m.index + 1).to_string(), 10.5, [255, 255, 255, 255], (0.5, 0.5));
-        img.text([p[0], p[1] - 15.5], &m.label, 10.5, [c[0], c[1], c[2], 255], (0.5, 0.5));
-    }
-
-    if !prims.title.is_empty() {
-        img.text([16.0, 10.0], &prims.title, 14.0, TITLE, (0.0, 0.0));
-    }
-    if !prims.note.is_empty() {
-        let y0 = if prims.title.is_empty() { 10 } else { 30 };
-        img.rect((16, y0, width as i32 - 16, y0 + 24), NOTE_FILL, NOTE_BORDER);
-        img.text([26.0, y0 as f32 + 12.0], &prims.note, 12.0, NOTE_TEXT, (0.0, 0.5));
-    }
-
-    let mut buf = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut buf, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-        writer.write_image_data(&img.rgba).map_err(|e| e.to_string())?;
-        writer.finish().map_err(|e| e.to_string())?;
-    }
-    Ok(buf)
 }
 
 #[cfg(test)]
-#[path = "export_tests.rs"]
+#[path = "../export_tests.rs"]
 mod tests;

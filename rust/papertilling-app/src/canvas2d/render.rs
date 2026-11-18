@@ -140,6 +140,10 @@ impl Canvas2D {
             );
         }
 
+        if let Some(g) = &self.gallery_overlay {
+            self.paint_gallery_over(&painter, rect, g, tokens);
+        }
+
         if let Some(pw) = preview_world {
             let sp = to_screen([pw[0] as f32, pw[1] as f32]);
             painter.circle_filled(
