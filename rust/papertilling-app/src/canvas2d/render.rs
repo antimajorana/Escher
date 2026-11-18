@@ -1,5 +1,5 @@
 use crate::scene2d::{PolyPrim, Scene2D, TextPrim};
-use crate::theme::ThemeTokens;
+use crate::theme::{ThemeTokens, contrast};
 
 use super::hit::ZOOM_STEP_FACTOR;
 use super::{
@@ -7,7 +7,7 @@ use super::{
     gauge_overlay, marker_colors, to_color32,
 };
 
-fn point_in_polygon(pt: [f32; 2], poly: &[[f32; 2]]) -> bool {
+pub(crate) fn point_in_polygon(pt: [f32; 2], poly: &[[f32; 2]]) -> bool {
     if poly.len() < 3 {
         return false;
     }
@@ -28,15 +28,27 @@ fn point_in_polygon(pt: [f32; 2], poly: &[[f32; 2]]) -> bool {
     inside
 }
 
-/// Keep dark label ink when a label sits inside a translucent filled polygon (such as core
-/// `ring_tint_rgba` faces in `CrystalPatch`), while lifting labels over bare dark `Studio` canvas.
+/// Label ink on the 2D canvas. In `Studio`, the ring numbers of a `CrystalPatch` take near-black or white ink,
+/// whichever has the higher WCAG contrast against every face under the label composited on the canvas in draw
+/// order (the compiled dark ink reached only about 2:1 there). Every other label keeps its compiled colour over a
+/// filled polygon (fill alpha >= 80; e.g. the colour-coded gluing labels of a surface net) and is lifted by
+/// `remap_scene_ink` on the bare canvas; `Paper` draws the compiled colour, as the export does.
 pub(crate) fn scene_label_color(
     scene: &Scene2D,
     polygons: &[PolyPrim],
     lbl: &TextPrim,
     tokens: &ThemeTokens,
 ) -> egui::Color32 {
-    let over_filled_poly = (!polygons.is_empty() && matches!(scene, Scene2D::CrystalPatch { .. }))
+    let crystal = matches!(scene, Scene2D::CrystalPatch { .. });
+    if crystal && !tokens.is_light {
+        let c = tokens.bg_canvas_2d;
+        let mut under = [c.r(), c.g(), c.b()];
+        for p in polygons.iter().filter(|p| point_in_polygon(lbl.pos, &p.points)) {
+            under = contrast::over(p.fill, egui::Color32::from_rgb(under[0], under[1], under[2]));
+        }
+        return contrast::best_ink(under);
+    }
+    let over_filled_poly = (!polygons.is_empty() && crystal)
         || polygons
             .iter()
             .any(|p| p.fill[3] >= 80 && point_in_polygon(lbl.pos, &p.points));
@@ -66,7 +78,7 @@ impl Canvas2D {
         for poly in &self.compiled.polygons {
             if poly.points.len() >= 3 {
                 let pts: Vec<egui::Pos2> = poly.points.iter().copied().map(to_screen).collect();
-                let fill = to_color32(poly.fill);
+                let fill = tokens.scene_fill(poly.fill);
                 let stroke = poly
                     .stroke
                     .map_or(egui::Stroke::NONE, |(c, w)| egui::Stroke::new(w, tokens.remap_scene_ink(c)));

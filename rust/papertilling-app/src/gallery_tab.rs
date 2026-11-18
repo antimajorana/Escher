@@ -12,13 +12,19 @@ use crate::backend::{AppBackend, CatalogueItemUi, CatalogueRuleUi, DSymbolReadou
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::live_plane::{slider_params_ui, tune_item};
 
+pub(crate) mod browser;
 mod builder_ui;
+pub(crate) mod filter;
 mod inspector;
+mod retune_async;
 mod search_worker;
+pub(crate) mod thumb_cache;
 mod ui;
 
 #[cfg(test)]
 mod python_cases;
+#[cfg(test)]
+mod browser_tests;
 #[cfg(test)]
 mod tests;
 
@@ -41,9 +47,11 @@ pub struct GalleryTabState {
     /// Coupled sliders of `base_item` (`None`: no free parameter).
     slider_state: Option<SliderState>,
     sliders: Vec<SliderParamUi>,
-    /// Slider being dragged whose move is applied on release (slow families), and the cost of the last move.
-    pending_drag: Option<(String, f64)>,
+    /// Cost of the last parameter move; above `LIVE_MOVE_SECS` pointer moves run on `retune` (newest wins), with
+    /// the moves not yet applied queued in `pending_moves`.
     last_move_secs: f64,
+    retune: Option<retune_async::RetuneWorker>,
+    pending_moves: Vec<(String, f64)>,
     pub repeat: i32,
     pub show_unit_cell: bool,
     pub readout: DSymbolReadoutUi,
@@ -56,10 +64,16 @@ pub struct GalleryTabState {
     rename_focus_pending: bool,
     pub alias_note: Option<String>,
     pub custom_builder: builder_ui::CustomBuilderState,
+    /// Lattice browser: card / table view, search and facets, previews, and per-rule lists of all 17 groups.
+    pub(crate) view: browser::BrowserView,
+    pub(crate) filter: filter::BrowseFilter,
+    pub(crate) thumbs: thumb_cache::LatticeThumbCache,
+    rule_index: [Option<Vec<CatalogueItemUi>>; 3],
 }
 
 fn same_lattice(a: &CatalogueItemUi, b: &CatalogueItemUi) -> bool {
-    a.recipe == b.recipe && a.frame == b.frame && a.group == b.group && a.label == b.label && a.named_key == b.named_key
+    a.alias_key == b.alias_key
+        && a.recipe == b.recipe && a.frame == b.frame && a.group == b.group && a.label == b.label && a.named_key == b.named_key
 }
 
 impl GalleryTabState {
@@ -94,8 +108,9 @@ impl GalleryTabState {
             base_item: item.clone(),
             slider_state: None,
             sliders,
-            pending_drag: None,
             last_move_secs: 0.0,
+            retune: None,
+            pending_moves: Vec::new(),
             repeat: 3,
             show_unit_cell: true,
             readout: t.readout,
@@ -107,6 +122,10 @@ impl GalleryTabState {
             rename_focus_pending: false,
             alias_note: None,
             custom_builder: builder_ui::CustomBuilderState::new(),
+            view: browser::BrowserView::default(),
+            filter: filter::BrowseFilter::default(),
+            thumbs: thumb_cache::LatticeThumbCache::default(),
+            rule_index: [None, None, None],
         };
         st.activate_item(item, backend, canvas, true);
         st.revision = 0;
@@ -142,8 +161,14 @@ impl GalleryTabState {
         self.sliders.iter().map(|s| (s.name.clone(), s.value)).collect()
     }
 
+    #[cfg(test)]
     pub fn catalogue(&self) -> &[CatalogueItemUi] {
         &self.catalogue
+    }
+
+    /// The all-groups list of `rule` if already built by [`Self::rule_index`] (empty otherwise).
+    pub(crate) fn rule_index_ready(&self, rule: CatalogueRuleUi) -> &[CatalogueItemUi] {
+        self.rule_index[rule.index()].as_deref().unwrap_or_default()
     }
 
     pub fn select_group_by_symbol(&mut self, symbol: &str, backend: &AppBackend, canvas: &mut Canvas2D) {
@@ -201,7 +226,7 @@ impl GalleryTabState {
         }
         self.slider_state = SliderState::new(item.recipe.clone()).ok().filter(|s| !s.sliders.is_empty());
         self.base_item = item;
-        self.pending_drag = None;
+        self.cancel_retune();
         self.last_move_secs = 0.0;
         self.renaming = false;
         self.rename_focus_pending = false;
@@ -246,7 +271,7 @@ impl GalleryTabState {
     }
 
     fn refresh_aliases(&mut self, backend: &AppBackend, canvas: &mut Canvas2D) {
-        for it in &mut self.catalogue {
+        for it in self.catalogue.iter_mut().chain(self.rule_index.iter_mut().flatten().flatten()) {
             it.label = backend.resolve_alias(it);
         }
         let next_lbl = backend.resolve_alias(&self.base_item);
@@ -262,6 +287,7 @@ impl GalleryTabState {
     /// within half a step); returns the stored value, `None` for an unknown name or NaN.
     pub fn drag_param(&mut self, name: &str, raw: f64, canvas: &mut Canvas2D) -> Option<f64> {
         let t0 = std::time::Instant::now();
+        self.flush_pending_moves();
         let v = self.slider_state.as_mut()?.drag_to(name, raw).ok()?;
         self.retune(canvas, false);
         self.last_move_secs = t0.elapsed().as_secs_f64();
@@ -271,6 +297,7 @@ impl GalleryTabState {
     /// Set parameter `name` to `value` (clamped to its limits, snapped within half a step onto a special value),
     /// as `box.sliders[name].value = value` in Python; returns the stored value.
     pub fn set_param(&mut self, name: &str, value: f64, canvas: &mut Canvas2D) -> Option<f64> {
+        self.flush_pending_moves();
         let v = self.slider_state.as_mut()?.set_value(name, value).ok()?;
         self.retune(canvas, false);
         Some(v)
@@ -278,6 +305,7 @@ impl GalleryTabState {
 
     /// Every parameter back to its default value (the Reset button).
     pub fn reset_params(&mut self, canvas: &mut Canvas2D) {
+        self.flush_pending_moves();
         if let Some(st) = self.slider_state.as_mut()
             && st.reset().is_ok()
         {
@@ -287,8 +315,15 @@ impl GalleryTabState {
 
     /// Recompute sliders, cell, status and the exported item after a change of lattice or values.
     fn retune(&mut self, canvas: &mut Canvas2D, reset_view: bool) {
-        self.sliders = self.slider_state.as_ref().map(slider_params_ui).unwrap_or_default();
+        let sliders = self.slider_state.as_ref().map(slider_params_ui).unwrap_or_default();
         let t = tune_item(&self.base_item, self.slider_state.as_ref());
+        self.apply_tuned(sliders, t);
+        self.sync_scene(canvas, reset_view);
+    }
+
+    /// Store a retuned lattice (synchronous or background move); bumps the revision when the item changed.
+    fn apply_tuned(&mut self, sliders: Vec<SliderParamUi>, t: crate::live_plane::TunedLattice) {
+        self.sliders = sliders;
         let next = match t.item {
             Some(item) => item,
             // not writable as a recipe here: keep the last exportable item of this lattice
@@ -301,7 +336,6 @@ impl GalleryTabState {
         self.active_item = next;
         self.cell = t.cell;
         self.readout = t.readout;
-        self.sync_scene(canvas, reset_view);
     }
 
     fn sync_scene(&self, canvas: &mut Canvas2D, reset_view: bool) {

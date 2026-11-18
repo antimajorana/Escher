@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use papertilling_core::types::Cell2D;
 
+use crate::theme::tokens::{SCENE_UNIT_CELL_EDGE, SCENE_UNIT_CELL_FILL, SCENE_UNIT_CELL_LABEL};
+
 use super::{
     CirclePrim, LinePrim, PolyPrim, ScenePrimitives, TextPrim, bond_palette, compute_bbox,
     site_palette,
@@ -27,31 +29,22 @@ pub(super) fn compile_periodic_cell(cell: &Cell2D, repeat: i32, show_unit_cell: 
         let p01 = a2;
         polygons.push(PolyPrim {
             points: vec![p00, p10, p11, p01],
-            fill: [218, 234, 252, 95],
+            fill: SCENE_UNIT_CELL_FILL,
             stroke: None,
         });
         for (p, q) in [(p00, p10), (p10, p11), (p11, p01), (p01, p00)] {
             lines.push(LinePrim {
                 a: p,
                 b: q,
-                color: [32, 94, 176, 225],
+                color: SCENE_UNIT_CELL_EDGE,
                 width: 1.6,
                 dashed: true,
                 arrow_mid: false,
             });
         }
-        labels.push(TextPrim {
-            pos: [0.5 * a1[0], 0.5 * a1[1] - 0.08],
-            text: String::from("a1"),
-            color: [24, 72, 145, 245],
-            size_px: 12.0,
-        });
-        labels.push(TextPrim {
-            pos: [0.5 * a2[0] - 0.08, 0.5 * a2[1]],
-            text: String::from("a2"),
-            color: [24, 72, 145, 245],
-            size_px: 12.0,
-        });
+        for (text, pos) in [("a1", edge_label_pos(a1, a2)), ("a2", edge_label_pos(a2, a1))] {
+            labels.push(TextPrim { pos, text: String::from(text), color: SCENE_UNIT_CELL_LABEL, size_px: 12.0 });
+        }
     }
 
     let site_pos = |u: i32, v: i32, idx: usize| -> [f32; 2] {
@@ -119,4 +112,21 @@ pub(super) fn compile_periodic_cell(cell: &Cell2D, repeat: i32, show_unit_cell: 
         note: String::new(),
         bbox,
     }
+}
+
+/// Label position of the cell edge along `v` (from the origin): its midpoint pushed outward, i.e. along the edge
+/// normal pointing away from the other cell vector `w`, by 14 % of the shorter cell vector.
+pub(crate) fn edge_label_pos(v: [f32; 2], w: [f32; 2]) -> [f32; 2] {
+    let len_v = v[0].hypot(v[1]);
+    let len_w = w[0].hypot(w[1]);
+    let mid = [0.5 * v[0], 0.5 * v[1]];
+    if len_v < 1e-9 || !len_v.is_finite() {
+        return mid;
+    }
+    let mut n = [-v[1] / len_v, v[0] / len_v];
+    if n[0] * w[0] + n[1] * w[1] > 0.0 {
+        n = [-n[0], -n[1]];
+    }
+    let d = 0.14 * len_v.min(if len_w > 1e-9 { len_w } else { len_v });
+    [mid[0] + d * n[0], mid[1] + d * n[1]]
 }

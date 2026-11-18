@@ -101,14 +101,14 @@ impl GalleryTabState {
             ui.small("No free parameters: lattice is rigid inside its group (scale a only).");
             return;
         }
-        // Live update while dragging when a move is cheap; otherwise only on release (ipywidgets'
-        // continuous_update=False), so a 20-parameter lattice does not drag at a few frames per second.
+        // A cheap move is applied on the UI thread as the slider moves; a slow family (last move above
+        // LIVE_MOVE_SECS) sends each pointer move to the background worker, newest wins, and the slider shows the
+        // queued value until the result lands.
         let live = self.last_move_secs < LIVE_MOVE_SECS;
         // (name, value, from a pointer drag): drags go on the step grid, typed / keyboard values are set as given
         let mut moved: Option<(String, f64, bool)> = None;
-        let mut pending = self.pending_drag.clone();
         for s in self.sliders() {
-            let shown = pending.as_ref().filter(|(n, _)| *n == s.name).map_or(s.value, |p| p.1);
+            let shown = self.pending_value(&s.name).unwrap_or(s.value);
             let mut v = shown;
             ui.horizontal(|ui| {
                 ui.label(&s.name);
@@ -123,26 +123,25 @@ impl GalleryTabState {
                 );
                 let by_pointer = resp.dragged() || resp.drag_stopped();
                 if resp.changed() && v != shown {
-                    if resp.dragged() && !live {
-                        pending = Some((s.name.clone(), v));
-                    } else {
-                        moved = Some((s.name.clone(), v, by_pointer));
-                    }
-                }
-                if !resp.dragged() && pending.as_ref().is_some_and(|(n, _)| *n == s.name) {
-                    moved = pending.take().map(|(n, x)| (n, x, true));
+                    moved = Some((s.name.clone(), v, by_pointer));
                 }
             });
             draw_range_bar(ui, s, shown, tokens);
+        }
+        if self.retune_pending() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.small(format!("Retuning in the background (last move {:.2} s)…", self.last_move_secs));
+            });
         }
         ui.small(
             "Bars: red = forbidden (bonds cross, a bond through a site, sites coincide or another tiling); \
              ink = current value; grey = default; blue tick = special value where the group is larger.",
         );
-        self.pending_drag = pending;
         if let Some((name, v, by_pointer)) = moved {
-            self.pending_drag = None;
-            if by_pointer {
+            if by_pointer && !live {
+                self.drag_param_async(&name, v, ui.ctx());
+            } else if by_pointer {
                 self.drag_param(&name, v, canvas);
             } else {
                 self.set_param(&name, v, canvas);

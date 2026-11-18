@@ -9,7 +9,9 @@ const MAX_SMOKE_FRAMES: u32 = 1800;
 impl PapertillingApp {
     fn smoke_stage_waiting(&self) -> bool {
         match self.active_tab {
-            NavTab::Surfaces => self.surfaces.elastic.is_busy() || self.surfaces.spectrum.is_busy(),
+            NavTab::Surfaces => {
+                self.surfaces.is_building() || self.surfaces.elastic.is_busy() || self.surfaces.spectrum.is_busy()
+            }
             NavTab::Defects => {
                 self.defects.is_busy()
                     || self.defects.initializing

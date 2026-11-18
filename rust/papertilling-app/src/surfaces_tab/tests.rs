@@ -307,3 +307,69 @@ fn special_locus_cell_enables_non_orientable_and_rp2_surfaces_on_chiral_recipe()
     let (rp2, rp2_rep) = build_surface_mesh_auto(&tuned, SurfaceTargetUi::ProjectivePlane, CentreModeUi::Auto, 2).unwrap();
     assert!(rp2_rep.ok && !rp2.orientable);
 }
+
+#[test]
+fn background_custom_size_build_matches_the_synchronous_build_and_is_debounced() {
+    let backend = AppBackend::new();
+    let ctx = egui::Context::default();
+    let kagome = backend.find_named("kagome").unwrap().clone();
+    let (mut cv_a, mut cv_s) = (blank_canvas(), blank_canvas());
+    let (mut v_a, mut v_s) = (View3dState::default(), View3dState::default());
+    let mut asy = SurfacesTabState::new();
+    let mut syn = SurfacesTabState::new();
+    for st in [&mut asy, &mut syn] {
+        st.target = SurfaceTargetUi::Torus;
+        st.auto_size = false;
+    }
+    // a 4 x 3 torus of kagome: 3 sites x 12 cells = 36 vertices, 6 bonds x 12 = 72 edges
+    asy.params.h = 2;
+    asy.request_build(&kagome, &ctx);
+    asy.params.h = 4;
+    asy.params.k = 3;
+    asy.request_build(&kagome, &ctx);
+    assert!(asy.is_building());
+    let g0 = v_a.mesh_generation();
+    assert!(asy.wait_build(&ctx, &mut cv_a, &mut v_a));
+    assert!(!asy.is_building());
+    syn.params.h = 4;
+    syn.params.k = 3;
+    let gs = v_s.mesh_generation();
+    syn.activate_and_sync(&kagome, &backend, &mut cv_s, &mut v_s);
+    let (ma, ms) = (asy.current_mesh.as_ref().unwrap(), syn.current_mesh.as_ref().unwrap());
+    assert_eq!((ma.sites.len(), ma.faces.len()), (ms.sites.len(), ms.faces.len()));
+    assert_eq!(ma.sites.len(), 36, "kagome 4 x 3 torus: 3 sites per cell x 12 cells");
+    assert_eq!(cv_a.counts(), cv_s.counts());
+    assert_eq!(v_a.mesh_generation() - g0, v_s.mesh_generation() - gs, "the superseded request built nothing");
+
+    // a synchronous rebuild cancels a queued background request
+    asy.params.h = 6;
+    asy.request_build(&kagome, &ctx);
+    asy.activate_and_sync(&kagome, &backend, &mut cv_a, &mut v_a);
+    assert!(!asy.is_building());
+    assert!(!asy.wait_build(&ctx, &mut cv_a, &mut v_a));
+}
+
+#[test]
+fn a_build_finishing_inside_a_newer_requests_debounce_is_never_shown() {
+    let backend = AppBackend::new();
+    let ctx = egui::Context::default();
+    let kagome = backend.find_named("kagome").unwrap().clone();
+    let mut cv = blank_canvas();
+    let mut view = View3dState::default();
+    let mut st = SurfacesTabState::new();
+    st.target = SurfaceTargetUi::Torus;
+    st.auto_size = false;
+    st.params.h = 2;
+    st.params.k = 1;
+    st.request_build(&kagome, &ctx);
+    std::thread::sleep(super::build_async::DEBOUNCE + std::time::Duration::from_millis(10));
+    assert!(!st.pump_build(&ctx, &mut cv, &mut view), "submitted, not finished yet");
+    st.params.h = 3;
+    st.request_build(&kagome, &ctx); // queued behind the running 2 x 1 build
+    std::thread::sleep(std::time::Duration::from_millis(60)); // 2 x 1 torus is done, 3 x 1 still debouncing
+    assert!(!st.pump_build(&ctx, &mut cv, &mut view));
+    assert!(st.current_mesh.is_none(), "the superseded 2 x 1 torus is never applied");
+    assert!(st.wait_build(&ctx, &mut cv, &mut view));
+    // kagome 3 x 1 torus: 3 sites per cell x 3 cells
+    assert_eq!(st.current_mesh.as_ref().unwrap().sites.len(), 9);
+}

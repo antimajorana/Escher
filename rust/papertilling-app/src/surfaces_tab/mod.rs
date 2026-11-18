@@ -19,6 +19,7 @@ use crate::surfaces_elastic::{SurfaceElasticState, SurfaceShapeMode};
 use crate::theme::ThemeTokens;
 use crate::view3d::View3dState;
 
+pub(crate) mod build_async;
 mod inspector;
 mod left;
 #[cfg(test)]
@@ -94,6 +95,8 @@ pub struct SurfacesTabState {
     pub(super) current_report: Option<SurfaceCheckReport>,
     pub(super) refusal_msg: Option<String>,
     lattice_verdicts: Option<(VerdictKey, [SurfaceCellVerdictUi; 8])>,
+    builder: Option<build_async::SurfaceWorker>,
+    queued_build: Option<(std::time::Instant, build_async::SurfaceJob)>,
 }
 
 type VerdictKey = (String, Recipe, Frame2D);
@@ -113,6 +116,8 @@ impl SurfacesTabState {
             current_report: None,
             refusal_msg: None,
             lattice_verdicts: None,
+            builder: None,
+            queued_build: None,
         }
     }
 
@@ -135,26 +140,33 @@ impl SurfacesTabState {
     pub fn activate_and_sync(
         &mut self,
         item: &CatalogueItemUi,
-        backend: &AppBackend,
+        _backend: &AppBackend,
         canvas: &mut Canvas2D,
         view3d: &mut View3dState,
     ) {
+        self.cancel_build();
+        let job = self.prepare_build(item);
+        let built = build_async::run_job(&job);
+        self.apply_built(built, &item.group, canvas, view3d);
+    }
+
+    /// Everything before the build itself: clamp the sizes and remember the lattice. The per-surface panels are
+    /// cleared when the new mesh is applied, so the mesh on screen keeps its own relaxation / spectrum meanwhile.
+    fn prepare_build(&mut self, item: &CatalogueItemUi) -> build_async::SurfaceJob {
         self.clamp_params(item);
-        let lkey = (item.group.clone(), item.recipe.clone(), item.frame);
-        let target_changed = self.active_lattice_key.as_ref() != Some(&lkey);
-        self.active_lattice_key = Some(lkey);
+        self.active_lattice_key = Some((item.group.clone(), item.recipe.clone(), item.frame));
         self.active_disp = item.display_with_orig();
+        build_async::SurfaceJob { item: item.clone(), target: self.target, params: self.params.clone(), auto_size: self.auto_size }
+    }
+
+    /// Show a built surface (net, 3D, elastic / spectrum follow-ups) or its refusal.
+    fn apply_built(&mut self, built: build_async::Built, group: &str, canvas: &mut Canvas2D, view3d: &mut View3dState) {
+        // results (and running jobs) of the previous mesh must never be drawn or exported with the new one
         self.elastic.clear_for_switch();
         self.spectrum.clear_for_switch();
-        let _ = target_changed;
-        let built = if self.auto_size {
-            live_ops::build_surface_mesh_auto(item, self.target, self.params.centre_mode, self.params.genus_g)
-        } else {
-            backend.build_surface(item, self.target, &self.params)
-        };
         match built {
             Ok((mesh, report)) => {
-                let net_title = format!("{} ({}) — {} — 2D net", self.active_disp, item.group, mesh.name);
+                let net_title = format!("{} ({}) — {} — 2D net", self.active_disp, group, mesh.name);
                 canvas.set_scene_with_title(Scene2D::SurfaceNet { mesh: mesh.clone() }, Some(net_title), true);
                 if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK {
                     self.elastic.request_relax(mesh.clone(), None);
@@ -211,6 +223,7 @@ impl SurfacesTabState {
     }
 
     pub fn poll_background(&mut self, ctx: &egui::Context, canvas: &mut Canvas2D, view3d: &mut View3dState) {
+        let _ = self.pump_build(ctx, canvas, view3d);
         let e_hit = self.elastic.poll(ctx);
         let s_hit = self.spectrum.poll(ctx);
         if e_hit || s_hit {

@@ -15,6 +15,7 @@ impl PapertillingApp {
                     }
                 }
                 ui.separator();
+                self.show_switcher_chip(ui);
                 let rev0 = self.gallery.revision();
                 self.gallery
                     .show_rename_bar(ui, &mut self.backend, &mut self.canvas2d, "top_rename");
@@ -51,6 +52,7 @@ impl PapertillingApp {
                         && !self.smoke_test
                     {
                         ui.close();
+                        self.finish_gallery_moves();
                         let item = self.gallery.active_item().clone();
                         self.combine.export_json_dialog(&item);
                         self.export_status = self.combine.json_status.clone();

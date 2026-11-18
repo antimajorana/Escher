@@ -23,7 +23,13 @@ impl SurfacesTabState {
         ui.strong(format!("Active lattice: {} ({})", active_item.display_with_orig(), active_item.group));
         ui.add_space(3.0);
         if self.show_controls(ui, active_item) {
-            self.activate_and_sync(active_item, backend, canvas, view3d);
+            self.request_build(active_item, ui.ctx());
+        }
+        if self.is_building() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.small("Building the surface in the background…");
+            });
         }
 
         ui.separator();

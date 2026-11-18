@@ -111,6 +111,7 @@ pub struct PapertillingApp {
     pub(crate) defects: DefectsTabState,
     pub(crate) combine: CombineTabState,
     pub(crate) atlas: crate::atlas_tab::AtlasTabState,
+    pub(crate) switcher: crate::ui::lattice_switcher::LatticeSwitcher,
 }
 
 impl PapertillingApp {
@@ -176,6 +177,7 @@ impl PapertillingApp {
             defects,
             combine,
             atlas,
+            switcher: Default::default(),
         }
     }
 
@@ -188,18 +190,75 @@ impl PapertillingApp {
         if self.smoke_test && self.smoke_step(ui.ctx()) {
             return true;
         }
+        let ctx = ui.ctx().clone();
+        self.gallery.thumbs.begin_frame(ctx.cumulative_pass_nr());
+        self.handle_switcher_shortcut(&ctx);
+        if self.switcher.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            // consumed here, so an Esc meant for the palette never also closes a window drawn earlier
+            self.switcher.open = false;
+        }
+        let on_gallery = self.active_tab == NavTab::Gallery;
+        let canvas = if on_gallery { Some(&mut self.canvas2d) } else { None };
+        if self.gallery.poll_retune(canvas) && !on_gallery {
+            // a background parameter move finished after leaving the Gallery: the active tab follows it
+            self.resync_active_tab_for_lattice();
+        }
         self.show_top_bar(ui);
         self.show_status_bar(ui);
         self.show_left_rail(ui);
         self.show_right_inspector(ui);
         self.show_viewport_pane(ui);
+        self.show_switcher_modal(&ctx);
+        self.switcher.push_recent(self.gallery.base_item());
         false
+    }
+
+    /// Select `item` (a stored lattice at its default values) from anywhere, e.g. the Quick Lattice Switcher:
+    /// the Gallery selection follows it and the active tab reloads for it at once, without a tab round-trip.
+    pub(crate) fn select_lattice_and_sync(&mut self, item: CatalogueItemUi) {
+        if item.alias_key == self.gallery.base_item().alias_key {
+            // already selected: keep its tuned parameters and every tab's work (e.g. Ctrl+K, Enter on Recent #1)
+            return;
+        }
+        self.gallery.cancel_rename();
+        self.gallery.select_external(item, &self.backend, &mut self.canvas2d);
+        self.switcher.push_recent(self.gallery.base_item());
+        self.resync_active_tab_for_lattice();
+    }
+
+    /// Reload the active tab for the Gallery's current `active_item()` (another lattice or parameter values).
+    fn resync_active_tab_for_lattice(&mut self) {
+        let item = self.gallery.active_item().clone();
+        match self.active_tab {
+            NavTab::Gallery => {}
+            NavTab::Surfaces => {
+                self.surfaces
+                    .activate_and_sync(&item, &self.backend, &mut self.canvas2d, &mut self.view3d);
+            }
+            NavTab::Defects if item_key(&item) != self.defects_seen => {
+                self.defects_seen = item_key(&item);
+                self.defects
+                    .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
+                self.defects.sync_view3d(&mut self.view3d);
+            }
+            NavTab::Combine if item_key(&item) != self.combine_seen => {
+                self.combine_seen = item_key(&item);
+                self.combine
+                    .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
+                self.combine.sync_view3d(&item, &mut self.view3d);
+            }
+            NavTab::Defects | NavTab::Combine => {}
+            // the Gallery redraw above replaced the Atlas 2D scene: restore it
+            NavTab::Atlas => self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d),
+        }
     }
 
     pub(crate) fn switch_tab(&mut self, tab: NavTab) {
         if self.active_tab == tab {
             return;
         }
+        // a background parameter move still pending is applied now, so the new tab gets the final lattice once
+        self.gallery.finish_pending_retune(&mut self.canvas2d);
         self.active_tab = tab;
         match tab {
             NavTab::Gallery => {
@@ -244,9 +303,21 @@ impl PapertillingApp {
         }
     }
 
+    /// On the Gallery, apply a pending background parameter move before exporting what the sliders show.
+    pub(crate) fn finish_gallery_moves(&mut self) {
+        if self.active_tab == NavTab::Gallery {
+            self.gallery.finish_pending_retune(&mut self.canvas2d);
+        }
+    }
+
     pub(crate) fn export_dialog(&mut self) {
+        self.finish_gallery_moves();
         if self.active_tab == NavTab::Defects && self.defects.is_busy() {
             self.export_status = String::from("Wait for the defect build before exporting.");
+            return;
+        }
+        if self.active_tab == NavTab::Surfaces && self.surfaces.is_building() {
+            self.export_status = String::from("Wait for the surface build before exporting.");
             return;
         }
         if self.active_tab == NavTab::Combine && (self.combine.is_building() || self.combine.dragging) {
@@ -275,6 +346,7 @@ impl PapertillingApp {
     }
 
     pub(crate) fn export_obj_dialog(&mut self) {
+        self.finish_gallery_moves();
         if self.active_tab == NavTab::Gallery {
             self.export_status =
                 String::from("Open Surfaces, Defects, or Combine to export a 3D .obj mesh.");
@@ -282,6 +354,10 @@ impl PapertillingApp {
         }
         if self.active_tab == NavTab::Defects && self.defects.is_busy() {
             self.export_status = String::from("Wait for the defect build before exporting .obj.");
+            return;
+        }
+        if self.active_tab == NavTab::Surfaces && self.surfaces.is_building() {
+            self.export_status = String::from("Wait for the surface build before exporting .obj.");
             return;
         }
         if self.active_tab == NavTab::Combine && (self.combine.is_building() || self.combine.dragging) {
@@ -316,6 +392,7 @@ impl PapertillingApp {
     }
 
     pub(crate) fn sync_active_tab_after_rename(&mut self) {
+        self.switcher.refresh_labels(&self.backend);
         let item = self.gallery.active_item().clone();
         if let Some(override_item) = &mut self.combine.override_item
             && override_item.alias_key == item.alias_key
@@ -338,7 +415,8 @@ impl PapertillingApp {
                 self.combine.sync_to_canvas(&item, &mut self.canvas2d, false);
                 self.combine.view3d_dirty = true;
             }
-            NavTab::Atlas => {}
+            // the renamed Gallery cell was redrawn into the shared canvas: restore the Atlas scene
+            NavTab::Atlas => self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d),
         }
     }
 }

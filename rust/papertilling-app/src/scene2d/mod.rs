@@ -3,7 +3,7 @@ use papertilling_core::types::{BuiltCrystal, Cell2D, SurfaceMesh};
 use crate::scene_crystal::compile_crystal_patch;
 
 mod overlays;
-mod periodic;
+pub(crate) mod periodic;
 mod surface_net;
 
 #[derive(Clone)]

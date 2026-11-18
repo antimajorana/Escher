@@ -19,7 +19,7 @@ use crate::backend::{
 };
 
 mod tuned;
-pub use tuned::{slider_params_ui, tune_item};
+pub use tuned::{TunedLattice, slider_params_ui, tune_item};
 
 const POINTS_JSON: &str = include_str!("../../../papertilling/data/points.json");
 const SHEET_JSON: &str = include_str!("../../../papertilling/data/sheet.json");
