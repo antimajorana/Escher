@@ -4,13 +4,18 @@ use std::path::{Path, PathBuf};
 use crate::canvas2d::{CanvasMarker, MarkerKind, Scene2D};
 use crate::scene2d::{ScenePrimitives, compile_scene};
 
-#[path = "../export_font.rs"]
-mod font;
-#[path = "../export_raster.rs"]
-mod raster;
+mod kern;
 mod legend;
+mod png_out;
+#[path = "../export_raster.rs"]
+pub(crate) mod raster;
+pub(crate) mod text_ttf;
 
 pub use legend::ExportLegend;
+#[cfg(test)]
+use png_out::{encode_prims_png, encode_prims_png_with_legend, encode_scene_png};
+use png_out::{PngSize, encode_layers_png};
+#[cfg(test)]
 use raster::Raster;
 
 const SVG_SIZE: u32 = 960;
@@ -31,40 +36,33 @@ pub fn export_scene_to_path(scene: &Scene2D, path: &Path) -> Result<String, Stri
 /// As [`export_scene_to_path`], with the Combine tab's defect pins drawn as on screen.
 #[cfg(test)]
 pub fn export_scene_with_markers(scene: &Scene2D, markers: &[CanvasMarker], path: &Path) -> Result<String, String> {
-    export_scene_full(scene, markers, None, path)
+    export_scene_full(scene, markers, None, path, 1)
 }
 
 /// Export `scene` with optional markers and an optional custom title override (used by Gallery and Surfaces
-/// so custom lattice names appear in exported SVG and PNG headers).
+/// so custom lattice names appear in exported SVG and PNG headers). A PNG is drawn at `png_scale` (1, 2, 4):
+/// `PNG_SIZE * png_scale` pixels a side, the same composition as at 1x; the SVG does not depend on it.
 pub fn export_scene_full(
     scene: &Scene2D,
     markers: &[CanvasMarker],
     title_override: Option<&str>,
     path: &Path,
+    png_scale: u32,
 ) -> Result<String, String> {
     let prims = compile_scene(scene);
-    export_scene_with_overlays(&prims, markers, title_override, path)
+    export_prims(&prims, &[], markers, title_override, None, (path, png_scale))
 }
 
-pub(crate) fn export_scene_with_overlays(
-    prims: &ScenePrimitives,
-    markers: &[CanvasMarker],
-    title_override: Option<&str>,
-    path: &Path,
-) -> Result<String, String> {
-    export_prims(prims, &[], markers, title_override, None, path)
-}
-
-/// As [`export_scene_with_overlays`], with an optional legend box and `top` drawn over the base layer.
+/// As [`export_scene_full`] for compiled primitives, with an optional legend box and `top` drawn over the base layer.
 pub(crate) fn export_scene_layers(
     prims: &ScenePrimitives,
     tops: &[ScenePrimitives],
     markers: &[CanvasMarker],
     title_override: Option<&str>,
     legend: Option<&ExportLegend>,
-    path: &Path,
+    (path, png_scale): (&Path, u32),
 ) -> Result<String, String> {
-    export_prims(prims, tops, markers, title_override, legend, path)
+    export_prims(prims, tops, markers, title_override, legend, (path, png_scale))
 }
 
 fn export_prims(
@@ -73,7 +71,7 @@ fn export_prims(
     markers: &[CanvasMarker],
     title_override: Option<&str>,
     legend: Option<&ExportLegend>,
-    path: &Path,
+    (path, png_scale): (&Path, u32),
 ) -> Result<String, String> {
     let ext = path.extension().map(|s| s.to_string_lossy().to_ascii_lowercase());
     let (target, is_svg): (PathBuf, bool) = match ext.as_deref() {
@@ -88,14 +86,16 @@ fn export_prims(
         std::fs::write(&target, svg).map_err(|e| format!("{}: {e}", target.display()))?;
         Ok(format!("Exported SVG ({name})"))
     } else {
-        let png_bytes = encode_layers_png(prims, tops, markers, title_override, legend, PNG_SIZE, PNG_SIZE)?;
+        let size = PngSize::export(png_scale)?;
+        let png_bytes = encode_layers_png(prims, tops, markers, title_override, legend, size)?;
         std::fs::write(&target, png_bytes).map_err(|e| format!("{}: {e}", target.display()))?;
-        Ok(format!("Exported high-DPI PNG ({name})"))
+        Ok(format!("Exported {}x{} PNG at {png_scale}x ({name})", size.w, size.h))
     }
 }
 
 /// World -> picture map, the same fit as the canvas (title / note band on top, `bottom_pad` px below: 36, or
-/// the legend band when a legend is exported so the legend box never covers the picture).
+/// the legend band when a legend is exported so the legend box never covers the picture). The fixed margins
+/// are multiplied by the pixel scale `k` (1 for SVG; 2 / 4 for a 2x / 4x PNG).
 struct Transform {
     wc: [f32; 2],
     sc: [f32; 2],
@@ -103,14 +103,14 @@ struct Transform {
 }
 
 impl Transform {
-    fn new(prims: &ScenePrimitives, width: u32, height: u32, bottom_pad: f32) -> Self {
+    fn new(prims: &ScenePrimitives, width: u32, height: u32, bottom_pad: f32, k: f32) -> Self {
         let (bmin, bmax) = prims.bbox;
         let wc = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
         let span_x = (bmax[0] - bmin[0]).max(0.5);
         let span_y = (bmax[1] - bmin[1]).max(0.5);
-        let top_pad = if !prims.note.is_empty() { 76.0 } else if !prims.title.is_empty() { 48.0 } else { 36.0 };
-        let avail_w = (width as f32 - 64.0).max(32.0);
-        let avail_h = (height as f32 - top_pad - bottom_pad).max(32.0);
+        let top_pad = k * if !prims.note.is_empty() { 76.0 } else if !prims.title.is_empty() { 48.0 } else { 36.0 };
+        let avail_w = (width as f32 - 64.0 * k).max(32.0 * k);
+        let avail_h = (height as f32 - top_pad - bottom_pad).max(32.0 * k);
         let scale = (avail_w / span_x).min(avail_h / span_y);
         Self { wc, sc: [width as f32 * 0.5, top_pad + avail_h * 0.5], scale }
     }
@@ -210,7 +210,8 @@ fn svg_with_legend(
     if let Some(t) = title_override.filter(|t| !t.is_empty()) {
         prims.title = t.to_string();
     }
-    let tf = Transform::new(&prims, width, height, legend::bottom_pad(legend, height));
+    let tf = Transform::new(&prims, width, height, legend::bottom_pad(legend, height), 1.0);
+
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">\n<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>\n",
         hex_rgb(BACKGROUND)
@@ -270,107 +271,6 @@ fn svg_with_legend(
     }
     out.push_str("</svg>\n");
     out
-}
-
-#[cfg(test)]
-pub fn encode_scene_png(scene: &Scene2D, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    encode_scene_png_with_markers(scene, &[], width, height)
-}
-
-/// PNG of the scene (`width` x `height`, RGBA 8-bit); `Err` for a size out of range (no panic, no huge buffer).
-#[cfg(test)]
-pub fn encode_scene_png_with_markers(scene: &Scene2D, markers: &[CanvasMarker], width: u32, height: u32) -> Result<Vec<u8>, String> {
-    encode_scene_png_with_title(scene, markers, None, width, height)
-}
-
-#[cfg(test)]
-pub fn encode_scene_png_with_title(
-    scene: &Scene2D,
-    markers: &[CanvasMarker],
-    title_override: Option<&str>,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
-    encode_prims_png(&compile_scene(scene), markers, title_override, width, height)
-}
-
-#[cfg(test)]
-pub(crate) fn encode_prims_png(
-    base_prims: &ScenePrimitives,
-    markers: &[CanvasMarker],
-    title_override: Option<&str>,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
-    encode_prims_png_with_legend(base_prims, markers, title_override, None, width, height)
-}
-
-#[cfg(test)]
-/// [`encode_prims_png`] with an optional legend box drawn last (none: the same pixels as without).
-pub(crate) fn encode_prims_png_with_legend(
-    base_prims: &ScenePrimitives,
-    markers: &[CanvasMarker],
-    title_override: Option<&str>,
-    legend: Option<&ExportLegend>,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
-    encode_layers_png(base_prims, &[], markers, title_override, legend, width, height)
-}
-
-/// PNG of `base_prims` with the `tops` layers drawn over it in order (e.g. Gallery symmetry elements over the sites).
-pub(crate) fn encode_layers_png(
-    base_prims: &ScenePrimitives,
-    tops: &[ScenePrimitives],
-    markers: &[CanvasMarker],
-    title_override: Option<&str>,
-    legend: Option<&ExportLegend>,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, String> {
-    let mut img = Raster::new(width, height, BACKGROUND)?;
-    let mut prims = base_prims.clone();
-    if let Some(t) = title_override.filter(|t| !t.is_empty()) {
-        prims.title = t.to_string();
-    }
-    let tf = Transform::new(&prims, width, height, legend::bottom_pad(legend, height));
-
-    raster_layer(&mut img, &prims, &tf);
-    for t in tops {
-        raster_layer(&mut img, t, &tf);
-    }
-
-    for m in markers {
-        let Some(p) = tf.map64(m.pos) else { continue };
-        let c = marker_colors(m.kind);
-        img.circle(p, 13.5, [c[0], c[1], c[2], 68], ([0, 0, 0, 0], 0.0));
-        img.circle(p, 9.5, [c[0], c[1], c[2], 255], ([255, 255, 255, 255], 1.8));
-        img.text(p, &(m.index + 1).to_string(), 10.5, [255, 255, 255, 255], (0.5, 0.5));
-        img.text([p[0], p[1] - 15.5], &m.label, 10.5, [c[0], c[1], c[2], 255], (0.5, 0.5));
-    }
-
-    if !prims.title.is_empty() {
-        img.text([16.0, 10.0], &prims.title, 14.0, TITLE, (0.0, 0.0));
-    }
-    if !prims.note.is_empty() {
-        let y0 = if prims.title.is_empty() { 10 } else { 30 };
-        img.rect((16, y0, width as i32 - 16, y0 + 24), NOTE_FILL, NOTE_BORDER);
-        img.text([26.0, y0 as f32 + 12.0], &prims.note, 12.0, NOTE_TEXT, (0.0, 0.5));
-    }
-    if let Some(l) = legend {
-        legend::raster_legend(&mut img, l, height);
-    }
-
-    let mut buf = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut buf, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-        writer.write_image_data(&img.rgba).map_err(|e| e.to_string())?;
-        writer.finish().map_err(|e| e.to_string())?;
-    }
-    Ok(buf)
 }
 
 /// Polygons, lines, circles and labels of one layer, in that order.
@@ -436,50 +336,6 @@ fn svg_layer(out: &mut String, prims: &ScenePrimitives, tf: &Transform) {
             opacity(lbl.color[3]),
             xml_escape(&lbl.text)
         );
-    }
-}
-
-/// Polygons, lines, circles and labels of one layer, in that order.
-fn raster_layer(img: &mut Raster, prims: &ScenePrimitives, tf: &Transform) {
-    for poly in &prims.polygons {
-        let pts: Option<Vec<[f32; 2]>> = poly.points.iter().map(|&p| tf.map(p)).collect();
-        let Some(pts) = pts.filter(|v| v.len() >= 3) else { continue };
-        img.fill_polygon(&pts, poly.fill);
-        if let Some((scol, sw)) = poly.stroke {
-            for m in 0..pts.len() {
-                img.segment(pts[m], pts[(m + 1) % pts.len()], scol, sw);
-            }
-        }
-    }
-
-    for ln in &prims.lines {
-        let (Some(p0), Some(p1)) = (tf.map(ln.a), tf.map(ln.b)) else { continue };
-        if ln.dashed {
-            img.dashed(p0, p1, ln.color, ln.width, (8.0, 5.5));
-        } else {
-            img.segment(p0, p1, ln.color, ln.width * 1.15);
-        }
-        let (dx, dy) = (p1[0] - p0[0], p1[1] - p0[1]);
-        let len = dx.hypot(dy);
-        if ln.arrow_mid && len >= 10.0 {
-            let (ux, uy) = (dx / len, dy / len);
-            let tip = [p0[0] + dx * 0.56, p0[1] + dy * 0.56];
-            let w = 7.0_f32;
-            img.segment(tip, [tip[0] - ux * w - uy * w * 0.62, tip[1] - uy * w + ux * w * 0.62], ln.color, ln.width * 1.15);
-            img.segment(tip, [tip[0] - ux * w + uy * w * 0.62, tip[1] - uy * w - ux * w * 0.62], ln.color, ln.width * 1.15);
-        }
-    }
-
-    for circ in &prims.circles {
-        let Some(c) = tf.map(circ.center) else { continue };
-        let r = (circ.radius_world * tf.scale).clamp(circ.min_px, circ.max_px * 1.4);
-        img.circle(c, r, circ.fill, circ.stroke);
-    }
-
-    for lbl in &prims.labels {
-        if let Some(p) = tf.map(lbl.pos) {
-            img.text(p, &lbl.text, lbl.size_px, lbl.color, (0.5, 0.5));
-        }
     }
 }
 

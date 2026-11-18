@@ -319,3 +319,26 @@ fn theme_toggle_updates_visuals_and_tokens_meet_wcag_contrast_across_all_painter
         );
     }
 }
+
+#[test]
+fn export_menu_offers_the_png_scale_and_choosing_4x_sets_it() {
+    let mut harness = app_harness(StudioTheme::Paper);
+    harness.run();
+    assert_eq!(harness.state().png_scale, 2, "default 2x (2048 px)");
+    harness.get_by_label("Export").click();
+    harness.run();
+    let _ = harness.get_by_label("PNG scale:");
+    for label in ["1x", "2x", "4x"] {
+        assert_eq!(harness.get_all_by_label(label).count(), 1, "one {label} choice in the open menu");
+    }
+    harness.get_by_label("4x").click();
+    harness.run();
+    assert_eq!(harness.state().png_scale, 4);
+    if harness.query_by_label("1x").is_none() {
+        harness.get_by_label("Export").click();
+        harness.run();
+    }
+    harness.get_by_label("1x").click();
+    harness.run();
+    assert_eq!(harness.state().png_scale, 1);
+}

@@ -1,8 +1,6 @@
 //! RGBA raster of the PNG export: alpha blending, antialiased segments and circles, polygon fill (scanline,
-//! even-odd: each pixel blended once), and 5x7 bitmap text. Every coordinate is clamped to the image, and
-//! non-finite input draws nothing.
-
-use super::font::{advance, glyph};
+//! even-odd: each pixel blended once), bordered rects, and TTF text (`super::text_ttf`). Every coordinate is
+//! clamped to the image, and non-finite input draws nothing.
 
 pub(crate) const MAX_SIDE: u32 = 8192;
 pub(crate) const MAX_PIXELS: u64 = 40_000_000;
@@ -82,9 +80,19 @@ impl Raster {
         };
         let (vx, vy) = (p1[0] - p0[0], p1[1] - p0[1]);
         let len2 = vx * vx + vy * vy;
+        let len = len2.sqrt();
         for y in ylo..=yhi {
             let py = y as f32 + 0.5;
-            for x in xlo..=xhi {
+            // pixels within `pad` of the infinite line on this row: |x - xc| <= pad * len / |vy| (a superset of
+            // the stroke), so a long diagonal costs O(length) instead of its whole bounding box
+            let (mut xa, mut xb) = (xlo, xhi);
+            if vy.abs() > 1e-3 {
+                let xc = p0[0] + (py - p0[1]) * vx / vy;
+                let half_w = pad * len / vy.abs();
+                xa = xa.max((xc - half_w - 0.5).floor().max(-1.0e9) as i32);
+                xb = xb.min((xc + half_w - 0.5).ceil().min(1.0e9) as i32);
+            }
+            for x in xa..=xb {
                 let px = x as f32 + 0.5;
                 let t = if len2 > 1e-6 { (((px - p0[0]) * vx + (py - p0[1]) * vy) / len2).clamp(0.0, 1.0) } else { 0.0 };
                 let dist = (px - (p0[0] + t * vx)).hypot(py - (p0[1] + t * vy));
@@ -137,44 +145,23 @@ impl Raster {
         }
     }
 
-    pub fn rect(&mut self, (x0, y0, x1, y1): (i32, i32, i32, i32), fill: [u8; 4], border: [u8; 4]) {
+    pub fn rect(&mut self, bx: (i32, i32, i32, i32), fill: [u8; 4], border: [u8; 4]) {
+        self.rect_bw(bx, fill, border, 1);
+    }
+
+    /// [`Self::rect`] with a border `bw` pixels wide (the 1 px border of a picture drawn at `bw`x scale).
+    pub fn rect_bw(&mut self, (x0, y0, x1, y1): (i32, i32, i32, i32), fill: [u8; 4], border: [u8; 4], bw: i32) {
         for y in y0.max(0)..y1.min(self.h as i32) {
             for x in x0.max(0)..x1.min(self.w as i32) {
-                let edge = x == x0 || x == x1 - 1 || y == y0 || y == y1 - 1;
+                let edge = x < x0 + bw || x >= x1 - bw || y < y0 + bw || y >= y1 - bw;
                 self.blend(x, y, if edge { border } else { fill });
             }
         }
     }
 
-    /// Text of nominal height `size_px` at `pos`, `anchor` = (0, 0) left-top .. (0.5, 0.5) centre.
+    /// Text of em size `size_px` at `pos`, `anchor` = (0, 0) left-top .. (0.5, 0.5) centre of the text box
+    /// (TTF glyphs with the Inter -> DejaVu Sans fallback chain, see [`super::text_ttf`]).
     pub fn text(&mut self, pos: [f32; 2], s: &str, size_px: f32, color: [u8; 4], anchor: (f32, f32)) {
-        if !fin(pos) || s.is_empty() {
-            return;
-        }
-        let scale = ((size_px / 7.0).round() as i32).max(1);
-        let n = s.chars().count() as i32;
-        let (tw, th) = (n * advance(scale) - scale, 7 * scale);
-        let x0 = (pos[0] - anchor.0 * tw as f32).round() as i32;
-        let y0 = (pos[1] - anchor.1 * th as f32).round() as i32;
-        if x0 > self.w as i32 || y0 > self.h as i32 || x0 + tw < 0 || y0 + th < 0 {
-            return;
-        }
-        for (k, ch) in s.chars().enumerate() {
-            let cx = x0 + k as i32 * advance(scale);
-            if cx > self.w as i32 {
-                break;
-            }
-            for (col, bits) in glyph(ch).iter().enumerate() {
-                for row in 0..7 {
-                    if bits & (1 << row) != 0 {
-                        for dy in 0..scale {
-                            for dx in 0..scale {
-                                self.blend(cx + col as i32 * scale + dx, y0 + row * scale + dy, color);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        super::text_ttf::draw_text(self, pos, s, size_px, color, anchor);
     }
 }

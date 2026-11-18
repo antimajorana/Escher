@@ -96,6 +96,8 @@ pub struct PapertillingApp {
     pub(crate) backend_name: String,
     pub(crate) active_tab: NavTab,
     pub(crate) export_status: String,
+    /// Pixel scale of a 2D PNG export (1, 2 or 4: 1024, 2048 or 4096 px a side), chosen in the Export menu.
+    pub(crate) png_scale: u8,
     pub(crate) theme: StudioTheme,
     pub(crate) left_rail_width: f32,
     pub(crate) right_inspector_open: bool,
@@ -162,6 +164,7 @@ impl PapertillingApp {
             backend_name,
             active_tab,
             export_status: String::from("Ready (SVG / high-DPI PNG)"),
+            png_scale: 2,
             theme: StudioTheme::Paper,
             left_rail_width: 300.0,
             right_inspector_open: true,
@@ -338,7 +341,8 @@ impl PapertillingApp {
             .add_filter("SVG vector", &["svg"])
             .add_filter("PNG image", &["png"]);
         if let Some(path) = dialog.save_file() {
-            self.export_status = match self.canvas2d.export_to_path(&path) {
+            self.export_status = match self.canvas2d.export_to_path(&path, u32::from(self.png_scale)) {
+
                 Ok(msg) => msg,
                 Err(err) => format!("Export error: {err}"),
             };

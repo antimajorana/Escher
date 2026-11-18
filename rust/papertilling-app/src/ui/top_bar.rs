@@ -40,7 +40,15 @@ impl PapertillingApp {
                         ui.close();
                         self.export_dialog();
                     }
+                    ui.horizontal(|ui| {
+                        ui.label("PNG scale:");
+                        for (s, tip) in [(1_u8, "1024 x 1024 px"), (2, "2048 x 2048 px"), (4, "4096 x 4096 px")] {
+                            ui.selectable_value(&mut self.png_scale, s, format!("{s}x"))
+                                .on_hover_text(format!("2D PNG export at {s}x pixel density: {tip}, same composition"));
+                        }
+                    });
                     if ui.button("Export .obj (3D)...").clicked() && !self.smoke_test {
+
                         ui.close();
                         self.export_obj_dialog();
                     }

@@ -115,7 +115,7 @@ fn canvas_draws_voronoi_under_and_symmetry_over_and_export_keeps_that_order() {
     let dir = std::env::temp_dir().join(format!("pt_overlay_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("kagome.svg");
-    canvas.export_to_path(&path).unwrap();
+    canvas.export_to_path(&path, 1).unwrap();
     let svg = std::fs::read_to_string(&path).unwrap();
     let last_site = svg.rfind("<circle").expect("sites");
     let first_symbol = svg.find("fill=\"#2e7d32\"").expect("rotation symbols (46,125,50)");
@@ -193,7 +193,7 @@ fn export_draws_rotation_symbols_over_the_mirror_lines() {
     let dir = std::env::temp_dir().join(format!("pt_overlay_order_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("square.svg");
-    canvas.export_to_path(&path).unwrap();
+    canvas.export_to_path(&path, 1).unwrap();
     let svg = std::fs::read_to_string(&path).unwrap();
     let last_mirror = svg.rfind("stroke=\"#c62828\"").expect("p4mm mirrors (198,40,40)");
     let first_symbol = svg.find("fill=\"#2e7d32\"").expect("rotation symbols");

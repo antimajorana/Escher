@@ -1,8 +1,8 @@
 //! Exported legends: SVG group with title and exactly 32 stepped rects (or one rect per chip), the picture fitted
 //! above the box, legend-free SVG / PNG pinned to hand-derived goldens (the pre-legend fit with a 36 px bottom pad),
-//! PNG bar ends with the hue of the colour map's ends, ASCII-only PNG labels, and the Canvas2D path.
+//! PNG bar ends with the hue of the colour map's ends, Unicode PNG labels with no tofu, and the Canvas2D path.
 
-use super::super::font::glyph;
+use super::super::text_ttf::has_glyph;
 use super::super::{encode_prims_png, encode_prims_png_with_legend, render_prims_svg, render_prims_svg_with_legend};
 use super::*;
 use crate::canvas2d::overlay_legend::{LegendCategory, spectral_overlay_data};
@@ -95,8 +95,9 @@ fn png_legend_bar_runs_blue_to_red_for_charge() {
 }
 
 #[test]
-fn png_labels_are_spelled_in_the_5x7_font() {
-    let unknown = glyph('\u{2603}');
+fn png_labels_keep_their_unicode_and_every_character_has_a_ttf_glyph() {
+    // The PNG legend now draws the labels as the SVG does (no ASCII spelling): every character of the overlay
+    // titles must be in the Inter -> DejaVu Sans chain, so none of them draws as a tofu box.
     let titles = [
         "LDOS |ψ|²",
         "Spectral charge δρ(μ)",
@@ -106,11 +107,11 @@ fn png_labels_are_spelled_in_the_5x7_font() {
         "Torsion α / τ-shift",
     ];
     for t in titles {
-        let a = ascii_label(t);
-        assert!(a.chars().all(|c| glyph(c) != unknown), "{t:?} -> {a:?}");
+        assert!(t.chars().all(has_glyph), "{t:?}: {:?}", t.chars().filter(|c| !has_glyph(*c)).collect::<String>());
     }
-    assert_eq!(ascii_label("δρ(μ)"), "drho(mu)");
+    assert!(!has_glyph('中'), "a CJK ideograph is in neither bundled face: the tofu case exists");
 }
+
 
 #[test]
 fn canvas_export_carries_the_overlay_legend_only_when_one_is_active() {
@@ -118,15 +119,15 @@ fn canvas_export_carries_the_overlay_legend_only_when_one_is_active() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let mut cv = Canvas2D::new(crystal_scene());
-    cv.export_to_path(&dir.join("plain.svg")).unwrap();
+    cv.export_to_path(&dir.join("plain.svg"), 1).unwrap();
     let plain = std::fs::read_to_string(dir.join("plain.svg")).unwrap();
     assert!(!plain.contains("id=\"legend\""));
     cv.set_gauge_overlay(Some(spectral_overlay_data(&[-0.3, 0.1], true)));
-    cv.export_to_path(&dir.join("charge.svg")).unwrap();
+    cv.export_to_path(&dir.join("charge.svg"), 1).unwrap();
     let svg = std::fs::read_to_string(dir.join("charge.svg")).unwrap();
     assert!(svg.contains("Spectral charge δρ(μ)") && svg.contains(">-0.300</text>") && svg.contains(">0.300</text>"));
     assert_eq!(svg.matches("class=\"legend-step\"").count(), 32);
-    cv.export_to_path(&dir.join("charge.png")).unwrap();
+    cv.export_to_path(&dir.join("charge.png"), 1).unwrap();
     assert!(std::fs::read(dir.join("charge.png")).unwrap().starts_with(b"\x89PNG"));
     let _ = std::fs::remove_dir_all(&dir);
 }

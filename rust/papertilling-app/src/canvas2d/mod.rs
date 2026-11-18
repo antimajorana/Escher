@@ -146,7 +146,9 @@ impl Canvas2D {
         &self.scene
     }
 
-    pub fn export_to_path(&self, path: &Path) -> Result<String, String> {
+    /// Export the scene as shown (overlays, pins, legend) to `path` (`.svg` / `.png`); a PNG is drawn at the
+    /// integer pixel scale `png_scale` (1, 2 or 4: 1024, 2048 or 4096 px a side), the SVG ignores it.
+    pub fn export_to_path(&self, path: &Path, png_scale: u32) -> Result<String, String> {
         if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() || self.gallery_overlay.is_some() {
             let mut prims = self.compiled.clone();
             if let Some(ov) = &self.gauge_overlay {
@@ -163,9 +165,10 @@ impl Canvas2D {
                 let symbols = crate::scene2d::ScenePrimitives { polygons: g.over.polygons.clone(), bbox: g.over.bbox, ..Default::default() };
                 vec![lines, symbols]
             });
-            export_scene_layers(&prims, &tops, &self.export_markers, title, legend.as_ref(), path)
+            export_scene_layers(&prims, &tops, &self.export_markers, title, legend.as_ref(), (path, png_scale))
         } else {
-            export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path)
+            export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path, png_scale)
+
         }
     }
 

@@ -1,6 +1,7 @@
 //! Legend of an exported 2D picture: the active overlay's colorbar (title, `LEGEND_STEPS` stepped colour rects,
-//! min / max) or its categorical chips, in a bottom-left inset box in picture space. SVG text keeps Unicode; the
-//! PNG text goes through the 5x7 ASCII font, so Greek letters and symbols are spelled out first (`ascii_label`).
+//! min / max) or its categorical chips, in a bottom-left inset box in picture space. Both SVG and PNG keep the
+//! Unicode labels (the PNG draws them with the bundled TTFs, `super::text_ttf`); a PNG at pixel scale `s`
+//! multiplies every length of the box (inset, size, padding, bar, chips, font sizes, border) by `s`.
 
 use std::fmt::Write as _;
 
@@ -40,22 +41,32 @@ impl<'a> ExportLegend<'a> {
 
 /// `(x0, y0, x1, y1)` of the legend box, inset 16 px from the left and 12 px from the bottom of the picture.
 pub(crate) fn legend_box(legend: &ExportLegend, height: u32) -> (i32, i32, i32, i32) {
+    legend_box_scaled(legend, height, 1)
+}
+
+/// [`legend_box`] with every length multiplied by the pixel scale `s`.
+pub(crate) fn legend_box_scaled(legend: &ExportLegend, height: u32, s: i32) -> (i32, i32, i32, i32) {
     let h = match legend {
         ExportLegend::Colorbar(_) => 62,
         ExportLegend::Categorical(chips) => 26 + CHIP_ROW * chips.len() as i32,
     };
-    let y1 = height as i32 - 12;
-    (16, y1 - h, 16 + BOX_W, y1)
+    let y1 = height as i32 - 12 * s;
+    (16 * s, y1 - h * s, (16 + BOX_W) * s, y1)
 }
 
 /// Bottom margin of the fitted picture: 36 px without a legend (the pre-legend layout), else the legend band
 /// (box height + its 12 px inset + an 8 px gap) so the box sits below the picture rather than over it.
 pub(crate) fn bottom_pad(legend: Option<&ExportLegend>, height: u32) -> f32 {
+    bottom_pad_scaled(legend, height, 1)
+}
+
+/// [`bottom_pad`] with every length multiplied by the pixel scale `s`.
+pub(crate) fn bottom_pad_scaled(legend: Option<&ExportLegend>, height: u32, s: i32) -> f32 {
     match legend {
-        None => 36.0,
+        None => (36 * s) as f32,
         Some(l) => {
-            let (_, y0, _, _) = legend_box(l, height);
-            ((height as i32 - y0 + 8) as f32).max(36.0)
+            let (_, y0, _, _) = legend_box_scaled(l, height, s);
+            ((height as i32 - y0 + 8 * s) as f32).max((36 * s) as f32)
         }
     }
 }
@@ -68,9 +79,9 @@ fn title_of(cb: &OverlayColorbar) -> String {
     if cb.sqrt_scale && !cb.title.contains('√') { format!("{} (√-scale)", cb.title) } else { cb.title.clone() }
 }
 
-/// Bar geometry `(x0, y0, x1, y1)` inside a colorbar box.
-fn bar_of((x0, y0, x1, _): (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
-    (x0 + PAD, y0 + 24, x1 - PAD, y0 + 38)
+/// Bar geometry `(x0, y0, x1, y1)` inside a colorbar box drawn at pixel scale `s`.
+fn bar_of((x0, y0, x1, _): (i32, i32, i32, i32), s: i32) -> (i32, i32, i32, i32) {
+    (x0 + PAD * s, y0 + 24 * s, x1 - PAD * s, y0 + 38 * s)
 }
 
 /// Step `i` of the gradient: `[a, b)` in x and its colour (sampled at the step centre).
@@ -106,10 +117,11 @@ pub(crate) fn svg_legend(out: &mut String, legend: &ExportLegend, height: u32) {
     match legend {
         ExportLegend::Colorbar(cb) => {
             text(out, x0 + PAD, y0 + 12, "start", 12.0, INK, &title_of(cb));
-            let bar = bar_of(bx);
+            let bar = bar_of(bx, 1);
             for i in 0..LEGEND_STEPS {
                 let (a, b, c) = step(cb, bar, i);
                 let _ = writeln!(
+
                     out,
                     "<rect class=\"legend-step\" x=\"{a}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
                     bar.1,
@@ -149,51 +161,32 @@ pub(crate) fn svg_legend(out: &mut String, legend: &ExportLegend, height: u32) {
     let _ = writeln!(out, "</g>");
 }
 
-/// ASCII spelling of a legend label for the 5x7 PNG font (Greek letters and symbols it lacks are spelled out).
-pub(crate) fn ascii_label(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            'ψ' => out.push_str("psi"),
-            'δ' => out.push('d'),
-            'ρ' => out.push_str("rho"),
-            'μ' => out.push_str("mu"),
-            'ε' => out.push_str("eps"),
-            'γ' => out.push_str("gamma"),
-            'Ω' => out.push_str("Omega"),
-            'τ' => out.push_str("tau"),
-            '√' => out.push_str("sqrt"),
-            '₀' => out.push('0'),
-            '−' => out.push('-'),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Draw the legend into the PNG raster.
-pub(crate) fn raster_legend(img: &mut Raster, legend: &ExportLegend, height: u32) {
-    let bx = legend_box(legend, height);
+/// Draw the legend into the PNG raster at pixel scale `s`: the SVG legend's layout, text sizes and positions
+/// (text vertically centred where the SVG uses `dominant-baseline="central"`).
+pub(crate) fn raster_legend(img: &mut Raster, legend: &ExportLegend, height: u32, s: i32) {
+    let bx = legend_box_scaled(legend, height, s);
     let (x0, y0, x1, y1) = bx;
-    img.rect(bx, BOX_FILL, BOX_BORDER);
+    let k = s as f32;
+    let at = |x: i32, y: i32| [x as f32, y as f32];
+    img.rect_bw(bx, BOX_FILL, BOX_BORDER, s);
     match legend {
         ExportLegend::Colorbar(cb) => {
-            img.text([(x0 + PAD) as f32, (y0 + 8) as f32], &ascii_label(&title_of(cb)), 7.0, INK, (0.0, 0.0));
-            let bar = bar_of(bx);
+            img.text(at(x0 + PAD * s, y0 + 12 * s), &title_of(cb), 12.0 * k, INK, (0.0, 0.5));
+            let bar = bar_of(bx, s);
             for i in 0..LEGEND_STEPS {
                 let (a, b, c) = step(cb, bar, i);
                 img.rect((a, bar.1, b, bar.3), c, c);
             }
-            img.text([(x0 + PAD) as f32, (y1 - 6) as f32], &fmt_v(cb.min_val), 7.0, INK_SOFT, (0.0, 1.0));
-            img.text([(x1 - PAD) as f32, (y1 - 6) as f32], &fmt_v(cb.max_val), 7.0, INK_SOFT, (1.0, 1.0));
+            img.text(at(x0 + PAD * s, y1 - 11 * s), &fmt_v(cb.min_val), 11.0 * k, INK_SOFT, (0.0, 0.5));
+            img.text(at(x1 - PAD * s, y1 - 11 * s), &fmt_v(cb.max_val), 11.0 * k, INK_SOFT, (1.0, 0.5));
         }
         ExportLegend::Categorical(chips) => {
-            img.text([(x0 + PAD) as f32, (y0 + 8) as f32], "Legend", 7.0, INK, (0.0, 0.0));
-            for (k, chip) in chips.iter().enumerate() {
-                let yc = y0 + 24 + CHIP_ROW * k as i32 + CHIP_ROW / 2;
+            img.text(at(x0 + PAD * s, y0 + 12 * s), "Legend", 12.0 * k, INK, (0.0, 0.5));
+            for (n, chip) in chips.iter().enumerate() {
+                let yc = y0 + (24 + CHIP_ROW * n as i32 + CHIP_ROW / 2) * s;
                 let c = [chip.rgba[0], chip.rgba[1], chip.rgba[2], 255];
-                img.rect((x0 + PAD, yc - 6, x0 + PAD + 12, yc + 6), c, c);
-                img.text([(x0 + PAD + 20) as f32, yc as f32], &ascii_label(&chip.label), 7.0, INK_SOFT, (0.0, 0.5));
+                img.rect((x0 + PAD * s, yc - 6 * s, x0 + (PAD + 12) * s, yc + 6 * s), c, c);
+                img.text(at(x0 + (PAD + 20) * s, yc), &chip.label, 11.0 * k, INK_SOFT, (0.0, 0.5));
             }
         }
     }

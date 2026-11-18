@@ -55,7 +55,7 @@ fn rename_alias_roundtrip_and_propagation_across_tabs_svg_and_notebook_json() {
 
     // Gallery SVG export carries the custom alias in its rendered header.
     let gal_svg = dir.join("gallery_renamed.svg");
-    canvas.export_to_path(&gal_svg).unwrap();
+    canvas.export_to_path(&gal_svg, 1).unwrap();
     let svg_txt = std::fs::read_to_string(&gal_svg).unwrap();
     assert!(svg_txt.contains("Cairo-Like Squares"), "Gallery SVG missing alias: {svg_txt}");
 
@@ -65,7 +65,7 @@ fn rename_alias_roundtrip_and_propagation_across_tabs_svg_and_notebook_json() {
     surfaces.activate_and_sync(&item, &backend, &mut canvas, &mut view3d);
     assert!(view3d.caption().contains("Cairo-Like Squares"), "Surfaces 3D caption: {}", view3d.caption());
     let surf_svg = dir.join("surface_renamed.svg");
-    canvas.export_to_path(&surf_svg).unwrap();
+    canvas.export_to_path(&surf_svg, 1).unwrap();
     assert!(std::fs::read_to_string(&surf_svg).unwrap().contains("Cairo-Like Squares"));
 
     // Defects readout title and 3D sheet caption carry the custom alias.

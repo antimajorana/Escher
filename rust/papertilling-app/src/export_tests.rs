@@ -173,8 +173,12 @@ fn every_tab_scene_exports_valid_svg_and_png() {
         let svg = check_svg_file(&svg_path, SVG_SIZE, SVG_SIZE);
         assert!(svg.contains("&amp; &lt;1&gt; fold") && svg.contains("—"), "escaped note, UTF-8 title");
         let img = export_all_ways(&scene, &[], &dir.0, stem);
-        assert!(count_px(&img, |c| c[..3] == NOTE_TEXT[..3]) > 30, "note text drawn in the banner");
+        // antialiased TTF text: a pixel at least 85 % covered by the note ink is within 0.15 x 255 < 39 levels of
+        // NOTE_TEXT in every channel (the 12 px Inter stems are ~1.1 px wide, so few pixels are fully covered)
+        let near_ink = |c: [u8; 4]| (0..3).all(|k| c[k].abs_diff(NOTE_TEXT[k]) <= 38);
+        assert!(count_px(&img, near_ink) > 30, "note text drawn in the banner");
     }
+
 
     let info = backend.combine_lattice_info(square);
     let specs = [DefectSpec::disclination(90.0, [0.0, 0.0]), DefectSpec::disclination(-90.0, [0.5, 0.5])];
