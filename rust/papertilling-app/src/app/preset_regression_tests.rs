@@ -221,21 +221,31 @@ fn defects_preset_resets_sheet_opts_circuit_and_spectrum() {
 fn combine_preset_clears_pending_combine_from_session_restore() {
     let mut h = harness();
     h.run_steps(2);
-    // Build a 1-pin Combine configuration for `square`, then simulate a session restore while on Gallery.
+    // Build a 1-pin Combine configuration for `square`, then simulate a session restore while on Gallery
+    // with non-default options so an un-discarded `pending_combine` would overwrite opts, grid, and undo.
     apply(&mut h, "Combine: square dislocation dipole");
     user_pins(&mut h);
-    let cfg = {
+    let mut cfg = {
         let app = h.state();
         let item = app.gallery.active_item();
         app.combine.to_notebook_json(item)
     };
     assert_eq!(cfg.defects.len(), 1);
+    cfg.options.r_patch = Some(10.0);
+    cfg.options.radius = 3;
+    cfg.options.grid = 3;
+    h.state_mut().combine.grid = 3;
     h.state_mut().switch_tab(NavTab::Gallery);
     h.state_mut().session.pending_combine = Some(cfg);
 
     apply(&mut h, "Combine: square dislocation dipole");
     let app = h.state();
     assert!(app.session.pending_combine.is_none(), "preset must discard deferred session Combine restore");
+    assert!(app.combine.opts.auto_radius, "pending_combine must not overwrite auto_radius");
+    assert_eq!(app.combine.opts.core_radius, 2, "pending_combine must not overwrite core_radius");
+    assert_eq!(app.combine.grid, 1, "preset must reset compare grid");
+    assert!(app.combine.json_status.is_empty());
+    assert_eq!(app.combine.undo_stack.len(), 1, "user pin on same lattice checkpointed once");
     let bs: Vec<[f64; 2]> = app.combine.specs.iter().map(|s| match s {
         DefectSpec::Dislocation { b, .. } => *b,
         _ => panic!("dislocations only"),

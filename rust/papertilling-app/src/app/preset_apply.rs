@@ -146,6 +146,7 @@ impl PapertillingApp {
                 let c = &mut self.combine;
                 c.view_mode = view;
                 c.opts = crate::combine::default_build_opts(c.info.r_auto_base);
+                c.grid = 1;
                 reset_sheet_and_inspectors(&mut c.inspectors, &mut c.sheet_opts, Sheet3dColorMode::FaceRingSize);
                 c.show_branch_cuts = false;
                 c.show_glide_lines = true;
