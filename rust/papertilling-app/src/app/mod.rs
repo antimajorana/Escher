@@ -21,6 +21,9 @@ mod preset_tests;
 mod export3d_tests;
 #[cfg(test)]
 mod rename_tests;
+pub(crate) mod session_hooks;
+#[cfg(test)]
+mod session_tests;
 mod smoke;
 #[cfg(test)]
 mod tests;
@@ -126,6 +129,7 @@ pub struct PapertillingApp {
     pub(crate) switcher: crate::ui::lattice_switcher::LatticeSwitcher,
     /// Follow-up work of the last preset waiting on a tab's background worker (Combine pins or Defects spectrum).
     pub(crate) preset_pending: Option<preset_apply::PendingPreset>,
+    pub(crate) session: session_hooks::SessionHost,
 }
 
 impl PapertillingApp {
@@ -196,6 +200,7 @@ impl PapertillingApp {
             atlas,
             switcher: Default::default(),
             preset_pending: None,
+            session: session_hooks::SessionHost::for_mode(smoke_test),
         }
     }
 
@@ -307,15 +312,17 @@ impl PapertillingApp {
             }
             NavTab::Combine => {
                 let item = self.gallery.active_item().clone();
-                if item_key(&item) == self.combine_seen {
-                    self.combine.ensure_compared(&item, &self.backend);
-                    self.combine.sync_to_canvas(&item, &mut self.canvas2d, true);
-                } else {
-                    self.combine_seen = item_key(&item);
-                    self.combine
-                        .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
+                if !self.apply_pending_combine() {
+                    if item_key(&item) == self.combine_seen {
+                        self.combine.ensure_compared(&item, &self.backend);
+                        self.combine.sync_to_canvas(&item, &mut self.canvas2d, true);
+                    } else {
+                        self.combine_seen = item_key(&item);
+                        self.combine
+                            .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
+                    }
+                    self.combine.sync_view3d(&item, &mut self.view3d);
                 }
-                self.combine.sync_view3d(&item, &mut self.view3d);
             }
             NavTab::Atlas => {
                 self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
@@ -455,5 +462,9 @@ impl PapertillingApp {
 impl eframe::App for PapertillingApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let _ = self.frame_ui(ui);
+    }
+
+    fn on_exit(&mut self) {
+        self.save_session_on_exit();
     }
 }

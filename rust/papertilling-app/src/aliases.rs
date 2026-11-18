@@ -127,9 +127,7 @@ impl AliasStore {
         std::fs::create_dir_all(parent_dir(path)).map_err(|e| format!("config dir: {e}"))?;
         // Lock a stable sidecar, not the JSON inode that rename replaces. Keep the sidecar: unlinking
         // it on unlock could let a third process acquire a different lock during an existing save.
-        let lock = OpenOptions::new().read(true).write(true).create(true).truncate(false)
-            .open(with_suffix(path, ".lock")).map_err(|e| format!("alias lock: {e}"))?;
-        lock.try_lock().map_err(|e| format!("alias file busy or lock unavailable; retry saving: {e}"))?;
+        let _lock = lock_sidecar(path, "alias")?;
         let mut latest = read_aliases(path)?;
         if std::fs::metadata(path).is_ok_and(|m| m.permissions().readonly()) {
             return Err(String::from("alias file is read-only"));
@@ -150,7 +148,7 @@ impl AliasStore {
         let json = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
         replace_atomically(path, |file| file.write_all(json.as_bytes()))
             .map_err(|e| format!("{}: {e}", path.display()))
-        // Dropping `lock` releases the OS lock, including on every error path above.
+        // Dropping `_lock` releases the OS lock, including on every error path above.
     }
 }
 
@@ -186,20 +184,29 @@ fn read_aliases(path: &Path) -> Result<AliasMap, String> {
     Ok(map)
 }
 
-fn parent_dir(path: &Path) -> &Path {
+pub(crate) fn parent_dir(path: &Path) -> &Path {
     path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."))
 }
 
-fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+pub(crate) fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(suffix);
     PathBuf::from(name)
 }
 
+/// Take the non-blocking OS lock on `path`'s stable `.lock` sidecar (shared by the alias and session files).
+/// Dropping the returned handle releases the lock; the sidecar itself is kept (see `save_change`).
+pub(crate) fn lock_sidecar(path: &Path, what: &str) -> Result<File, String> {
+    let lock = OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .open(with_suffix(path, ".lock")).map_err(|e| format!("{what} lock: {e}"))?;
+    lock.try_lock().map_err(|e| format!("{what} file busy or lock unavailable; retry saving: {e}"))?;
+    Ok(lock)
+}
+
 // Same-directory rename replaces an existing file on Windows as well as Unix; never delete the
 // destination first. `create_new` avoids following a stale/hostile staging-file symlink.
 // The writer callback also gives tests a deterministic partial-write failure without filling a disk.
-fn replace_atomically(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) -> io::Result<()> {
+pub(crate) fn replace_atomically(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) -> io::Result<()> {
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     #[cfg(unix)]
     let directory = File::open(parent_dir(path))?;
@@ -232,6 +239,11 @@ fn replace_atomically(path: &Path, write: impl FnOnce(&mut File) -> io::Result<(
 /// - macOS:   `$XDG_CONFIG_HOME/papertilling/...` or `~/Library/Application Support/papertilling/...`
 /// - Linux:   `$XDG_CONFIG_HOME/papertilling/...` or `~/.config/papertilling/...`
 pub fn default_config_file_path() -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join(ALIAS_FILENAME))
+}
+
+/// The per-user `papertilling` configuration folder (see [`default_config_file_path`]); also holds `session.json`.
+pub(crate) fn config_dir() -> Option<PathBuf> {
     let base = if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA")
             .filter(|v| !v.is_empty())
@@ -255,7 +267,7 @@ pub fn default_config_file_path() -> Option<PathBuf> {
                     .map(|h| PathBuf::from(h).join(".config"))
             })
     };
-    base.map(|dir| dir.join("papertilling").join(ALIAS_FILENAME))
+    base.map(|dir| dir.join("papertilling"))
 }
 
 #[cfg(test)]

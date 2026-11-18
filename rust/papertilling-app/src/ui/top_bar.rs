@@ -90,6 +90,7 @@ impl PapertillingApp {
                         }
                     }
                 });
+                self.session_menu(ui);
                 if ui
                     .selectable_label(self.right_inspector_open, "Inspector")
                     .on_hover_text("Toggle Right Inspector panel")
