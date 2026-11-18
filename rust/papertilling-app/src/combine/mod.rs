@@ -28,5 +28,5 @@ use crate::live_combine::spec_world_pos;
 mod tests;
 
 pub use kinematics::MotionMode;
-pub(crate) use state::{MANUAL_R_MAX, MANUAL_R_MIN};
+pub(crate) use state::{MANUAL_R_MAX, MANUAL_R_MIN, default_build_opts};
 pub use state::{CombineTabState, ToolMode};

@@ -25,6 +25,18 @@ use crate::mesh3d::{DefectViewMode, Sheet3dViewOpts};
 pub(crate) const MANUAL_R_MIN: f64 = 2.4;
 pub(crate) const MANUAL_R_MAX: f64 = 30.0;
 
+/// The build options of a fresh Combine tab (also what a curated preset restores): fast relaxed drawing, automatic
+/// radius (manual radius `r_auto_base` when the user unticks it), core radius 2.
+pub(crate) fn default_build_opts(r_auto_base: f64) -> CombineBuildOptions {
+    CombineBuildOptions {
+        draw_mode: CombineDrawMode::FastRelaxed,
+        full_planar_repair: false,
+        auto_radius: true,
+        manual_radius: r_auto_base,
+        core_radius: 2,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolMode {
     PanAndDrag,
@@ -86,13 +98,7 @@ impl CombineTabState {
     pub fn new(gallery_item: &CatalogueItemUi, backend: &AppBackend) -> Self {
         let info = Arc::new(backend.combine_lattice_info(gallery_item));
         let specs = preset_neighbour_pair(&info);
-        let opts = CombineBuildOptions {
-            draw_mode: CombineDrawMode::FastRelaxed,
-            full_planar_repair: false,
-            auto_radius: true,
-            manual_radius: info.r_auto_base,
-            core_radius: 2,
-        };
+        let opts = default_build_opts(info.r_auto_base);
         let sheet_opts = Sheet3dViewOpts::default();
         let last_build = build_combined_crystal(gallery_item, &info, &[], &opts, false);
         let last_sheet3d = build_sheet_bundle_sync(
