@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::inflation::*;
-use super::{build_hyperbolic_tiling, HyperbolicStyle};
+use super::{build_hyperbolic_tiling, build_hyperbolic_tiling_capped, DrawCaps, HyperbolicStyle, DRAW_CAPS};
 
 fn shells(p: usize, q: usize, n: usize) -> Vec<usize> {
     let c = vertex_completion_counts(p, q, n).unwrap();
@@ -56,7 +56,7 @@ fn patch_smoke_all_pairs_styles_layers() {
                     let h = build_hyperbolic_tiling(p, q, style, layers, 0).unwrap();
                     let seed = if style == HyperbolicStyle::DualQP { q } else { p };
                     assert_eq!(h.faces[0].len(), seed);
-                    assert!(h.faces.len() <= 180 && h.face_shell.len() == h.faces.len());
+                    assert!(h.faces.len() <= DRAW_CAPS.max_faces && h.face_shell.len() == h.faces.len());
                     assert!(h.poincare_pts.iter().all(|z| z[0] * z[0] + z[1] * z[1] < 1.0));
                 }
             }
@@ -326,13 +326,27 @@ fn patch_54_includes_corner_tiles() {
     }
 }
 
-/// 180-face cap: {7,3} layers 4 would be |S_4| = 232 > 180, so only S_3 (85 faces) is drawn.
+/// Face-cap mechanism with the old caps (180 faces, radius 0.985): {7,3} layers 4 would be
+/// |S_4| = 232 > 180, so only S_3 (85 faces, hand count) is drawn.
 #[test]
 fn patch_face_cap_keeps_whole_shells() {
-    let t = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RegularPQ, 4, 0).unwrap();
+    let old = DrawCaps { max_faces: 180, max_centre_radius: 0.985 };
+    let t = build_hyperbolic_tiling_capped(7, 3, HyperbolicStyle::RegularPQ, 4, 0, old).unwrap();
     assert_eq!(t.faces.len(), 85);
     assert_eq!(t.complete_through_shell, 3);
     assert!(t.growth_rule.contains("omitted"), "{}", t.growth_rule);
+}
+
+/// Default caps make the layers slider meaningful: {5,4} layers 1..4 draw |S_1..S_4| = 11, 51, 201,
+/// 761 (hand counts 1 + 10, + 40; GT shells 150, 560), {7,3} 8, 29, 85, 232 (hand / GT), all complete.
+#[test]
+fn default_caps_draw_four_whole_shells() {
+    for (p, q, want) in [(5, 4, [11, 51, 201, 761]), (7, 3, [8, 29, 85, 232])] {
+        for (l, &w) in want.iter().enumerate() {
+            let t = build_hyperbolic_tiling(p, q, HyperbolicStyle::RegularPQ, l + 1, 0).unwrap();
+            assert_eq!((t.faces.len(), t.complete_through_shell), (w, l + 1), "{{{p},{q}}} layers {}", l + 1);
+        }
+    }
 }
 
 /// Styles: dual of {7,3} is {3,7} (|S_1| = 1 + 15 = 16 triangles); kagome keeps the p-gon count.
@@ -346,14 +360,16 @@ fn patch_styles() {
     let r = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RegularPQ, 2, 0).unwrap();
     assert_eq!(k.poincare_pts.len(), r.edges.len());
     let cone = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RegularPQ, 2, -1).unwrap();
-    assert!(cone.growth_rule.contains("not upgraded"));
+    assert!(cone.growth_rule.contains("edge-BFS for q = 3"), "{}", cone.growth_rule);
 }
 
-/// {12,12} layers 1: S_1 = 121 faces fits the face cap, but corner tiles sit at Poincare radius
-/// tanh(R) with cosh R = cot^2(pi/12) ~ 13.9, i.e. ~0.997 > 0.985: shell 1 is truncated and flagged.
+/// {12,12} layers 1 with the old radius cap 0.985: S_1 = 121 faces fits the face cap, but corner tiles
+/// sit at Poincare radius tanh(R) with cosh R = cot^2(pi/12) ~ 13.9, i.e. ~0.9974 > 0.985: shell 1 is
+/// truncated and flagged. (Under the default cap 0.998 they are drawn.)
 #[test]
 fn patch_radius_cap_flags_truncation() {
-    let t = build_hyperbolic_tiling(12, 12, HyperbolicStyle::RegularPQ, 1, 0).unwrap();
+    let old = DrawCaps { max_faces: 180, max_centre_radius: 0.985 };
+    let t = build_hyperbolic_tiling_capped(12, 12, HyperbolicStyle::RegularPQ, 1, 0, old).unwrap();
     assert!(t.faces.len() < 121);
     assert_eq!(t.complete_through_shell, 0);
     assert!(t.growth_rule.contains("truncated"), "{}", t.growth_rule);
@@ -361,8 +377,9 @@ fn patch_radius_cap_flags_truncation() {
 
 /// Large q (regression: an absolute 1e-6 star-closure tolerance rejected these, while the pre-upgrade
 /// e09ee15 drew a patch). Layers 2 must build, and the drawn patch must be a closed disk:
-/// V - E + F = 1. Shell 1 (p (q - 2) faces, more than the 180-face drawing cap, so the drawn patch
-/// is only the seed) is checked on the counter instead: hand count p (q - 2) and S_1 a closed disk,
+/// V - E + F = 1. Shell 1 (p (q - 2) faces; in the drawn patch its corner faces lie beyond the radius
+/// cap or the whole shell exceeds the face cap, so it is drawn partly or not at all) is checked on the
+/// counter instead: hand count p (q - 2) and S_1 a closed disk,
 /// which exercises every vertex star. Very large q builds, or fails or stops with a precision message.
 /// The closed-disk check is topological (on a distance dedup of the vertices); it does not check
 /// that the points lie on the hyperboloid, so beyond p, q <= 12 these are empirical checks.

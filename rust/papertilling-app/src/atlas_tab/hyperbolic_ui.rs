@@ -3,7 +3,9 @@
 
 use std::f64::consts::PI;
 
-use papertilling_core::hyperbolic::inflation::{vertex_completion_counts_budget, ShellCounts};
+use papertilling_core::hyperbolic::inflation::{
+    is_hyperbolic, lambda_plus, vertex_completion_counts_budget, vertex_completion_counts_combinatorial,
+};
 use papertilling_core::hyperbolic::{build_hyperbolic_tiling, HyperbolicStyle};
 
 use crate::mesh3d::atlas_mesh::mesh_from_hyperboloid;
@@ -29,14 +31,60 @@ pub struct HyperbolicPanelState {
     pub shell_key: Option<(usize, usize)>,
     /// Uncapped BDF vertex-completion shell counts, at most [`SHELL_CACHE_MAX`] `{p, q}` keys
     /// (oldest dropped first), so Regular <-> Dual toggles and revisits do not recompute.
-    pub shell_cache: Vec<((usize, usize), Result<ShellCounts, String>)>,
+    pub shell_cache: Vec<((usize, usize), Result<ShellTable, String>)>,
     /// Which shells the drawn patch contains (from the tiling's `growth_rule`).
     pub drawn_patch_note: String,
 }
 
-/// Shells and face budget of the inspector's shell table (interactive, so kept small).
+/// Shells of the inspector's shell table, and the face budget of its geometric fallback.
 const SHELL_TABLE_MAX_N: usize = 6;
 const SHELL_TABLE_FACE_BUDGET: usize = 20_000;
+
+/// One row of the shell table: `n`, `|S_n|`, `a_n`, `a_n / a_{n-1}`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellRow {
+    pub n: usize,
+    pub cumulative: u64,
+    pub shell: u64,
+    pub ratio: Option<f64>,
+}
+
+/// The inspector's shell table for one `{p, q}`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellTable {
+    pub rows: Vec<ShellRow>,
+    pub lambda_plus: f64,
+    /// `true`: exact integer counts from the boundary-letter counter; `false`: the geometric counter
+    /// (used only where the exact one returns `None`).
+    pub exact: bool,
+    /// Why the table stops before `n = SHELL_TABLE_MAX_N` (geometric fallback only).
+    pub stopped: Option<String>,
+}
+
+/// Exact counts from `vertex_completion_counts_combinatorial` (O(n q), microseconds); the geometric
+/// counter only if that returns `None` (u64 overflow or a non-convex step, neither of which occurs for
+/// p, q <= 12 to n = 6), labelled as such.
+pub fn shell_table(p: usize, q: usize) -> Result<ShellTable, String> {
+    if !is_hyperbolic(p, q) {
+        return Err(format!("{{{p}, {q}}} is not hyperbolic (requires (p-2)(q-2) > 4)"));
+    }
+    let rows_from = |a: &[u64]| {
+        let mut cumulative = 0;
+        a.iter()
+            .enumerate()
+            .map(|(n, &s)| {
+                cumulative += s;
+                ShellRow { n, cumulative, shell: s, ratio: (n >= 1).then(|| s as f64 / a[n - 1] as f64) }
+            })
+            .collect()
+    };
+    if let Some(a) = vertex_completion_counts_combinatorial(p, q, SHELL_TABLE_MAX_N) {
+        return Ok(ShellTable { rows: rows_from(&a), lambda_plus: lambda_plus(p, q), exact: true, stopped: None });
+    }
+    let c = vertex_completion_counts_budget(p, q, SHELL_TABLE_MAX_N, SHELL_TABLE_FACE_BUDGET)?;
+    let a: Vec<u64> = c.shells.iter().map(|s| s.shell as u64).collect();
+    Ok(ShellTable { rows: rows_from(&a), lambda_plus: c.lambda_plus, exact: false, stopped: c.stopped })
+}
 /// Number of `{p, q}` shell tables kept in [`HyperbolicPanelState::shell_cache`].
 const SHELL_CACHE_MAX: usize = 16;
 
@@ -128,8 +176,8 @@ impl HyperbolicPanelState {
         };
         ui.separator();
         ui.strong(format!("Vertex completion shells, {{{p},{q}}}, one {p}-gon seed"));
-        let counts = match res {
-            Ok(c) => c,
+        let table = match res {
+            Ok(t) => t,
             Err(e) => {
                 ui.small(e);
                 return;
@@ -140,7 +188,7 @@ impl HyperbolicPanelState {
                 ui.small(egui::RichText::new(h).strong());
             }
             ui.end_row();
-            for s in &counts.shells {
+            for s in &table.rows {
                 ui.small(s.n.to_string());
                 ui.small(s.cumulative.to_string());
                 ui.small(s.shell.to_string());
@@ -152,16 +200,24 @@ impl HyperbolicPanelState {
             "λ+ = γ + √(γ²−1) = {:.5}, γ = ((p−2)(q−2)−2)/2: BDF Eq. 10–11 give it as the growth eigenvalue of the \
              boundary under vertex completion. That the shell ratio a_n/a_{{n-1}} approaches it is observed in this \
              table, not a formula from the paper; λ+ is not a count formula.",
-            counts.lambda_plus
+            table.lambda_plus
         ));
-        if let Some(stop) = &counts.stopped {
+        if table.exact {
+            ui.small("Counts: exact integers from the boundary-letter counter (no geometry).");
+        } else {
+            ui.small("Counts: geometric counter (the exact boundary counter returned None for this pair).");
+        }
+        if let Some(stop) = &table.stopped {
             ui.small(format!("Table stops early: {stop}"));
         }
         if self.style == HyperbolicStyle::RectifiedKagome {
             ui.small("Kagome: counts are of the underlying {p,q} p-gons.");
         }
         if self.wedge_delta != 0 {
-            ui.small("Wedge core Δp ≠ 0: the drawn patch is edge-BFS; this table does not describe it.");
+            ui.small(
+                "Wedge core Δp ≠ 0: the drawn patch grows copies of the wedge core (vertex completion); \
+                 this table (one regular p-gon) does not describe it.",
+            );
         }
         ui.small(format!("Drawn patch: {}", self.drawn_patch_note));
     }
@@ -169,7 +225,7 @@ impl HyperbolicPanelState {
     pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {
         let (pe, qe) = if self.style == HyperbolicStyle::DualQP { (self.q, self.p) } else { (self.p, self.q) };
         if !self.shell_cache.iter().any(|(k, _)| *k == (pe, qe)) {
-            let res = vertex_completion_counts_budget(pe, qe, SHELL_TABLE_MAX_N, SHELL_TABLE_FACE_BUDGET);
+            let res = shell_table(pe, qe);
             if self.shell_cache.len() >= SHELL_CACHE_MAX {
                 self.shell_cache.drain(..1); // drop the oldest table
             }
@@ -302,5 +358,78 @@ impl HyperbolicPanelState {
         let mesh = mesh_from_hyperboloid(&hyp);
         let cap = format!("Hyperboloid H² {} ({} faces)", hyp.symbol_label, hyp.faces.len());
         (Scene2D::VectorScene { primitives: prim }, mesh, cap)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    /// Known answers (hand counts, derived in papertilling-core's hyperbolic inflation_tests):
+    /// {7,3} a_n = 1, 7, 21, 56; {5,4} a_n = 1, 10, 40; |S_1| = 1 + p (q - 2) for every pair.
+    /// Every one of the 92 hyperbolic pairs with p, q in 3..=12 gets an exact table to n = 6; the
+    /// first-load time of all 92 is printed.
+    #[test]
+    fn shell_table_exact_for_all_92_pairs() {
+        let t73 = shell_table(7, 3).unwrap();
+        assert!(t73.exact);
+        assert_eq!(t73.rows.iter().take(4).map(|r| r.shell).collect::<Vec<_>>(), vec![1, 7, 21, 56]);
+        assert_eq!(t73.rows.iter().take(4).map(|r| r.cumulative).collect::<Vec<_>>(), vec![1, 8, 29, 85]);
+        assert_eq!(t73.rows[2].ratio, Some(3.0));
+        let t54 = shell_table(5, 4).unwrap();
+        assert_eq!(t54.rows.iter().take(3).map(|r| r.shell).collect::<Vec<_>>(), vec![1, 10, 40]);
+        assert!(shell_table(4, 4).is_err());
+        let t = Instant::now();
+        let mut worst = (0.0, (0, 0));
+        let mut pairs = 0;
+        for p in 3..=12 {
+            for q in (3..=12).filter(|&q| is_hyperbolic(p, q)) {
+                let t1 = Instant::now();
+                let tab = shell_table(p, q).unwrap();
+                let dt = t1.elapsed().as_secs_f64();
+                if dt > worst.0 {
+                    worst = (dt, (p, q));
+                }
+                assert!(tab.exact && tab.rows.len() == SHELL_TABLE_MAX_N + 1, "{{{p},{q}}}");
+                assert_eq!(tab.rows[1].cumulative, 1 + (p * (q - 2)) as u64, "{{{p},{q}}}");
+                pairs += 1;
+            }
+        }
+        assert_eq!(pairs, 92);
+        println!("# time shell tables, 92 pairs: {:?}; worst {:.3} ms at {:?}", t.elapsed(), 1e3 * worst.0, worst.1);
+    }
+
+    /// Full scene build (tiling + 2D primitives + hyperboloid mesh) for every pair, layer count and
+    /// wedge, timed: the worst case is what one slider step costs.
+    #[test]
+    fn build_scenes_all_pairs_timed() {
+        let t = Instant::now();
+        let mut worst = (0.0, (0, 0, 0, 0), 0, 0);
+        for p in 3..=12 {
+            for q in (3..=12).filter(|&q| is_hyperbolic(p, q)) {
+                for layers in 1..=4 {
+                    for wedge_delta in [0, -1, 1] {
+                        let mut st = HyperbolicPanelState { p, q, layers, wedge_delta, ..Default::default() };
+                        let t1 = Instant::now();
+                        let (scene, _mesh, _cap) = st.build_scenes();
+                        let dt = t1.elapsed().as_secs_f64();
+                        let Scene2D::VectorScene { primitives } = scene else { panic!("vector scene") };
+                        if dt > worst.0 {
+                            worst = (dt, (p, q, layers, wedge_delta as usize), primitives.lines.len(), primitives.polygons.len());
+                        }
+                    }
+                }
+            }
+        }
+        println!(
+            "# time build_scenes 92 pairs x 4 layers x 3 wedges: {:?}; worst {:.1} ms at {:?} ({} line prims, {} polygons)",
+            t.elapsed(),
+            1e3 * worst.0,
+            worst.1,
+            worst.2,
+            worst.3
+        );
     }
 }

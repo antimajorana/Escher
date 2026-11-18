@@ -26,8 +26,9 @@
 //! 2026-11-18; tested through `S_2`). Counts beyond the UI range are empirical.
 //!
 //! An exact integer counter that tracks only the boundary (number of patch faces at each boundary
-//! vertex) is included as an independent cross-check; it is exact while the patch stays convex
-//! in the paper's sense and returns `None` otherwise.
+//! vertex) lives in [`super::boundary_counts`] (re-exported here); it is an independent cross-check,
+//! exact while the patch stays convex in the paper's sense (always, for hyperbolic pairs; see there),
+//! and returns `None` otherwise.
 
 use std::collections::HashMap;
 use std::f64::consts::PI;
@@ -38,16 +39,16 @@ use serde::{Deserialize, Serialize};
 pub type Vec3 = [f64; 3];
 pub type Mat3 = [[f64; 3]; 3];
 
-const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+pub(crate) const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 /// Stop growing once a face centre has time coordinate above this: past it the f64 dedup test
 /// (cancellation of order `eps * t^2`) is no longer trustworthy. Distance ~ `ln(2e6)` ~ 14.5.
 /// It gates face centres only: vertices of the last built shell lie up to ~`2 cosh R` times
 /// further out in `t` and are not limited (see the module doc, "Precision").
 const T_PRECISION_LIMIT: f64 = 1.0e6;
 
-fn mink(a: Vec3, b: Vec3) -> f64 { a[0] * b[0] + a[1] * b[1] - a[2] * b[2] }
-fn mat_vec(m: &Mat3, v: Vec3) -> Vec3 { core::array::from_fn(|i| m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2]) }
-fn mat_mul(a: &Mat3, b: &Mat3) -> Mat3 {
+pub(crate) fn mink(a: Vec3, b: Vec3) -> f64 { a[0] * b[0] + a[1] * b[1] - a[2] * b[2] }
+pub(crate) fn mat_vec(m: &Mat3, v: Vec3) -> Vec3 { core::array::from_fn(|i| m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2]) }
+pub(crate) fn mat_mul(a: &Mat3, b: &Mat3) -> Mat3 {
     core::array::from_fn(|i| core::array::from_fn(|j| a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j]))
 }
 /// Hyperbolic distance from the Minkowski square norm of `a - b` (= `2 (cosh d - 1)`), which avoids
@@ -465,63 +466,6 @@ pub fn vertex_completion_counts_budget(p: usize, q: usize, n_max: usize, budget:
     })
 }
 
-/// Exact integer shell counts `[a_0, .., a_{n_max}]` from the boundary alone.
-///
-/// The boundary is the cyclic list of `k_i` = number of patch faces at boundary vertex `i`. Around
-/// vertex `i` there are `o_i = q - k_i` outside faces: the faces across its two boundary edges and
-/// `o_i - 2` corner faces; if `o_i = 1` the faces across both edges coincide. A new face touching
-/// `m` old boundary edges gets `p - m - 1` new vertices; consecutive new faces share one new vertex.
-/// Valid while the patch is convex (BDF Sec. III): `o_i >= 2` for `q > 3`, and no two adjacent
-/// `o_i = 1` for `q = 3`. Returns `None` if that fails.
-pub fn vertex_completion_counts_combinatorial(p: usize, q: usize, n_max: usize) -> Option<Vec<u64>> {
-    if !is_hyperbolic(p, q) {
-        return None;
-    }
-    let mut boundary: Vec<usize> = vec![1; p];
-    let mut out = vec![1_u64];
-    for _ in 0..n_max {
-        let l = boundary.len();
-        let o: Vec<usize> = boundary.iter().map(|&k| q.checked_sub(k).filter(|&x| x >= 1)).collect::<Option<_>>()?;
-        let convex = if q > 3 { o.iter().all(|&x| x >= 2) } else { (0..l).all(|i| o[i] >= 2 || o[(i + 1) % l] >= 2) };
-        if !convex {
-            return None;
-        }
-        // New faces in cyclic order, as their new-vertex counts c = p - m - 1.
-        let i0 = (0..l).find(|&i| o[i] >= 2)?;
-        let mut c_list: Vec<usize> = Vec::new();
-        let mut open_m = 0_usize; // edges touched by the currently open edge face
-        for t in 0..l {
-            let i = (i0 + t) % l;
-            if o[i] == 1 {
-                open_m += 1;
-                continue;
-            }
-            if open_m > 0 {
-                c_list.push(p.checked_sub(open_m + 1).filter(|&c| c >= 1)?);
-            }
-            c_list.extend(std::iter::repeat_n(p - 1, o[i] - 2));
-            open_m = 1;
-        }
-        c_list.push(p.checked_sub(open_m + 1).filter(|&c| c >= 1)?);
-        out.push(c_list.len() as u64);
-        // New boundary: private vertices (k = 1) and shared vertices (k = faces containing them).
-        let f0 = (0..c_list.len()).find(|&j| c_list[j] >= 2)?;
-        let mut next = Vec::with_capacity(c_list.len() * p);
-        let mut pending = 0_usize;
-        for t in 0..c_list.len() {
-            let c = c_list[(f0 + t) % c_list.len()];
-            if c == 1 {
-                pending += 1; // its single new vertex is also in the following face
-                continue;
-            }
-            if t > 0 {
-                next.push(pending);
-            }
-            next.extend(std::iter::repeat_n(1, c - 2));
-            pending = 2;
-        }
-        next.push(pending);
-        boundary = next;
-    }
-    Some(out)
-}
+/// Exact integer shell counts from the boundary alone (letter counts; see [`super::boundary_counts`]),
+/// and the whole-word version they are cross-checked against.
+pub use super::boundary_counts::{vertex_completion_counts_boundary_word, vertex_completion_counts_combinatorial};

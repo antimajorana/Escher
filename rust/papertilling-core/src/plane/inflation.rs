@@ -15,9 +15,10 @@
 //! complement `R^2 \ |S|`. Two non-patch faces meeting only at a patch vertex are separated by that vertex, so
 //! vertex adjacency would leave pinched pockets (a ring whose ends touch at one vertex) unfilled.
 //!
-//! [`inflate`] errs when `S~_0` has `chi != 1` or a pinch vertex, as for a [`InflationSeed::CellStar`] whose basis
-//! stars at offset `(0, 0)` are not edge-connected (named `elongated_triangular`: two disjoint stars). Each step
-//! works only on the faces the previous step added (completion, FillHoles starts, topology update).
+//! [`inflate`] / [`inflate_with`] err when `S~_0` has `chi != 1` or a pinch vertex. Each step works only on the
+//! faces the previous step added (completion, FillHoles starts, topology update). Child modules: the growth rules
+//! and results (`inflation_grow.rs`), the Dirichlet seed (`inflation_dirichlet.rs`) and tile classes / symmetry
+//! (`inflation_symmetry.rs`), and the torus mode (`inflation_torus.rs`).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -25,12 +26,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::plane::tuning;
 use crate::surface::quotient::{CellGeom, Dart2D, plane_faces};
-use crate::types::{Bond2D, Cell2D};
+use crate::types::{Bond2D, Cell2D, FracOp2D};
 
 #[path = "inflation_topology.rs"]
 mod topology;
 pub use topology::PatchTopology;
 use topology::Tracker;
+#[path = "inflation_grow.rs"]
+mod grow;
+pub use grow::{CentreSet, InflationFace, InflationResult, InflationRule, ShellStats, inflate, inflate_with};
+#[path = "inflation_dirichlet.rs"]
+mod dirichlet;
+pub use dirichlet::{CentreKind, SymmetricPoint};
+#[path = "inflation_symmetry.rs"]
+mod symmetry;
+#[path = "inflation_torus.rs"]
+mod torus;
+pub use torus::{TorusResult, TorusShell};
 
 /// Integer cell offset `(n1, n2)` in units of `(a1, a2)`.
 pub type Off = [i32; 2];
@@ -45,16 +57,18 @@ pub const MAX_STEPS: usize = 64;
 fn add(a: Off, b: Off) -> Off { [a[0] + b[0], a[1] + b[1]] }
 fn sub(a: Off, b: Off) -> Off { [a[0] - b[0], a[1] - b[1]] }
 
-/// Initial patch `S~_0` (before FillHoles).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Initial face set (before FillHoles).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum InflationSeed {
     /// The single face of this orbit at offset `(0, 0)`.
     Face(usize),
     /// All faces around basis site `i` at offset `(0, 0)`.
     VertexStar(usize),
-    /// Union of the vertex stars of every basis site at offset `(0, 0)`. This is a closed disk only when those
-    /// stars are edge-connected, which depends on the chosen basis representatives; [`inflate`] errs otherwise.
-    CellStar,
+    /// Faces whose centroids lie in the closed Wigner-Seitz cell of the lattice about the most symmetric point
+    /// ([`PlaneTiling::most_symmetric_point`]), boundary ties included.
+    Dirichlet,
+    /// Faces whose centroids lie in the closed Wigner-Seitz cell about this Cartesian point.
+    DirichletAt([f64; 2]),
 }
 
 /// One corner of a face orbit: the corner's site, its offset relative to the first corner, and the face across
@@ -85,6 +99,8 @@ pub struct PlaneTiling {
     orbits: Vec<Vec<Corner>>,
     rotation: Vec<Vec<SiteCorner>>,
     pad: Off,
+    /// Coset representatives `x_frac -> mf x_frac + t` of the cell's uncoloured symmetry group modulo translations.
+    ops: Vec<FracOp2D>,
 }
 
 impl PlaneTiling {
@@ -174,7 +190,8 @@ impl PlaneTiling {
             (lo[ax], hi[ax]) = (lo[ax].min(x), hi[ax].max(x));
         }
         let pad = [(hi[0] - lo[0]).ceil() as i32 + 1, (hi[1] - lo[1]).ceil() as i32 + 1];
-        let t = Self { a1: cell.a1, a2: cell.a2, basis: cell.basis.clone(), orbits, rotation, pad };
+        let ops = cell.symmetry_frac_ops(false);
+        let t = Self { a1: cell.a1, a2: cell.a2, basis: cell.basis.clone(), orbits, rotation, pad, ops };
         let det = (cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0]).abs();
         let areas: Vec<f64> = (0..nf).map(|g| signed_area(&t.polygon((g, [0, 0])))).collect();
         // Backstop for multi-orbit cells; after the planarity check it should not fire (each face is a simple
@@ -220,7 +237,8 @@ impl PlaneTiling {
             InflationSeed::Face(f) => Err(format!("face orbit {f} out of range ({} orbits)", self.orbits.len())),
             InflationSeed::VertexStar(s) if s < self.rotation.len() => Ok(star(s).into_iter().collect()),
             InflationSeed::VertexStar(s) => Err(format!("site {s} out of range ({} sites)", self.rotation.len())),
-            InflationSeed::CellStar => Ok((0..self.rotation.len()).flat_map(star).collect()),
+            InflationSeed::Dirichlet => Ok(self.dirichlet_faces(self.most_symmetric_point().point)),
+            InflationSeed::DirichletAt(c) => Ok(self.dirichlet_faces(c)),
         }
     }
 
@@ -315,84 +333,4 @@ fn grow_box(b: &mut (Off, Off), faces: &[FaceId]) {
 fn signed_area(poly: &[[f64; 2]]) -> f64 {
     let n = poly.len();
     0.5 * (0..n).map(|k| poly[k][0] * poly[(k + 1) % n][1] - poly[(k + 1) % n][0] * poly[k][1]).sum::<f64>()
-}
-
-/// Per-shell statistics of `S~_n`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ShellStats {
-    pub n: usize,
-    pub topology: PatchTopology,
-    /// `N_n = |S~_n| - |S~_{n-1}|` (`N_0 = |S~_0|`).
-    pub new_tiles: usize,
-    /// `N_n / N_{n-1}` for `n >= 1`.
-    pub growth: Option<f64>,
-    /// Faces added by FillHoles at this step (included in `new_tiles`).
-    pub filled: usize,
-}
-
-/// One face of the final patch, drawn in Cartesian coordinates, with the shell that first contained it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct InflationFace {
-    pub orbit: usize,
-    pub offset: Off,
-    pub shell: usize,
-    pub polygon: Vec<[f64; 2]>,
-}
-
-/// Shells `S~_0 .. S~_{n_max}` and the faces of the final patch.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct InflationResult {
-    pub shells: Vec<ShellStats>,
-    pub faces: Vec<InflationFace>,
-}
-
-/// Grow `S~_0 = FillHoles(seed)` by `S~_{n+1} = FillHoles(S~_n U U(S~_n))` for `n_max` steps. Errs when `S~_0`
-/// is not a closed disk (`chi != 1` or a pinch vertex), e.g. a `CellStar` whose basis stars are not edge-connected.
-pub fn inflate(cell: &Cell2D, seed: InflationSeed, n_max: usize) -> Result<InflationResult, String> {
-    if n_max > MAX_STEPS {
-        return Err(format!("n_max = {n_max} exceeds the limit {MAX_STEPS}"));
-    }
-    let tiling = PlaneTiling::new(cell)?;
-    let mut patch = tiling.seed_faces(seed)?;
-    let mut frontier: Vec<FaceId> = patch.iter().copied().collect::<BTreeSet<_>>().into_iter().collect();
-    let filled0 = tiling.fill_holes(&mut patch);
-    frontier.extend(filled0.iter().copied());
-    let mut tracker = Tracker::default();
-    tracker.add(&tiling, &frontier, &patch);
-    let top = tracker.stats();
-    if top.chi != 1 || top.pinch_vertices != 0 {
-        let why = match seed {
-            InflationSeed::CellStar => ": the vertex stars of the basis sites at offset (0, 0) are not edge-connected",
-            _ => "",
-        };
-        let (chi, pinch) = (top.chi, top.pinch_vertices);
-        return Err(format!("S~_0 of {seed:?} is not a closed disk (chi = {chi}, {pinch} pinch vertices){why}"));
-    }
-    let mut bbox = EMPTY_BOX;
-    grow_box(&mut bbox, &frontier);
-    let mut order: Vec<(FaceId, usize)> = frontier.iter().map(|&f| (f, 0)).collect();
-    let mut shells = vec![ShellStats { n: 0, topology: top, new_tiles: patch.len(), growth: None, filled: filled0.len() }];
-    for n in 1..=n_max {
-        let grown: Vec<FaceId> = tiling.completion_from(&patch, &frontier).into_iter().collect();
-        patch.extend(grown.iter().copied());
-        grow_box(&mut bbox, &grown);
-        let filled = tiling.fill_holes_from(&mut patch, &grown, bbox);
-        frontier = grown;
-        frontier.extend(filled.iter().copied());
-        tracker.add(&tiling, &frontier, &patch);
-        order.extend(frontier.iter().map(|&f| (f, n)));
-        let (new_tiles, prev) = (frontier.len(), shells[n - 1].new_tiles);
-        shells.push(ShellStats {
-            n,
-            topology: tracker.stats(),
-            new_tiles,
-            growth: (prev > 0).then(|| new_tiles as f64 / prev as f64),
-            filled: filled.len(),
-        });
-    }
-    let faces = order
-        .into_iter()
-        .map(|(face, shell)| InflationFace { orbit: face.0, offset: face.1, shell, polygon: tiling.polygon(face) })
-        .collect();
-    Ok(InflationResult { shells, faces })
 }

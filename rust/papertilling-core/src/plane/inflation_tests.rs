@@ -194,6 +194,14 @@ fn naive_topology(cell: &Cell2D, t: &PlaneTiling, patch: &HashSet<FaceId>) -> Pa
         }
     }
     let (faces, vertices, edges) = (patch.len(), verts.len(), sides.len());
+    // A boundary tile has an edge whose other side is not a patch face (an edge seen once).
+    let boundary_tiles = patch
+        .iter()
+        .filter(|&&f| {
+            let vs = t.face_vertices(f);
+            (0..vs.len()).any(|k| sides[&key(vs[k], vs[(k + 1) % vs.len()])] == 1)
+        })
+        .count();
     PatchTopology {
         faces,
         vertices,
@@ -202,6 +210,7 @@ fn naive_topology(cell: &Cell2D, t: &PlaneTiling, patch: &HashSet<FaceId>) -> Pa
         chi: vertices as i64 - edges as i64 + faces as i64,
         pinch_vertices,
         dangling_bonds,
+        boundary_tiles,
     }
 }
 
@@ -233,6 +242,17 @@ fn disk_failures(label: &str, cell: &Cell2D, seed: InflationSeed) -> (Vec<String
         if drawn != reference || *tp != t.topology(&reference) || *tp != naive_topology(cell, &t, &reference) {
             bad.push(format!("{label} {seed:?} n={}: inflate differs from the from-scratch reference shell", s.n));
         }
+        // Boundary vertex types from scratch: patch vertices with a non-patch face corner, by patch corner count.
+        let mut types = std::collections::BTreeMap::new();
+        for v in reference.iter().flat_map(|&f| t.face_vertices(f)).collect::<HashSet<_>>() {
+            let inside = t.vertex_faces(v).iter().filter(|f| reference.contains(f)).count();
+            if inside < t.vertex_faces(v).len() {
+                *types.entry(inside).or_insert(0) += 1;
+            }
+        }
+        if types != s.boundary_vertex_types {
+            bad.push(format!("{label} {seed:?} n={}: boundary vertex types differ from scratch", s.n));
+        }
         let grew = s.n == 0 || s.new_tiles > 0;
         if tp.chi != 1 || tp.pinch_vertices != 0 || !grew {
             bad.push(format!("{label} {seed:?} n={}: chi={} pinch={} new={}", s.n, tp.chi, tp.pinch_vertices, s.new_tiles));
@@ -244,16 +264,16 @@ fn disk_failures(label: &str, cell: &Cell2D, seed: InflationSeed) -> (Vec<String
 /// The distinctive part of the `Err` that `inflate` returns when `S~_0` is not a closed disk.
 const NOT_DISK: &str = "is not a closed disk";
 
-/// Disk-check outcome over many cells: failures, CellStar seeds rejected as not a disk, runs where FillHoles fired.
+/// Disk-check outcome over many cells: failures, Dirichlet seeds rejected as not a disk, runs where FillHoles fired.
 #[derive(Default)]
 struct Sweep {
     bad: Vec<String>,
-    cell_star_err: Vec<String>,
+    dirichlet_err: Vec<String>,
     filled: Vec<String>,
 }
 
 impl Sweep {
-    /// Every Face and VertexStar seed of `cell` must give disk shells. CellStar must either give disk shells or be
+    /// Every Face and VertexStar seed of `cell` must give disk shells. Dirichlet must either give disk shells or be
     /// rejected with the S~_0-not-a-disk error (any other error is a failure).
     fn add(&mut self, label: &str, cell: &Cell2D) {
         // `PlaneTiling::new` checks the torus Euler characteristic, that no bonds cross or pass through a site, and
@@ -267,14 +287,14 @@ impl Sweep {
                 self.filled.push(format!("{label} {seed:?}: {filled} faces"));
             }
         }
-        match inflate(cell, InflationSeed::CellStar, 4) {
-            Err(e) if e.contains(NOT_DISK) => self.cell_star_err.push(format!("{label}: {e}")),
-            _ => self.bad.extend(disk_failures(label, cell, InflationSeed::CellStar).0),
+        match inflate(cell, InflationSeed::Dirichlet, 4) {
+            Err(e) if e.contains(NOT_DISK) => self.dirichlet_err.push(format!("{label}: {e}")),
+            _ => self.bad.extend(disk_failures(label, cell, InflationSeed::Dirichlet).0),
         }
     }
 
     fn report(&self, what: &str) {
-        println!("{what} CellStar rejected as not a disk: {} {:#?}", self.cell_star_err.len(), self.cell_star_err);
+        println!("{what} Dirichlet rejected as not a disk: {} {:#?}", self.dirichlet_err.len(), self.dirichlet_err);
         println!("{what} Face/VertexStar runs where FillHoles added faces ({}): {:#?}", self.filled.len(), self.filled);
     }
 }
@@ -294,32 +314,12 @@ fn inflation_named_lattices_shells_are_disks() {
 }
 
 #[test]
-fn inflation_named_lattices_cell_star() {
-    // elongated_triangular (3^3.4^2): rows of unit squares between rows of unit triangles, with horizontal bonds.
-    // From the input cell: every bond has length 1 and vertical extent |dy| in {0, sqrt(3)/2, 1}, the dy = 0 bonds
-    // being the horizontal ones. A face at a site is a triangle (third corner = the end of a bond at the site) or
-    // an axis-aligned unit square (far corner = site + horizontal bond + vertical bond), so the vertex star of a
-    // site lies in the strip |y - y_site| <= 1. The two basis sites at offset (0, 0) are 1 + sqrt(3) > 2 apart in
-    // y, so their stars share no vertex: S_0 is two disjoint closed disks (each star of 5 faces around a vertex),
-    // the complement is connected, FillHoles adds nothing, and chi(S~_0) = 1 + 1 = 2 with no pinch vertex.
-    let et = named("elongated_triangular").cell;
-    assert_eq!(et.basis.len(), 2);
-    assert!(((et.basis[0][1] - et.basis[1][1]).abs() - (1.0 + 3f64.sqrt())).abs() < 1e-9, "{:?}", et.basis);
-    for b in &et.bonds {
-        let d: Vec<f64> = (0..2)
-            .map(|ax| et.basis[b.j][ax] + b.n1 as f64 * et.a1[ax] + b.n2 as f64 * et.a2[ax] - et.basis[b.i][ax])
-            .collect();
-        assert!((d[0].hypot(d[1]) - 1.0).abs() < 1e-9, "bond {b:?} = {d:?}");
-        let dy = d[1].abs();
-        assert!([0.0, 3f64.sqrt() / 2.0, 1.0].iter().any(|&h| (dy - h).abs() < 1e-9), "bond {b:?} = {d:?}");
-    }
-    let err = inflate(&et, InflationSeed::CellStar, 1).unwrap_err();
-    assert!(err.contains("is not a closed disk (chi = 2, 0 pinch vertices)"), "{err}");
-    assert!(err.contains("not edge-connected"), "{err}");
-    // Every other named lattice: CellStar is accepted and every shell is a closed disk.
+fn inflation_named_lattices_dirichlet() {
+    // Every named lattice: the Dirichlet seed is accepted (S~_0 a closed disk) and every BDF shell n <= 4 is a
+    // closed disk that agrees with the from-scratch reference.
     let mut bad = Vec::new();
-    for lat in parse_named_str(NAMED_JSON).unwrap().named.iter().filter(|l| l.key != "elongated_triangular") {
-        bad.extend(disk_failures(&lat.key, &lat.cell, InflationSeed::CellStar).0);
+    for lat in &parse_named_str(NAMED_JSON).unwrap().named {
+        bad.extend(disk_failures(&lat.key, &lat.cell, InflationSeed::Dirichlet).0);
     }
     assert!(bad.is_empty(), "{bad:#?}");
 }
@@ -461,7 +461,8 @@ const POINTS_JSON: &str = include_str!("../../../../papertilling/data/points.jso
 const SHEET_JSON: &str = include_str!("../../../../papertilling/data/sheet.json");
 const MINIMAL_B_JSON: &str = include_str!("../../../../papertilling/data/minimal_b.json");
 
-/// Sweep every drawing of one stored catalogue (Face and VertexStar seeds, n = 0..=4); CellStar is printed only.
+/// Sweep every drawing of one stored catalogue (Face and VertexStar seeds, n = 0..=4); Dirichlet rejections are
+/// printed only.
 fn catalogue_sweep(file: &str, text: &str) {
     let t0 = Instant::now();
     let cats = parse_catalogue_str(text).unwrap();
@@ -497,10 +498,10 @@ fn inflation_catalogue_minimal_b_shells_are_disks() {
 
 #[test]
 fn inflation_handoff_mixed_polygon_entries_are_disks() {
-    // The spec names "p4m #6, p6 #5, pmm #5" without a file or base. ASSUMPTION: 1-based indices into a group's
-    // `all` list (one entry per network), i.e. p4m all[5], p6 all[4], pmm all[4]. The 0-based reading (all[6],
-    // all[5], all[5]) is checked as well. Each is taken from sheet.json, points.json and minimal_b.json when that
-    // list is long enough. For n = 0..=4 and every seed: chi = 1 and no pinch vertex (`Sweep`). "Zero dangling
+    // Plain examples of mixed-polygon entries (author decision 6: catalogue numbering is 1-based, the app labels
+    // entry k as #k+1; "p4m #6, p6 #5, pmm #5" came from a handoff prompt and carry no special status): p4m all[5],
+    // p6 all[4], pmm all[4], and the neighbours all[6], all[5], all[5]. Each is taken from sheet.json, points.json
+    // and minimal_b.json when that list is long enough. For n = 0..=4 and every seed: chi = 1 and no pinch vertex (`Sweep`). "Zero dangling
     // bonds" is not asserted: the definition is the author's call. In the `PatchTopology::dangling_bonds` sense (a
     // bond between two patch vertices on no patch face) it is NOT zero for most entries (see
     // `inflation_dangling_bond_notches`); `DANGLING` lines print the nonzero counts. (The legacy `prune` sense, a
@@ -523,8 +524,13 @@ fn inflation_handoff_mixed_polygon_entries_are_disks() {
             println!("{label} face sizes {}; plain BDF chi {chis:?}", face_size_label(&cell).0);
             sw.add(&label, &cell);
             let seeds = (0..t.orbit_count()).map(InflationSeed::Face).chain((0..cell.basis.len()).map(InflationSeed::VertexStar));
-            for seed in seeds.chain([InflationSeed::CellStar]) {
-                let res = inflate(&cell, seed, 4).unwrap_or_else(|e| panic!("{label} {seed:?}: {e}"));
+            for seed in seeds.chain([InflationSeed::Dirichlet]) {
+                // A Dirichlet seed whose S~_0 is pinched is rejected (sheet/p6/all[5]: chi = 1, 1 pinch); it is
+                // counted in `Sweep::dirichlet_err` and printed, any other error fails.
+                let res = match inflate(&cell, seed, 4) {
+                    Err(e) if seed == InflationSeed::Dirichlet && e.contains(NOT_DISK) => continue,
+                    r => r.unwrap_or_else(|e| panic!("{label} {seed:?}: {e}")),
+                };
                 let dangling: Vec<usize> = res.shells.iter().map(|s| s.topology.dangling_bonds).collect();
                 if dangling != vec![0; 5] {
                     println!("DANGLING {label} {seed:?}: {dangling:?}");
@@ -540,7 +546,6 @@ fn inflation_handoff_mixed_polygon_entries_are_disks() {
         assert!(checked.iter().any(|c| c == want), "{want} missing");
     }
     assert!(sw.bad.is_empty(), "{:#?}", sw.bad);
-    assert!(sw.cell_star_err.is_empty(), "{:#?}", sw.cell_star_err);
 }
 
 #[test]
