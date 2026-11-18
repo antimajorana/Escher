@@ -79,6 +79,8 @@ impl PapertillingApp {
             None => None,
         };
         self.preset_pending = None;
+        self.canvas2d.reset();
+        self.view3d.reset();
         self.switch_tab(NavTab::Gallery);
         self.gallery.cancel_rename();
         if let Some(item) = item {
@@ -256,8 +258,9 @@ impl PapertillingApp {
 }
 
 /// Reset 3D sheet options and inspectors (Burgers circuit, 2D overlay, tight-binding spectrum) so a Defects or
-/// Combine preset never depends on earlier state. LDOS / charge open the spectrum panel and its 2D overlay; any
-/// other colouring closes both.
+/// Combine preset never depends on earlier state. LDOS / charge configures the spectral color mode and 2D overlay
+/// (while `CollapsingHeader::default_open(false)` in `spectrum_ui.rs` keeps the visual fold state); any other
+/// colouring clears both.
 fn reset_sheet_and_inspectors(
     insp: &mut DefectInspectors,
     sheet_opts: &mut Sheet3dViewOpts,

@@ -52,6 +52,7 @@ fn settled(app: &PapertillingApp) -> bool {
                 Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge
             );
             let spectral_ok = (!d.inspectors.spectrum.expanded && !wants_spectral)
+                || d.error.is_some()
                 || (!d.inspectors.spectrum.is_busy()
                     && (d.inspectors.spectrum.result.is_some() || d.inspectors.spectrum.last_error.is_some()));
             app.preset_pending.is_none() && !d.is_busy() && !d.initializing && !d.view3d_dirty && spectral_ok
