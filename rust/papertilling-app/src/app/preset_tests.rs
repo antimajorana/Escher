@@ -44,6 +44,7 @@ fn preset_idx(name: &str) -> usize {
 fn settled(app: &PapertillingApp) -> bool {
     match app.active_tab {
         NavTab::Gallery | NavTab::Atlas => true,
+        NavTab::Workbench => !app.workbench_busy() && !app.workbench.dirty,
         NavTab::Surfaces => !app.surfaces.is_building() && !app.surfaces.elastic.is_busy(),
         NavTab::Defects => {
             let d = &app.defects;
@@ -102,6 +103,7 @@ fn snapshot(app: &PapertillingApp) -> String {
             format!("{:?} {:?} {} {:?} {:?} {}", d.current_selection(), d.sub_tab, d.radius, d.view_mode, d.sheet_opts.color_mode, d.readout.title)
         }
         NavTab::Combine => format!("{:?} {:?} {}", app.combine.specs, app.combine.view_mode, app.combine.undo_stack.len()),
+        NavTab::Workbench => format!("{:?}", app.workbench.view),
         NavTab::Atlas => {
             let a = &app.atlas;
             format!(
@@ -359,7 +361,8 @@ fn preset_list_has_unique_names_descriptions_and_valid_lattices() {
             assert!(app.preset_lattice_item(l).is_some(), "{}: lattice {l:?}", p.name);
         }
     }
-    for tab in NavTab::ALL {
+    // Workbench views have no preset yet; PRESETS is capped at 15 by the assertion above.
+    for tab in NavTab::ALL.into_iter().filter(|t| *t != NavTab::Workbench) {
         assert!(PRESETS.iter().any(|p| p.tab() == tab), "{tab:?} has a preset");
     }
     for mode in super::AppMode::ALL {

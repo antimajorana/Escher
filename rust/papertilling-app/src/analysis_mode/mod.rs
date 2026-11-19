@@ -29,7 +29,7 @@ mod source_key;
 pub(crate) mod spectrum_ui;
 pub(crate) mod spectrum_worker;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod ui;
 
 use source_key::{SourceKey, build_source_key};

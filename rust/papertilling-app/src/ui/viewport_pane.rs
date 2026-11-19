@@ -88,6 +88,14 @@ impl PapertillingApp {
                 self.analysis
                     .show_central(ui, &mut env, &mut self.viewport_split_ratio, &tokens);
             }
+            NavTab::Workbench => {
+                self.workbench_pump_sources(ui.ctx());
+                let mut ratio = self.viewport_split_ratio;
+                self.workbench_call(|wb, cx, canvas, view3d| {
+                    wb.show_central(ui, cx, canvas, view3d, &mut ratio, &tokens);
+                });
+                self.viewport_split_ratio = ratio;
+            }
         }
         });
     }

@@ -13,6 +13,7 @@ use crate::gallery_tab::GalleryTabState;
 use crate::surfaces_tab::SurfacesTabState;
 use crate::theme::StudioTheme;
 use crate::view3d::{OffscreenGpuContext, View3dState};
+use crate::workbench::WorkbenchState;
 
 mod export3d;
 mod modes;
@@ -30,6 +31,7 @@ mod session_tests;
 mod smoke;
 #[cfg(test)]
 mod tests;
+mod workbench_hooks;
 
 pub use modes::{AppMode, DefectsView, LatticesView, NavTab};
 
@@ -107,6 +109,8 @@ pub struct PapertillingApp {
     pub(crate) combine: CombineTabState,
     pub(crate) atlas: crate::atlas_tab::AtlasTabState,
     pub(crate) analysis: AnalysisModeState,
+    /// Stage S2..S6 panels behind `NavTab::Workbench`.
+    pub(crate) workbench: WorkbenchState,
     pub(crate) switcher: crate::ui::lattice_switcher::LatticeSwitcher,
     /// Follow-up work of the last preset waiting on a tab's background worker (Combine pins or Defects spectrum).
     pub(crate) preset_pending: Option<preset_apply::PendingPreset>,
@@ -195,6 +199,7 @@ impl PapertillingApp {
             combine,
             atlas,
             analysis,
+            workbench: WorkbenchState::new(),
             switcher: Default::default(),
             preset_pending: None,
             session: session_hooks::SessionHost::for_mode(smoke_test),
@@ -274,6 +279,8 @@ impl PapertillingApp {
                 self.analysis.sync_canvas(&self.surfaces, &self.defects, &self.combine, &mut self.canvas2d);
                 self.analysis.sync_view3d(&self.surfaces, &self.defects, &self.combine, &mut self.view3d);
             }
+            // the Gallery redraw replaced the workbench scene: rebuild (lattice-dependent panels) and re-push it
+            NavTab::Workbench => self.workbench_lattice_changed(),
         }
     }
 
@@ -310,6 +317,10 @@ impl PapertillingApp {
             self.export_status = String::from("Wait for the spectrum or source build before exporting.");
             return;
         }
+        if self.active_tab == NavTab::Workbench && self.workbench_busy() {
+            self.export_status = String::from("Wait for the workbench build before exporting.");
+            return;
+        }
         let default_name = match self.active_tab {
             NavTab::Gallery => "lattice_gallery.svg",
             NavTab::Surfaces => "surface_net.svg",
@@ -317,6 +328,7 @@ impl PapertillingApp {
             NavTab::Combine => "combined_defects.svg",
             NavTab::Atlas => "atlas_scene.svg",
             NavTab::Analysis => "analysis_spectrum.svg",
+            NavTab::Workbench => "workbench_scene.svg",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 2D scene (SVG or PNG)")
@@ -348,6 +360,10 @@ impl PapertillingApp {
             self.export_status = String::from("Wait for the spectrum or source build before exporting .obj.");
             return;
         }
+        if self.active_tab == NavTab::Workbench && self.workbench_busy() {
+            self.export_status = String::from("Wait for the workbench build before exporting .obj.");
+            return;
+        }
         if self.active_tab == NavTab::Defects && self.defects.is_busy() {
             self.export_status = String::from("Wait for the defect build before exporting .obj.");
             return;
@@ -370,6 +386,7 @@ impl PapertillingApp {
             NavTab::Combine => "combined_sheet.obj",
             NavTab::Atlas => "atlas_mesh.obj",
             NavTab::Analysis => "analysis_mesh.obj",
+            NavTab::Workbench => "workbench_mesh.obj",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 3D mesh (.obj)")
@@ -389,6 +406,7 @@ impl PapertillingApp {
                     &self.combine,
                     &path,
                 ),
+                NavTab::Workbench => self.workbench.export_active_obj(&path, &self.view3d),
             };
             self.export_status = match res {
                 Ok(msg) => msg,
@@ -427,6 +445,8 @@ impl PapertillingApp {
                 self.analysis.sync_canvas(&self.surfaces, &self.defects, &self.combine, &mut self.canvas2d);
                 self.analysis.sync_view3d(&self.surfaces, &self.defects, &self.combine, &mut self.view3d);
             }
+            // the renamed Gallery cell was redrawn into the shared canvas: restore the workbench scene
+            NavTab::Workbench => self.workbench_lattice_changed(),
         }
     }
 }

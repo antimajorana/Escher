@@ -184,6 +184,7 @@ impl PapertillingApp {
             defects_view: Some(name_of(self.defects_view)),
             analysis_target: Some(name_of(self.analysis.target)),
             analysis_view: Some(name_of(self.analysis.view_mode)),
+            workbench: Some(self.workbench.capture()),
         }
     }
 

@@ -128,6 +128,8 @@ impl PapertillingApp {
             None => {}
         }
         self.analysis.reset_transient_for_session();
+        // before routing: the routed view wins over the JSON "view", and entering it uses the restored panel state
+        self.workbench.restore(st.workbench.as_ref(), notes);
 
         let use_v2_mode = st.schema_version >= 2 && st.active_mode.is_some();
         if use_v2_mode {
@@ -167,6 +169,8 @@ impl PapertillingApp {
                 Some(NavTab::Defects) => self.select_defects_view(DefectsView::Catalogue2D),
                 Some(NavTab::Combine) => self.select_defects_view(DefectsView::CombineAndFuse),
                 Some(NavTab::Analysis) => self.switch_mode(AppMode::Analysis),
+                // never written by a v1 app (the tab did not exist); listed because the match is exhaustive
+                Some(NavTab::Workbench) => self.select_lattices_view(LatticesView::Plane2D),
                 Some(NavTab::Atlas) => {
                     if self.atlas.sub_tab == AtlasSubTab::HyperbolicH2 {
                         self.select_lattices_view(LatticesView::NonEuclidean);

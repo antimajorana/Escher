@@ -1,10 +1,15 @@
-//! Real native GPU smoke coverage of five surface states and both new 3D sheet tabs.
+//! Real native GPU smoke coverage: five surface states, the 3D sheet tabs, Analysis, the Atlas views and the
+//! three 3D workbench views (stages 0..=LAST_SMOKE_STAGE, one new painted non-empty mesh per stage).
 use std::sync::atomic::Ordering;
 
 use super::{NavTab, PapertillingApp, SurfaceTargetUi};
 use crate::mesh3d::DefectViewMode;
+use crate::workbench::WorkbenchView;
 
 const MAX_SMOKE_FRAMES: u32 = 1800;
+/// The final stage (Atlas H² + the offscreen 3D PNG export). Stages: 0..4 surfaces, 5 defects sheet, 6 combine
+/// sheet, 7 FvK, 8 AO Mobius, 9 Analysis, 10 Atlas 3D, 11 flat 3D, 12 curved 2D, 13 honeycombs, 14 Atlas H².
+pub(super) const LAST_SMOKE_STAGE: u32 = 14;
 
 impl PapertillingApp {
     fn smoke_stage_waiting(&self) -> bool {
@@ -28,6 +33,7 @@ impl PapertillingApp {
                     || (self.analysis.spectrum.last_error.is_none()
                         && (self.analysis.spectrum.result.is_none() || self.view3d.legend().is_none()))
             }
+            NavTab::Workbench => self.workbench_busy() || self.workbench.dirty,
             _ => false,
         }
     }
@@ -45,6 +51,7 @@ impl PapertillingApp {
             NavTab::Analysis => {
                 self.defects.error.is_some() || self.analysis.spectrum.last_error.is_some()
             }
+            NavTab::Workbench => self.workbench.error().is_some(),
             NavTab::Gallery | NavTab::Atlas => false,
         }
     }
@@ -85,12 +92,12 @@ impl PapertillingApp {
             && !cap.contains("unavailable");
 
         if ready {
-            if self.last_smoke_stage == 11 && self.smoke_reported {
+            if self.last_smoke_stage == LAST_SMOKE_STAGE && self.smoke_reported {
                 // already reported; the window is closing (the 3D view is no longer drawn, so no second export)
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return true;
             }
-            if self.last_smoke_stage == 11 {
+            if self.last_smoke_stage == LAST_SMOKE_STAGE {
                 // the real offscreen 3D PNG path (render, readback, compose, encode, write, decode)
                 let export3d = match self.smoke_export_3d(ctx.cumulative_pass_nr()) {
                     Ok(Some(info)) => {
@@ -111,7 +118,7 @@ impl PapertillingApp {
                 if !self.smoke_reported {
                     self.smoke_reported = true;
                     println!(
-                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=12 (surfaces,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,atlas-h2) export3d={export3d}",
+                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=15 (surfaces x5,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,flat3d,curved2d,honeycombs,atlas-h2) export3d={export3d}",
                         self.adapter_name, self.backend_name, self.view3d.counters.uploads()
                     );
                 }
@@ -128,7 +135,10 @@ impl PapertillingApp {
                     self.atlas.dirty = true;
                     self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
                 }
-                11 => {
+                11 => self.smoke_enter_workbench(WorkbenchView::S4Flat3d),
+                12 => self.smoke_enter_workbench(WorkbenchView::S5Curved2d),
+                13 => self.smoke_enter_workbench(WorkbenchView::S6Honeycombs),
+                LAST_SMOKE_STAGE => {
                     self.select_lattices_view(super::LatticesView::NonEuclidean);
                     self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
                 }
@@ -192,6 +202,16 @@ impl PapertillingApp {
         ctx.request_repaint();
         false
     }
+
+    /// Smoke defaults first (they mark the view dirty, so the stage waits for its first build), then route.
+    fn smoke_enter_workbench(&mut self, view: WorkbenchView) {
+        self.workbench.view = view;
+        self.workbench.smoke_defaults();
+        match view.mode_view() {
+            crate::workbench::ModeView::Lattices(v) => self.select_lattices_view(v),
+            crate::workbench::ModeView::Defects(v) => self.select_defects_view(v),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -217,18 +237,18 @@ mod tests {
     }
 
     #[test]
-    fn smoke_succeeds_only_after_all_seven_stages_paint_valid_geometry() {
+    fn smoke_succeeds_only_after_all_stages_paint_valid_geometry() {
         let ctx = egui::Context::default();
         let outcome = Arc::new(AtomicU8::new(0));
         let mut app = PapertillingApp::new(true, String::from("mock"), String::from("mock"))
             .with_smoke_outcome(Arc::clone(&outcome));
-        for _ in 0..300 {
+        for _ in 0..600 {
             if step_with_mock_paint(&mut app, &ctx, true) {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(app.last_smoke_stage, 11);
+        assert_eq!(app.last_smoke_stage, LAST_SMOKE_STAGE);
         assert_eq!(outcome.load(Ordering::Acquire), 1);
     }
 

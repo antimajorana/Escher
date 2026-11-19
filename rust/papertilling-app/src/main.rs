@@ -33,6 +33,7 @@ mod surfaces_tab;
 mod theme;
 mod ui;
 mod view3d;
+mod workbench;
 #[cfg(test)]
 mod features_gate_tests;
 

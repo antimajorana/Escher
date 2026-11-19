@@ -2,6 +2,7 @@
 
 use crate::analysis_mode::AnalysisTarget;
 use crate::atlas_tab::{AtlasSubTab, AtlasTabState};
+use crate::workbench::ModeView;
 
 use super::{PapertillingApp, item_key};
 
@@ -13,16 +14,19 @@ pub enum NavTab {
     Combine,
     Atlas,
     Analysis,
+    /// Stage S2..S6 panels (`crate::workbench`), one tab for all of them.
+    Workbench,
 }
 
 impl NavTab {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Gallery,
         Self::Surfaces,
         Self::Defects,
         Self::Combine,
         Self::Atlas,
         Self::Analysis,
+        Self::Workbench,
     ];
 }
 
@@ -53,14 +57,20 @@ pub enum LatticesView {
     ThreeDAndSubperiodic,
     NonEuclidean,
     Manifolds,
+    Flat3D,
+    Curved2D,
+    Honeycombs3D,
 }
 
 impl LatticesView {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 7] = [
         Self::Plane2D,
         Self::ThreeDAndSubperiodic,
         Self::NonEuclidean,
         Self::Manifolds,
+        Self::Flat3D,
+        Self::Curved2D,
+        Self::Honeycombs3D,
     ];
 
     pub fn label(self) -> &'static str {
@@ -69,6 +79,9 @@ impl LatticesView {
             Self::ThreeDAndSubperiodic => "3D & Subperiodic",
             Self::NonEuclidean => "Non-Euclidean",
             Self::Manifolds => "Manifolds & Surfaces",
+            Self::Flat3D => "Flat 3D: Slabs, Tubes, Flakes",
+            Self::Curved2D => "{p,q} on S² / E² / H²",
+            Self::Honeycombs3D => "Honeycombs & TPMS",
         }
     }
 
@@ -77,6 +90,7 @@ impl LatticesView {
             Self::Plane2D => NavTab::Gallery,
             Self::ThreeDAndSubperiodic | Self::NonEuclidean => NavTab::Atlas,
             Self::Manifolds => NavTab::Surfaces,
+            Self::Flat3D | Self::Curved2D | Self::Honeycombs3D => NavTab::Workbench,
         }
     }
 }
@@ -87,16 +101,26 @@ pub enum DefectsView {
     Catalogue2D,
     AtlasDefects,
     CombineAndFuse,
+    PointAndBoundary,
+    DetectFields,
 }
 
 impl DefectsView {
-    pub const ALL: [Self; 3] = [Self::Catalogue2D, Self::AtlasDefects, Self::CombineAndFuse];
+    pub const ALL: [Self; 5] = [
+        Self::Catalogue2D,
+        Self::AtlasDefects,
+        Self::CombineAndFuse,
+        Self::PointAndBoundary,
+        Self::DetectFields,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue2D => "Catalogue (2D)",
             Self::AtlasDefects => "3D / H² / 0D–1D Defects",
             Self::CombineAndFuse => "Combine, Fuse & Move",
+            Self::PointAndBoundary => "Point, Stone-Wales & GB",
+            Self::DetectFields => "Detect & Fields",
         }
     }
 
@@ -105,6 +129,7 @@ impl DefectsView {
             Self::Catalogue2D => NavTab::Defects,
             Self::AtlasDefects => NavTab::Atlas,
             Self::CombineAndFuse => NavTab::Combine,
+            Self::PointAndBoundary | Self::DetectFields => NavTab::Workbench,
         }
     }
 }
@@ -165,7 +190,9 @@ impl PapertillingApp {
         let prev_tab = self.active_tab;
         self.active_mode = AppMode::Lattices;
         self.lattices_view = view;
-        let view_changed = prev_mode != AppMode::Lattices || prev_view != view || prev_tab != view.nav_tab();
+        let wb_changed = self.route_workbench_view(view.workbench_view());
+        let view_changed =
+            prev_mode != AppMode::Lattices || prev_view != view || prev_tab != view.nav_tab() || wb_changed;
         match view {
             LatticesView::ThreeDAndSubperiodic => {
                 self.atlas.set_pristine_only(true);
@@ -183,7 +210,11 @@ impl PapertillingApp {
                     self.atlas.dirty = true;
                 }
             }
-            LatticesView::Plane2D | LatticesView::Manifolds => {}
+            LatticesView::Plane2D
+            | LatticesView::Manifolds
+            | LatticesView::Flat3D
+            | LatticesView::Curved2D
+            | LatticesView::Honeycombs3D => {}
         }
         let target_tab = view.nav_tab();
         self.activate_nav_tab(target_tab, view_changed);
@@ -199,8 +230,9 @@ impl PapertillingApp {
         if view == DefectsView::AtlasDefects {
             self.atlas.enter_defects_mode(from_outside);
         }
+        let wb_changed = self.route_workbench_view(view.workbench_view());
         let target_tab = view.nav_tab();
-        let changed = prev_mode != AppMode::Defects || prev_view != view || prev_tab != target_tab;
+        let changed = prev_mode != AppMode::Defects || prev_view != view || prev_tab != target_tab || wb_changed;
         self.activate_nav_tab(target_tab, changed);
     }
 
@@ -211,6 +243,10 @@ impl PapertillingApp {
             NavTab::Defects => self.select_defects_view(DefectsView::Catalogue2D),
             NavTab::Combine => self.select_defects_view(DefectsView::CombineAndFuse),
             NavTab::Analysis => self.switch_mode(AppMode::Analysis),
+            NavTab::Workbench => match self.workbench.view.mode_view() {
+                ModeView::Lattices(v) => self.select_lattices_view(v),
+                ModeView::Defects(v) => self.select_defects_view(v),
+            },
             NavTab::Atlas => {
                 if self.atlas.pristine_only {
                     let view = if self.atlas.sub_tab == AtlasSubTab::HyperbolicH2 {
@@ -227,7 +263,10 @@ impl PapertillingApp {
     }
 
     pub(crate) fn activate_nav_tab(&mut self, tab: NavTab, changed: bool) {
-        if !changed && (tab != NavTab::Atlas || !self.atlas.dirty) {
+        if !changed
+            && (tab != NavTab::Atlas || !self.atlas.dirty)
+            && (tab != NavTab::Workbench || !self.workbench.dirty)
+        {
             return;
         }
         let prev_tab = self.active_tab;
@@ -287,6 +326,12 @@ impl PapertillingApp {
                 self.analysis.on_enter();
                 self.analysis.sync_canvas(&self.surfaces, &self.defects, &self.combine, &mut self.canvas2d);
                 self.analysis.sync_view3d(&self.surfaces, &self.defects, &self.combine, &mut self.view3d);
+            }
+            NavTab::Workbench => {
+                self.canvas2d.set_gauge_overlay(None);
+                self.view3d.set_legend(None);
+                self.workbench_defect_source_synced();
+                self.workbench_call(|wb, cx, canvas, view3d| wb.on_enter(cx, canvas, view3d));
             }
         }
     }

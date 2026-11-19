@@ -12,6 +12,7 @@ pub mod sheet_colors;
 pub mod sheet_modes;
 mod sort;
 mod surface_elastic;
+pub mod wb_mesh;
 #[cfg(test)]
 mod tests;
 

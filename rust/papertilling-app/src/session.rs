@@ -106,6 +106,10 @@ pub struct SessionState {
     /// `DefectViewMode` variant name in Analysis mode.
     #[serde(default, deserialize_with = "lenient")]
     pub analysis_view: Option<String>,
+    /// Workbench (stage S2..S6 panels): `{"view": "<WorkbenchView>", "s2": .., ...}`, each panel's own JSON.
+    /// Optional and additive, so schema 2 is kept: older files load without it and older apps ignore it.
+    #[serde(default, deserialize_with = "lenient")]
+    pub workbench: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -75,6 +75,9 @@ impl PapertillingApp {
                         };
                         self.analysis.show_inspector_panel(ui, &mut env, &tokens);
                     }
+                    NavTab::Workbench => {
+                        self.workbench_call(|wb, cx, _, _| wb.show_inspector_panel(ui, cx, &tokens));
+                    }
                 });
             });
         self.right_inspector_width = resp.response.rect.width().clamp(260.0, 440.0);

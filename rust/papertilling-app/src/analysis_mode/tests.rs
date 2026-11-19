@@ -12,7 +12,7 @@ use crate::atlas_tab::AtlasSubTab;
 use crate::mesh3d::DefectViewMode;
 use crate::theme::{StudioTheme, typography};
 
-const FORBIDDEN_SPECTRAL: [&str; 6] = [
+pub(crate) const FORBIDDEN_SPECTRAL: [&str; 6] = [
     "Tight-Binding",
     "Compute Spectrum",
     "LDOS",
@@ -21,7 +21,7 @@ const FORBIDDEN_SPECTRAL: [&str; 6] = [
     "Peierls",
 ];
 
-fn harness() -> Harness<'static, PapertillingApp> {
+pub(crate) fn harness() -> Harness<'static, PapertillingApp> {
     let app = PapertillingApp::new(false, String::from("kittest"), String::from("kittest"));
     Harness::builder()
         .with_size(egui::vec2(1280.0, 800.0))
@@ -47,7 +47,7 @@ fn click_combobox_value(h: &mut Harness<'static, PapertillingApp>, val: &str) {
         .click();
 }
 
-fn assert_no_forbidden_tokens(h: &Harness<'_, PapertillingApp>, where_ctx: &str) {
+pub(crate) fn assert_no_forbidden_tokens(h: &Harness<'_, PapertillingApp>, where_ctx: &str) {
     for tok in FORBIDDEN_SPECTRAL {
         assert!(
             h.query_all_by_label_contains(tok).next().is_none(),
@@ -82,7 +82,7 @@ fn assert_no_forbidden_tokens(h: &Harness<'_, PapertillingApp>, where_ctx: &str)
     }
 }
 
-fn wait_until(h: &mut Harness<'static, PapertillingApp>, what: &str, pred: impl Fn(&PapertillingApp) -> bool) {
+pub(crate) fn wait_until(h: &mut Harness<'static, PapertillingApp>, what: &str, pred: impl Fn(&PapertillingApp) -> bool) {
     let t0 = Instant::now();
     loop {
         h.step();
@@ -145,6 +145,20 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
 
+    // Workbench Lattices views (stage S4..S6 panels).
+    for lbl in ["Flat 3D: Slabs, Tubes, Flakes", "{p,q} on S² / E² / H²", "Honeycombs & TPMS"] {
+        h.get_by_label(lbl).click();
+        wait_until(&mut h, lbl, |a| !a.workbench_busy() && !a.workbench.dirty);
+        assert_eq!(h.state().active_tab, NavTab::Workbench, "{lbl}");
+        assert_no_forbidden_tokens(&h, lbl);
+        assert!(
+            h.query_all_by_label_contains("Line defect:").next().is_none()
+                && h.query_all_by_label_contains("Frieze defect:").next().is_none()
+                && h.query_all_by_label_contains("Central Wedge").next().is_none(),
+            "{lbl}: defect controls must be hidden in pristine Lattices mode"
+        );
+    }
+
     // 2. Defects: visit all 3 sub-views + open "2D Overlay:" and "Color:" ComboBoxes.
     h.get_by_label("2. Defects").click();
     wait_until(&mut h, "Defects Catalogue build", |a| !a.defects.is_busy() && !a.defects.initializing);
@@ -174,6 +188,14 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
         h.get_by_label(st_lbl).click();
         h.run_steps(2);
         assert_no_forbidden_tokens(&h, st_lbl);
+    }
+
+    // Workbench Defects views (stage S2, S3 panels).
+    for lbl in ["Point, Stone-Wales & GB", "Detect & Fields"] {
+        h.get_by_label(lbl).click();
+        wait_until(&mut h, lbl, |a| !a.workbench_busy() && !a.workbench.dirty);
+        assert_eq!(h.state().active_tab, NavTab::Workbench, "{lbl}");
+        assert_no_forbidden_tokens(&h, lbl);
     }
 
     h.get_by_label("Combine, Fuse & Move").click();

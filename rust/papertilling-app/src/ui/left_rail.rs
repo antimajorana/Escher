@@ -89,6 +89,9 @@ impl PapertillingApp {
                         };
                         self.analysis.show_left_panel(ui, &mut env);
                     }
+                    NavTab::Workbench => {
+                        self.workbench_call(|wb, cx, _, _| wb.show_left_panel(ui, cx));
+                    }
                 });
             });
         self.left_rail_width = resp.response.rect.width().clamp(260.0, 420.0);

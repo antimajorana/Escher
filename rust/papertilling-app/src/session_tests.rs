@@ -119,6 +119,7 @@ pub(crate) fn sample_state() -> SessionState {
         defects_view: Some("Catalogue2D".into()),
         analysis_target: Some("SingleDefect".into()),
         analysis_view: Some("Split2D3D".into()),
+        workbench: Some(serde_json::json!({"view": "S5Curved2d"})),
     }
 }
 

@@ -57,6 +57,9 @@ impl PapertillingApp {
                 return refuse("Finish moving pins and wait for the crystal build before exporting the 3D PNG.");
             }
             NavTab::Atlas if self.atlas.dirty => return refuse("Wait for the Atlas 3D scene to update before exporting the 3D PNG."),
+            NavTab::Workbench if self.workbench_busy() || self.workbench.dirty => {
+                return refuse("Wait for the workbench 3D scene to update before exporting the 3D PNG.");
+            }
             NavTab::Analysis if self.analysis.view3d_dirty => {
                 return refuse("Wait for the 3D spectral view to update before exporting the 3D PNG.");
             }
@@ -91,6 +94,7 @@ impl PapertillingApp {
             NavTab::Combine => "combined_sheet.png",
             NavTab::Atlas => "atlas_mesh.png",
             NavTab::Analysis => "analysis_ldos.png",
+            NavTab::Workbench => "workbench_mesh.png",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export 3D view (PNG)")
