@@ -1,9 +1,11 @@
 //! Regular {p,q}: one switch over S² (δ > 0), E² (δ = 0) and H² (δ < 0) via `build_unified_pq`.
 //! 2D: stereographic picture (S²), the plane (E²) or the Poincaré disk with geodesic edges (H²).
-//! 3D: the unit sphere, the plane z = 0, or the upper sheet of the hyperboloid x² + y² − z² = −1.
+//! 3D: the unit sphere, the plane z = 0, or the upper sheet of the hyperboloid x² + y² − z² = −1 (exact lift of the
+//! faces within Poincaré radius [`LIFT_R_MAX`]; the outer faces are counted, never squashed onto a rim).
 
 use papertilling_core::dsymbol::GeometryKind;
-use papertilling_core::noneuclidean2d::build_unified_pq;
+use papertilling_core::hyperbolic::{HyperbolicStyle, build_hyperbolic_tiling};
+use papertilling_core::noneuclidean2d::{build_unified_pq, poincare_to_hyperboloid_exact};
 use serde_json::{Value, json};
 
 use super::draw::{DiskModel, arcs_picture, e2_picture, h2_picture, mesh_with_arcs, s2_picture};
@@ -17,6 +19,50 @@ pub(crate) fn layer_range(k: GeometryKind) -> (usize, usize) {
         GeometryKind::Euclidean => (1, 6),
         GeometryKind::Hyperbolic => (1, 4),
     }
+}
+
+/// Poincaré radius within which H² faces are lifted to the hyperboloid: height t = (1 + r²)/(1 − r²) ≈ 19.5 at 0.95.
+/// Faces reaching farther are left out of the 3D view and counted (they would set the scale and shrink the rest).
+pub(crate) const LIFT_R_MAX: f64 = 0.95;
+
+/// Exact hyperboloid lift of the H² faces whose vertices all lie within the radius, and of the geodesic edge samples
+/// within it. Points are compacted, so the faces left out (`dropped`) do not set the 3D scale.
+pub(crate) struct H2Lift {
+    pub(crate) pts: Vec<[f64; 3]>,
+    pub(crate) faces: Vec<Vec<usize>>,
+    pub(crate) arcs: Vec<Vec<[f64; 3]>>,
+    pub(crate) dropped: usize,
+}
+
+pub(crate) fn h2_lift(coords: &[[f64; 2]], faces: &[Vec<usize>], arcs: &[Vec<[f64; 2]>], r_max: f64) -> Result<H2Lift, String> {
+    let inside = |z: &[f64; 2]| z[0].hypot(z[1]) <= r_max;
+    let mut map: Vec<Option<usize>> = vec![None; coords.len()];
+    let (mut pts, mut kept, mut dropped) = (Vec::new(), Vec::new(), 0);
+    for f in faces {
+        if !f.iter().all(|&v| coords.get(v).is_some_and(inside)) {
+            dropped += 1;
+            continue;
+        }
+        let mut ring = Vec::with_capacity(f.len());
+        for &v in f {
+            let id = match map[v] {
+                Some(id) => id,
+                None => {
+                    pts.push(poincare_to_hyperboloid_exact(coords[v])?);
+                    map[v] = Some(pts.len() - 1);
+                    pts.len() - 1
+                }
+            };
+            ring.push(id);
+        }
+        kept.push(ring);
+    }
+    let arcs = arcs
+        .iter()
+        .filter(|a| a.iter().all(inside))
+        .map(|a| a.iter().map(|&z| poincare_to_hyperboloid_exact(z)).collect::<Result<Vec<_>, _>>())
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(H2Lift { pts, faces: kept, arcs, dropped })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,7 +108,9 @@ impl PqState {
                     rebuild |= ui.add(egui::DragValue::new(&mut self.layers).range(lo..=hi)).changed();
                 });
                 if k == GeometryKind::Hyperbolic {
-                    ui.small("H² patch is trimmed to whole shells within the core's drawing caps (1000 faces).");
+                    ui.small(
+                        "H² patch: whole vertex-completion shells while the total stays within 1000 faces; faces centred beyond Poincaré radius 0.998 are dropped, so the outer shell can be partial (see the inspector).",
+                    );
                 }
             }
             Err(_) => {}
@@ -120,11 +168,28 @@ pub(crate) fn build(j: &PqJob) -> Result<S5Out, String> {
             (s, d, note)
         }
     };
-    let mesh = mesh_with_arcs(&t.coords_3d, &t.faces, Some(&t.edge_arcs_3d));
-    let model3d = match kind {
-        GeometryKind::Spherical => "unit sphere",
-        GeometryKind::Euclidean => "plane z = 0",
-        GeometryKind::Hyperbolic => "hyperboloid sheet (Minkowski model)",
+    // H²: the core's own shell bookkeeping (same builder and caps as `build_unified_pq`, so the same faces).
+    let shells = if kind == GeometryKind::Hyperbolic {
+        let h = build_hyperbolic_tiling(j.p, j.q, HyperbolicStyle::RegularPQ, j.layers, 0)?;
+        if h.faces.len() != t.n_faces {
+            return Err(format!("core builds disagree on {{{},{}}}: {} vs {} faces", j.p, j.q, h.faces.len(), t.n_faces));
+        }
+        Some((h.complete_through_shell, h.growth_rule))
+    } else {
+        None
+    };
+    let (mesh, model3d, lift_note) = if kind == GeometryKind::Hyperbolic {
+        let l = h2_lift(&t.coords_2d, &t.faces, &t.edge_arcs_2d, LIFT_R_MAX)?;
+        let note = format!(
+            "3D: exact lift z ↦ (2z, 1 + |z|²)/(1 − |z|²) of the {} face(s) whose vertices lie within Poincaré radius {LIFT_R_MAX} (height ≤ 19.5); {} outer face(s) are left out of the 3D view and drawn in 2D only [COMPUTATIONAL EVIDENCE]",
+            l.faces.len(),
+            l.dropped
+        );
+        let model = format!("hyperboloid sheet (Minkowski model), faces within Poincaré radius {LIFT_R_MAX}");
+        (mesh_with_arcs(&l.pts, &l.faces, Some(&l.arcs)), model, Some(note))
+    } else {
+        let model = if kind == GeometryKind::Spherical { "unit sphere" } else { "plane z = 0" };
+        (mesh_with_arcs(&t.coords_3d, &t.faces, Some(&t.edge_arcs_3d)), model.to_string(), None)
     };
     let chi_label = if kind == GeometryKind::Spherical { "χ = V − E + F (sphere)" } else { "χ = V − E + F (finite patch)" };
     let mut rows = vec![
@@ -134,15 +199,24 @@ pub(crate) fn build(j: &PqJob) -> Result<S5Out, String> {
         (String::from("V / E / F"), format!("{} / {} / {}", t.n_vertices, t.n_edges, t.n_faces)),
         (String::from(chi_label), t.euler_chi.to_string()),
         (String::from("2D picture"), view.to_string()),
-        (String::from("3D model"), model3d.to_string()),
+        (String::from("3D model"), model3d.clone()),
     ];
-    if kind != GeometryKind::Spherical {
-        rows.insert(4, (String::from("Layers (effective)"), t.layers.to_string()));
+    match (&shells, kind) {
+        (Some((complete, _)), _) => {
+            rows.insert(4, (String::from("Layers requested (core range 1..=4)"), t.layers.to_string()));
+            rows.insert(5, (String::from("Complete through shell"), complete.to_string()));
+        }
+        (None, GeometryKind::Euclidean) => rows.insert(4, (String::from("Layers"), t.layers.to_string())),
+        (None, _) => {}
     }
-    let mut notes = vec![
-        format!("Geometry from the sign of δ (Coxeter, Regular Polytopes, §1.7, §4.5) [PROVED]; core: {}", t.provenance),
-    ];
+    let mut notes = vec![String::from(
+        "Geometry from the sign of δ (Coxeter, Regular Polytopes, §1.7, §4.5) [PROVED]; the built vertex coordinates are floating point [COMPUTATIONAL EVIDENCE]",
+    )];
     notes.push(euler_note(kind == GeometryKind::Spherical, t.euler_chi));
+    if let Some((_, rule)) = &shells {
+        notes.push(format!("Patch: {rule} [COMPUTATIONAL EVIDENCE]"));
+    }
+    notes.extend(lift_note);
     if j.p == 2 {
         notes.push(String::from("Hosohedron: its digon faces cannot be filled as flat polygons; only the great-circle edges are drawn."));
     } else if j.q == 2 {

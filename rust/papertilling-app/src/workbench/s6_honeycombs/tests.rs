@@ -21,7 +21,8 @@ use super::tpms::{TpmsMode, build_net, net_drawing, unwrap_faces};
 use super::{Panel, S6Job, S6Sub, run_job};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
 use crate::app::{LatticesView, NavTab, PapertillingApp};
-use crate::workbench::{WbPanel, WorkbenchView};
+use crate::canvas2d::Scene2D;
+use crate::workbench::{WbCtx, WbPanel, WorkbenchView};
 
 fn new_app() -> PapertillingApp {
     PapertillingApp::new(false, String::from("test"), String::from("test"))
@@ -295,4 +296,97 @@ fn pilot_timing_heaviest_s6_jobs() {
         let b = run_job(job).unwrap_or_else(|e| panic!("{what}: {e}"));
         eprintln!("# time {what}: {:.3} s, {} mesh vertices", t.elapsed().as_secs_f64(), b.mesh.faces.len());
     }
+}
+
+/// Poll the panel's worker until a result lands (stored or dropped).
+fn wait_poll(p: &mut Panel, what: &str) {
+    let t0 = Instant::now();
+    while !p.poll() {
+        assert!(t0.elapsed() < Duration::from_secs(60), "{what}: no result after 60 s");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn shown_counts(p: &Panel) -> Option<(usize, usize, usize, usize)> {
+    match &p.current()?.core {
+        CoreOut::Complex(cx) => Some(cx.counts()),
+        _ => None,
+    }
+}
+
+/// Stale results: {4,3,5} shells 0 is one cube (8, 12, 6, 1). A {4,3,6} job started and abandoned (r back to 5,
+/// a cache hit) is cancelled and never lands under the {4,3,5} controls; a stored result is not shown under changed
+/// inputs; a job pending for another sub-row does not make the shown (cached) sub-row busy.
+#[test]
+fn stale_results_never_shown_under_current_inputs() {
+    let app = new_app();
+    let cx = WbCtx { item: app.gallery.active_item(), cell: app.gallery.cell(), smoke: false, backend: &app.backend, defect_crystal: None };
+    let mut p = Panel { schlafli: super::honeycomb::SchlafliState { p: 4, q: 3, r: 5, shells: 0, patch_layers: 1 }, ..Default::default() };
+    p.submit(&cx, None);
+    wait_poll(&mut p, "{4,3,5}");
+    assert_eq!(shown_counts(&p), Some((8, 12, 6, 1)));
+    // r -> 6 -> 5 before the {4,3,6} job is polled: the cache hit cancels it
+    p.schlafli.r = 6;
+    p.submit(&cx, None);
+    assert!(p.pending.is_some() && p.is_busy());
+    p.schlafli.r = 5;
+    p.submit(&cx, None);
+    assert!(p.pending.is_none() && !p.is_busy(), "the abandoned job is cancelled");
+    std::thread::sleep(Duration::from_millis(300));
+    for _ in 0..10 {
+        let _ = p.poll();
+    }
+    assert_eq!(shown_counts(&p), Some((8, 12, 6, 1)), "still the {{4,3,5}} cube");
+    assert_eq!(p.built[0].as_ref().map(|(k, _)| k.clone()), Some(format!("{:?}", p.job())));
+    // accept() drops a result whose key is not the wanted one (here a {4,3,6} build arriving under {4,3,5})
+    let stale = S6Job::Schlafli { p: 4, q: 3, r: 6, shells: 0, layers: 1 };
+    p.pending = Some((S6Sub::Schlafli, format!("{stale:?}")));
+    p.accept(Ok(run_job(stale)));
+    assert_eq!(p.built[0].as_ref().map(|(k, _)| k.clone()), Some(format!("{:?}", p.job())), "stale result dropped");
+    // changed inputs, not yet built: nothing is shown (the inspector says "Building…")
+    p.schlafli.p = 5;
+    assert!(p.current().is_none());
+    p.schlafli.p = 4;
+    assert!(p.current().is_some());
+    // another sub-row: build SC, start a Schläfli job, return to Voronoi (cached) -> not busy, Schläfli job cancelled
+    p.sub = S6Sub::Voronoi;
+    p.submit(&cx, None);
+    wait_poll(&mut p, "SC cell");
+    p.sub = S6Sub::Schlafli;
+    p.schlafli.r = 6;
+    p.submit(&cx, None);
+    assert!(p.is_busy());
+    p.sub = S6Sub::Voronoi;
+    p.submit(&cx, None);
+    assert!(p.pending.is_none() && !p.is_busy() && p.current().is_some(), "the cached sub-row is shown at once");
+}
+
+/// {6,3,3}, shells 0, one patch ring: the central horospherical cell cut to a flower of 7 hexagons. Each outer hexagon
+/// has 4 vertices off the centre, one of them shared with each ring neighbour: V = 6 + 6·4 − 6 = 24; it has 5 edges
+/// off the centre, one shared with each ring neighbour: E = 6 + 6·5 − 6 = 30; F = 7, C = 1, so V − E + F − C = 0
+/// (also asserted by the core's paracompact patch test). No χ(B³) = 1 expectation may be stamped.
+#[test]
+fn truncated_infinite_cells_carry_no_ball_test() {
+    let b = run_job(S6Job::Schlafli { p: 6, q: 3, r: 3, shells: 0, layers: 1 }).unwrap();
+    let CoreOut::Complex(cx) = &b.core else { panic!("cell complex") };
+    assert_eq!((cx.counts(), cx.euler()), ((24, 30, 7, 1), 0));
+    assert!(!b.notes.iter().any(|n| n.contains("χ(B³)")), "{:?}", b.notes);
+    assert!(b.notes.iter().any(|n| n.starts_with("No 3-ball test")), "{:?}", b.notes);
+    let cube = run_job(S6Job::Schlafli { p: 4, q: 3, r: 4, shells: 1, layers: 1 }).unwrap();
+    assert!(cube.notes.iter().any(|n| n.contains("[PROVED: χ(B³) = 1]")), "compact cells keep the ball test");
+}
+
+#[test]
+fn tpms_notes_describe_what_is_drawn() {
+    let note = |mode, n| match run_job(S6Job::Surface { kind: TpmsKind::P, mode, n, reps: 1 }).unwrap().scene2d {
+        Scene2D::VectorScene { primitives } => primitives.note,
+        _ => panic!("vector scene"),
+    };
+    let exact = note(TpmsMode::PetrieCoxeter, 0);
+    assert!(exact.starts_with("heat map of the nodal approximation only") && !exact.contains("the surface meets"), "{exact}");
+    assert!(note(TpmsMode::Nodal, 12).contains("the surface meets this slice"));
+    // second gyroid labyrinth: the core inverts all three coordinates
+    let g = build_net(TpmsKind::G, 2, 1).unwrap();
+    assert!(g.notes.iter().any(|n| n.contains("G inverted through the origin, r ↦ −r")), "{:?}", g.notes);
+    assert!(!g.notes.iter().any(|n| n.contains("x ↦ −x")));
 }

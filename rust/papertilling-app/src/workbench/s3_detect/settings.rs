@@ -76,7 +76,10 @@ impl Default for Settings {
     }
 }
 
-pub(crate) const CUTOFF_RANGE: std::ops::RangeInclusive<f64> = 1.0..=2.5;
+/// Manual cutoff range in longest ideal bonds. The lower end sits just above 1: bonds are kept only when strictly
+/// shorter than the cutoff, so at exactly 1.0 ideal bonds of the longest length are dropped by rounding. Above
+/// sqrt 2 (square) or sqrt 3 (triangular, honeycomb) the cutoff graph is not plane and detection refuses it.
+pub(crate) const CUTOFF_RANGE: std::ops::RangeInclusive<f64> = 1.001..=2.5;
 pub(crate) const MAX_CLEARANCE: usize = 4;
 pub(crate) const GRID_RANGE: std::ops::RangeInclusive<usize> = 10..=80;
 pub(crate) const EXTENT_RANGE: std::ops::RangeInclusive<f64> = 2.0..=20.0;
@@ -98,7 +101,13 @@ impl Settings {
     /// Refuse inputs outside the supported ranges (with the reason) instead of clamping silently.
     pub(crate) fn validate(&self, sub: S3Sub) -> Result<(), String> {
         if !self.own_bonds && !self.auto_cutoff && !(self.cutoff_rel.is_finite() && CUTOFF_RANGE.contains(&self.cutoff_rel)) {
-            return Err(format!("bond cutoff must lie in [1.0, 2.5] longest ideal bonds (got {})", self.cutoff_rel));
+            return Err(format!(
+                "bond cutoff must lie in [{}, {}] longest ideal bonds (got {}); at 1.0 the longest ideal bonds sit on the cutoff \
+                 and are dropped by rounding",
+                CUTOFF_RANGE.start(),
+                CUTOFF_RANGE.end(),
+                self.cutoff_rel
+            ));
         }
         if self.clearance > MAX_CLEARANCE {
             return Err(format!("loop clearance must be at most {MAX_CLEARANCE} face rings"));

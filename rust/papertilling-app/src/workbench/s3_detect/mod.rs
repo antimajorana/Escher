@@ -22,6 +22,7 @@ mod detect;
 mod elastic;
 mod fields;
 mod gif;
+mod graph_check;
 mod settings;
 #[cfg(test)]
 mod tests;
@@ -130,6 +131,8 @@ pub(crate) struct Panel {
     worker: Option<S3Worker>,
     /// Sub-row and input key of the job in flight.
     pending: Option<(S3Sub, String)>,
+    /// Per sub-row, the key the current inputs ask for (set by `submit`); a result with another key is stale.
+    wanted: [Option<String>; 4],
     built: [Option<String>; 4],
     errors: [Option<String>; 4],
     /// Why nothing was submitted (no source crystal yet); never an error.
@@ -141,8 +144,20 @@ impl Panel {
         format!("{:?}|{}|{}", self.sub, src.fp, self.set.key(self.sub))
     }
 
+    /// Forget the job in flight: the worker drops its late result (it cannot interrupt the running job).
+    fn forget_pending(&mut self) {
+        if self.pending.take().is_some()
+            && let Some(w) = self.worker.as_mut()
+        {
+            w.cancel();
+        }
+    }
+
     fn accept(&mut self, res: Result<Result<S3Out, String>, String>) {
         let Some((sub, key)) = self.pending.take() else { return };
+        if self.wanted[sub.idx()].as_deref() != Some(key.as_str()) {
+            return; // stale: the inputs changed (or the source went away) after this job was submitted
+        }
         match res.and_then(|r| r) {
             Ok(out) => {
                 self.errors[sub.idx()] = None;
@@ -211,6 +226,7 @@ impl WbPanel for Panel {
         };
         if let Some(w) = &self.waiting {
             ui.label(w.as_str());
+            return; // the stored results belong to a crystal that is gone
         }
         ui.separator();
         match self.sub {
@@ -245,13 +261,23 @@ impl WbPanel for Panel {
     fn submit(&mut self, cx: &WbCtx, repaint: Option<&egui::Context>) {
         let Some(src) = Source::from_ctx(cx) else {
             self.waiting = Some(String::from("Waiting for the Defects-tab crystal (build a defect there, or wait for it)."));
+            self.forget_pending();
+            self.wanted = Default::default();
             return;
         };
         self.waiting = None;
         let key = self.job_key(&src);
         let i = self.sub.idx();
-        let in_flight = self.pending.as_ref().is_some_and(|(s, k)| *s == self.sub && *k == key);
-        if in_flight || self.built[i].as_deref() == Some(key.as_str()) {
+        self.wanted[i] = Some(key.clone());
+        // Some(true): this key is in flight; Some(false): another key of this sub-row is in flight (stale)
+        let pending_same = self.pending.as_ref().filter(|(s, _)| *s == self.sub).map(|(_, k)| *k == key);
+        if pending_same == Some(true) {
+            return;
+        }
+        if self.built[i].as_deref() == Some(key.as_str()) {
+            if pending_same == Some(false) {
+                self.forget_pending();
+            }
             return;
         }
         self.errors[i] = None;
@@ -286,6 +312,9 @@ impl WbPanel for Panel {
     }
 
     fn error(&self) -> Option<&str> {
+        if self.waiting.is_some() {
+            return None;
+        }
         self.errors[self.sub.idx()].as_deref()
     }
 
@@ -296,6 +325,9 @@ impl WbPanel for Panel {
     /// A click selects the detected defect whose centre is nearest (Fields / Elastic then use its Burgers vector).
     fn on_canvas(&mut self, i: &CanvasInteraction, _cx: &WbCtx) -> bool {
         let Some(w) = i.clicked_world else { return false };
+        if self.waiting.is_some() {
+            return false;
+        }
         let Some(det) = self.current_detection() else { return false };
         let Some(k) = detect::nearest_defect(&det.det, w, 3.0 * det.lmax) else { return false };
         if self.set.selected == Some(k) {

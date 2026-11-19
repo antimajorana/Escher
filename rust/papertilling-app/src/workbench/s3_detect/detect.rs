@@ -2,12 +2,12 @@
 //! clusters, surrounding loops and Burgers vectors (`detect_defects_from_coords`), plus CNA signature counts and a
 //! Wigner-Seitz occupancy count against the perfect lattice.
 
-use std::collections::BTreeMap;
-
 use papertilling_core::defect::perfect_disk;
-use papertilling_core::defect_fields::{BondGraph, CnaSignature, CoordDetection, RefLattice, cna_2d, detect_defects_from_coords, wigner_seitz_occupancy};
+use papertilling_core::defect_fields::nye_loops::default_cutoff;
+use papertilling_core::defect_fields::{BondGraph, CoordDetection, RefLattice, detect_defects_from_coords, wigner_seitz_occupancy};
 use papertilling_core::types::Frame2D;
 
+use super::graph_check::{CnaCounts, check_plane, cna_histogram};
 use super::{SCENE_TITLE, Settings, Source};
 use crate::canvas2d::Scene2D;
 use crate::scene2d::LinePrim;
@@ -34,7 +34,8 @@ pub(crate) struct DetectOut {
     pub(crate) graph_source: String,
     /// Whether the cutoff graph equals the crystal's own bonds (`None` when the own bonds were used).
     pub(crate) graph_matches_crystal: Option<bool>,
-    pub(crate) cna: Vec<(CnaSignature, usize)>,
+    /// CNA signature counts, or why the longest-chain search was not run.
+    pub(crate) cna: Result<CnaCounts, String>,
     pub(crate) ws: Result<WsSummary, String>,
 }
 
@@ -54,6 +55,13 @@ pub(crate) fn build(src: &Source, set: &Settings) -> Result<DetectOut, String> {
     if !(rl.lmax.is_finite() && rl.lmax > 0.0) {
         return Err(String::from("REFUSED: the lattice cell has no bonds (no ideal bond star to snap to)"));
     }
+    // the detector's own graph, rebuilt here first: a drawing that is not plane is refused before any face walk
+    let pre = if set.own_bonds {
+        BondGraph::from_edges(&src.pos, &src.edges)
+    } else {
+        BondGraph::from_cutoff(&src.pos, if set.auto_cutoff { default_cutoff(&src.cell, &rl) } else { set.cutoff_rel * rl.lmax })
+    };
+    check_plane(&src.pos, &pre.edges).map_err(|e| if set.own_bonds { e } else { format!("{e}; lower the cutoff or use the automatic one") })?;
     let own = set.own_bonds.then_some(src.edges.as_slice());
     let cutoff = (!set.own_bonds && !set.auto_cutoff).then_some(set.cutoff_rel * rl.lmax);
     let det = detect_defects_from_coords(&src.pos, &src.group, &src.cell, Frame2D::default(), own, cutoff, set.clearance)?;
@@ -68,13 +76,7 @@ pub(crate) fn build(src: &Source, set: &Settings) -> Result<DetectOut, String> {
         ce.dedup();
         ce == det.edges
     });
-    let g = BondGraph::from_edges(&src.pos, &det.edges);
-    let mut hist: BTreeMap<CnaSignature, usize> = BTreeMap::new();
-    for s in cna_2d(&g).0 {
-        *hist.entry(s).or_default() += 1;
-    }
-    let mut cna: Vec<(CnaSignature, usize)> = hist.into_iter().collect();
-    cna.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let cna = cna_histogram(&BondGraph::from_edges(&src.pos, &det.edges));
     let ws = wigner_seitz_summary(src, &det, rl.lmax);
     Ok(DetectOut { det, pos: src.pos.clone(), lmax: rl.lmax, graph_source, graph_matches_crystal, cna, ws })
 }
@@ -153,6 +155,7 @@ pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &DetectOut, selected: usize) 
             if m { "equals" } else { "DIFFERS from" }
         ));
     }
+    ui.label("[COMPUTATIONAL EVIDENCE] plane drawing checked: no two bonds cross, touch or overlap (relative tolerance 1e-9)");
     let net_v: f64 = det.vertex_frank.iter().sum();
     let net_f: f64 = det.face_frank.iter().sum();
     let nz = det.face_frank.iter().filter(|q| **q != 0.0).count();
@@ -189,8 +192,15 @@ pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &DetectOut, selected: usize) 
         ui.small(format!("#{k}: {}", d.reason));
     }
     ui.separator();
-    let top: Vec<String> = o.cna.iter().take(6).map(|((a, b, c), n)| format!("({a},{b},{c}) x{n}")).collect();
-    ui.label(format!("CNA bond signatures (n_common, n_bonds, chain): {}", top.join(", ")));
+    match &o.cna {
+        Ok(cna) => {
+            let top: Vec<String> = cna.iter().take(6).map(|((a, b, c), n)| format!("({a},{b},{c}) x{n}")).collect();
+            ui.label(format!("CNA bond signatures (n_common, n_bonds, chain): {}", top.join(", ")));
+        }
+        Err(e) => {
+            ui.label(format!("CNA bond signatures: {e}"));
+        }
+    }
     match &o.ws {
         Ok(w) => ui.label(format!(
             "[COMPUTATIONAL EVIDENCE] Wigner-Seitz vs the perfect lattice ({} cells counted): {} empty, {} doubly occupied \

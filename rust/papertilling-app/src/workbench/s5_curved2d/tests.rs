@@ -126,13 +126,19 @@ fn surfaces_refuse_non_hyperbolic_and_unfold_every_face() {
     assert!(refused(surfaces::build(&flat)).contains("only H² tilings"));
     for s in 0..surfaces::SURFACES.len() {
         let o = surfaces::build(&surfaces::SurfJob { p: 7, q: 3, layers: 2, surface: s, twist: 0.3 }).unwrap();
-        assert_eq!(row(&o, "Faces placed"), "29");
-        assert!(row(&o, "Net pieces / glued edges / cut edges").starts_with("29 / 28 /"), "a spanning tree of 29 faces has 28 edges");
+        // Dini with twist ≠ 0: the central heptagon (the only face around the origin) cannot be placed.
+        let (n, tree) = if s == 3 { ("28", "28 / 27 /") } else { ("29", "29 / 28 /") };
+        assert_eq!(row(&o, "Faces placed"), n);
+        let nets = row(&o, "Net pieces / glued edges / cut edges");
+        assert!(s == 3 || nets.starts_with(tree), "a spanning tree of 29 faces has 28 edges: {nets}");
+        assert!(nets.starts_with(&tree[..5]), "one net piece per placed face: {nets}");
         let svg = o.svg.as_deref().unwrap();
-        assert!(svg.starts_with("<svg") && svg.matches("<polygon").count() == 29);
+        assert!(svg.starts_with("<svg") && svg.matches("<polygon").count().to_string() == n);
         assert_eq!(o.notes[0].starts_with("Isometric embedding"), s == 0, "only the hyperboloid bowl is called an isometry");
         assert!(o.notes.iter().all(|n| n.contains("[PROVED]") || n.contains("[COMPUTATIONAL EVIDENCE]")), "{:?}", o.notes);
     }
+    let untwisted = surfaces::build(&surfaces::SurfJob { p: 7, q: 3, layers: 2, surface: 3, twist: 0.0 }).unwrap();
+    assert_eq!(row(&untwisted, "Faces placed"), "29", "twist 0: height has no b·u term, nothing to unwrap");
     let dir = std::env::temp_dir().join("wb_s5_net_test.svg");
     let msg = surfaces::export_to(&dir, "<svg/>").unwrap();
     assert!(msg.contains("6 bytes"));
@@ -354,4 +360,80 @@ fn pilot_timing_heaviest_s5_jobs() {
     let t = Instant::now();
     wythoff::build(&wythoff::WyJob { p: 7, q: 3, op: 6, layers: 3 }).unwrap();
     eprintln!("# time Wythoff omnitruncated {{7,3}} 3 layers: {:.3}s", t.elapsed().as_secs_f64());
+}
+
+/// Finding: Dini tear. Hand values: wrap(−3.0 − 3.0) = 2π − 6 ≈ 0.283, so θ = (3.0, −3.0, −2.9) unwraps to
+/// (3.0, 3.283, 3.383), mean ≈ 3.222 > π, shifted by −2π: branches (−1, 0, 0). θ = (0.1, 1.6, 3.1, −1.5) turns once
+/// around the origin (steps 1.5, 1.5, 1.683, 1.6 sum to 2π): no branch.
+#[test]
+fn dini_branch_unwrapping_by_hand() {
+    assert_eq!(surfaces::unwrap_branches(&[3.0, -3.0, -2.9]), Some(vec![-1, 0, 0]));
+    assert_eq!(surfaces::unwrap_branches(&[0.1, 0.2, 0.3]), Some(vec![0, 0, 0]));
+    assert_eq!(surfaces::unwrap_branches(&[0.1, 1.6, 3.1, -1.5]), None);
+}
+
+/// Finding: curvature row conventions. Bowl −1 for its Minkowski metric; hemisphere +1 for its Euclidean metric.
+#[test]
+fn curvature_row_names_its_metric() {
+    let (l0, v0) = surfaces::curvature_row(0, -1.0);
+    assert!(l0.contains("Minkowski") && v0.starts_with("-1 [PROVED]"), "{l0}: {v0}");
+    let (l1, v1) = surfaces::curvature_row(1, 1.0);
+    assert!(l1.contains("Euclidean") && v1.starts_with("1 [PROVED]") && v1.contains("K = −1"), "{l1}: {v1}");
+}
+
+/// Finding: exact i128 overflow. 2 · 4294967291 · 4294967279 > 10^15 (both odd, coprime as distinct primes); and
+/// 1000000, 999999, 999997 are pairwise coprime (consecutive; 999997 is odd and not a multiple of 5), lcm ≈ 10^18.
+#[test]
+fn huge_orders_are_refused_before_exact_arithmetic() {
+    let big = "4294967291,4294967279,4294967231,4294967197,4294967189";
+    assert!(orbifolds::orbifold_card(big).unwrap_err().contains("orders too large"));
+    let vbig = "4294967294.4294967258.4294967174.4294967158.4294967126";
+    assert!(orbifolds::vertex_card(vbig).unwrap_err().contains("orders too large"));
+    assert!(orbifolds::orbifold_card("1000000,999999,999997").unwrap_err().contains("orders too large"));
+    assert!(orbifolds::vertex_card("1000000.999999.999997").unwrap_err().contains("orders too large"));
+    assert_eq!(orbifolds::orbifold_orders("*2(10)3 4,5"), vec![2, 10, 3, 4, 5]);
+    assert_eq!(orbifolds::orbifold_orders("o632"), vec![6, 3, 2]);
+    // 30 cones of order 2: χ = 2 − 30 · 1/2 = −13.
+    let many = orbifolds::orbifold_card(&"2".repeat(30)).unwrap();
+    assert_eq!((many.chi_num, many.chi_den), (-13, 1));
+    let h = orbifolds::orbifold_card("*237").unwrap();
+    assert_eq!((h.chi_num, h.chi_den), (-1, 84));
+}
+
+/// Finding: chirality field. Snub cube 3.3.3.3.4 is a chiral tiling of S² (its vertex sequence is mirror-symmetric);
+/// 3.4.6.4 (rhombitrihexagonal) is not chiral.
+#[test]
+fn vertex_card_shows_tiling_chirality() {
+    let snub = orbifolds::chirality_text(&orbifolds::vertex_card("3.3.3.3.4").unwrap());
+    assert!(snub.contains("mirror-symmetric vertex figure): yes") && snub.ends_with(": yes"), "{snub}");
+    let rhombi = orbifolds::chirality_text(&orbifolds::vertex_card("3.4.6.4").unwrap());
+    assert!(rhombi.ends_with(": no"), "{rhombi}");
+}
+
+/// Findings: rim clamp and shell rows. A lifted point (0.5, 0) goes to (2·0.5, 1 + 0.25)/0.75 = (4/3, 0, 5/3); a face
+/// with a vertex beyond the radius is left out, and only the kept face's vertices are lifted. {7,3} at 2 layers draws
+/// S_0..S_2 whole (1 + 7 + 21 faces); {10,7}: |S_2| = 1951 > 1000, so S_1 only (51 faces); {5,5} at 3 layers: S_3
+/// is cut by the 0.998 radius cap (counts from the core's documented hand recurrences).
+#[test]
+fn h2_lift_is_exact_and_shells_are_reported() {
+    let coords = [[0.0, 0.0], [0.5, 0.0], [0.0, 0.5], [0.97, 0.0]];
+    let l = pq::h2_lift(&coords, &[vec![0, 1, 2], vec![0, 1, 3]], &[vec![[0.5, 0.0]], vec![[0.97, 0.0]]], 0.95).unwrap();
+    assert_eq!((l.faces.len(), l.dropped, l.pts.len(), l.arcs.len()), (1, 1, 3, 1));
+    let a = l.arcs[0][0];
+    assert!((a[0] - 4.0 / 3.0).abs() < 1e-12 && a[1].abs() < 1e-12 && (a[2] - 5.0 / 3.0).abs() < 1e-12, "{a:?}");
+    assert_eq!(l.pts[0], [0.0, 0.0, 1.0]);
+    let h = pq::build(&pq::PqJob { p: 7, q: 3, layers: 2 }).unwrap();
+    assert_eq!(row(&h, "Complete through shell"), "2");
+    assert!(row(&h, "3D model").contains("radius 0.95"));
+    assert!(h.notes.iter().any(|n| n.starts_with("3D: exact lift")));
+    assert!(h.notes.iter().all(|n| !n.contains("core: ")), "no forwarded blanket core stamp");
+    for layers in [2, 3, 4] {
+        let t = pq::build(&pq::PqJob { p: 10, q: 7, layers }).unwrap();
+        assert_eq!(row(&t, "Complete through shell"), "1", "{{10,7}} layers {layers}");
+        assert_eq!(row(&t, "Layers requested (core range 1..=4)"), layers.to_string());
+        assert!(row(&t, "V / E / F").ends_with("/ 51"));
+    }
+    let f = pq::build(&pq::PqJob { p: 5, q: 5, layers: 3 }).unwrap();
+    assert_eq!(row(&f, "Complete through shell"), "2");
+    assert!(f.notes.iter().any(|n| n.contains("truncated")));
 }

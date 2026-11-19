@@ -7,6 +7,9 @@
 //!   so B = 2μ(λ+μ)/(λ+2μ) I (Hirth & Lothe 1982 ch. 3).
 //! - The Stroh field's displacement circulates by its b round any loop; the panel feeds it the FS/RH vector -b.
 //! - A GIF file starts with "GIF89a" and stores its width little-endian at bytes 6..8 (GIF89a specification).
+//! - Plane check: a unit square with both diagonals, a 3 x 3 grid at cutoff 1.5 (> sqrt 2), a collinear overlap and a
+//!   T junction are refused; CNA of a hexagon + centre patch is six (2,0,0) spokes and six (1,0,0) rim bonds.
+//! - Green-Lagrange strain is zero under a rigid 30° rotation; F = diag(1.1, 1) gives trace 0.105, max shear 0.0525.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -315,4 +318,138 @@ fn pilot_timing_s3_jobs() {
     let t = Instant::now();
     let _ = run(&src, S3Sub::Gif, &big);
     eprintln!("# time S3 GIF 60 frames 800 px: {:.3}s", t.elapsed().as_secs_f64());
+}
+
+/// Triangular patch: a centre and its six nearest neighbours at unit distance.
+fn hex_patch() -> Vec<[f64; 2]> {
+    let mut p = vec![[0.0, 0.0]];
+    p.extend((0..6_i32).map(|k| {
+        let t = f64::from(k) * std::f64::consts::FRAC_PI_3;
+        [t.cos(), t.sin()]
+    }));
+    p
+}
+
+#[test]
+fn plane_check_refuses_crossing_touching_and_overlapping_bonds() {
+    use super::graph_check::check_plane;
+    use papertilling_core::defect_fields::pairs_within;
+    let sq = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    assert!(check_plane(&sq, &[(0, 1), (1, 2), (2, 3), (0, 3)]).is_ok());
+    let both_diagonals = [(0, 1), (1, 2), (2, 3), (0, 3), (0, 2), (1, 3)];
+    assert!(check_plane(&sq, &both_diagonals).is_err_and(|e| e.contains("not plane")));
+    // 3 x 3 square grid: 1.3 keeps the 12 nearest bonds; 1.5 > sqrt 2 adds the 8 diagonals, which cross in pairs
+    let grid: Vec<[f64; 2]> = (0..9_i32).map(|k| [f64::from(k % 3), f64::from(k / 3)]).collect();
+    assert_eq!(pairs_within(&grid, 1.3).len(), 12);
+    assert!(check_plane(&grid, &pairs_within(&grid, 1.3)).is_ok());
+    assert_eq!(pairs_within(&grid, 1.5).len(), 20);
+    assert!(check_plane(&grid, &pairs_within(&grid, 1.5)).is_err());
+    // triangular patch at 1.3: 6 spokes + 6 rim bonds, plane
+    let tri = hex_patch();
+    assert_eq!(pairs_within(&tri, 1.3).len(), 12);
+    assert!(check_plane(&tri, &pairs_within(&tri, 1.3)).is_ok());
+    // collinear overlap: 0-2 runs along 0-1 (shared site, same direction); 0-1 and 1-2 only touch at site 1
+    let line = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]];
+    assert!(check_plane(&line, &[(0, 1), (1, 2)]).is_ok());
+    assert!(check_plane(&line, &[(0, 1), (1, 2), (0, 2)]).is_err());
+    // a site on another bond's interior (T junction), and coincident sites
+    let t = [[0.0, 0.0], [2.0, 0.0], [1.0, 0.0], [1.0, 1.0]];
+    assert!(check_plane(&t, &[(0, 1), (2, 3)]).is_err());
+    assert!(check_plane(&[[0.0, 0.0], [0.0, 0.0]], &[(0, 1)]).is_err_and(|e| e.contains("zero")));
+}
+
+#[test]
+fn cna_runs_on_plane_graphs_and_is_skipped_on_dense_ones() {
+    use super::graph_check::cna_histogram;
+    use papertilling_core::defect_fields::BondGraph;
+    // hand count: a spoke has the two flanking rim sites in common (not bonded: sqrt 3 apart) -> (2,0,0);
+    // a rim bond has only the centre in common -> (1,0,0); six of each
+    let mut got = cna_histogram(&BondGraph::from_cutoff(&hex_patch(), 1.3)).unwrap();
+    got.sort_unstable();
+    assert_eq!(got, vec![((1, 0, 0), 6), ((2, 0, 0), 6)]);
+    // 8 sites in convex position, all 28 pairs bonded: each bond's 6 common neighbours are bonded to the other 5
+    let oct: Vec<[f64; 2]> = (0..8_i32)
+        .map(|k| {
+            let t = f64::from(k) * std::f64::consts::FRAC_PI_4;
+            [t.cos(), t.sin()]
+        })
+        .collect();
+    let all: Vec<(usize, usize)> = (0..8).flat_map(|i| (i + 1..8).map(move |j| (i, j))).collect();
+    assert!(cna_histogram(&BondGraph::from_edges(&oct, &all)).is_err_and(|e| e.contains("not computed")));
+}
+
+#[test]
+fn cutoff_ends_are_refused_with_reasons() {
+    let at_one = Settings { auto_cutoff: false, cutoff_rel: 1.0, ..Default::default() };
+    assert!(at_one.validate(S3Sub::Detect).is_err_and(|e| e.contains("dropped by rounding")));
+    assert!(Settings { cutoff_rel: 1.001, ..at_one }.validate(S3Sub::Detect).is_ok());
+    let mut r = Settings::default();
+    r.restore(&serde_json::json!({ "cutoff_rel": 1.0 }));
+    assert!((r.cutoff_rel - 1.001).abs() < 1e-15, "restore clamps into the range");
+    // square lattice: 1.5 longest bonds > sqrt 2 brings in the crossing diagonals
+    let ctx = egui::Context::default();
+    let app = s3_app("square", &ctx);
+    let wide = Settings { auto_cutoff: false, cutoff_rel: 1.5, ..Default::default() };
+    assert!(run(&source_of(&app), S3Sub::Detect, &wide).is_err_and(|e| e.contains("not plane")));
+}
+
+#[test]
+fn stale_results_are_dropped_and_waiting_hides_old_state() {
+    let ctx = egui::Context::default();
+    let app = s3_app("square", &ctx);
+    let src = source_of(&app);
+    let (item, cell) = (app.gallery.active_item(), app.gallery.cell());
+    let cx = WbCtx { item, cell, smoke: false, backend: &app.backend, defect_crystal: Some(&app.defects.last_crystal) };
+    let mut p = super::Panel::default();
+    let key_a = p.job_key(&src);
+    // A built, job B (another cutoff) still in flight, the inputs return to A: B is forgotten and nothing is rebuilt
+    p.built[0] = Some(key_a.clone());
+    p.pending = Some((S3Sub::Detect, String::from("B")));
+    p.submit(&cx, None);
+    assert!(p.pending.is_none() && !p.is_busy() && p.worker.is_none());
+    assert_eq!(p.wanted[0].as_deref(), Some(key_a.as_str()));
+    // a late result whose key is not the wanted one changes nothing, failure or success
+    let own = Settings { own_bonds: true, ..Default::default() };
+    p.pending = Some((S3Sub::Detect, String::from("B")));
+    p.accept(Ok(Err(String::from("late failure"))));
+    p.pending = Some((S3Sub::Detect, String::from("B")));
+    p.accept(Ok(run(&src, S3Sub::Detect, &own)));
+    assert!(p.detect.is_none() && p.error().is_none());
+    assert_eq!(p.built[0].as_deref(), Some(key_a.as_str()));
+    // the wanted key is stored
+    p.pending = Some((S3Sub::Detect, key_a.clone()));
+    p.accept(Ok(run(&src, S3Sub::Detect, &own)));
+    assert!(p.detect.is_some());
+    // the source goes away: the old error is hidden, the job in flight forgotten and its late result dropped
+    p.errors[0] = Some(String::from("old error"));
+    p.pending = Some((S3Sub::Detect, key_a.clone()));
+    let gone = WbCtx { item, cell, smoke: false, backend: &app.backend, defect_crystal: None };
+    p.submit(&gone, None);
+    assert!(p.waiting.is_some() && p.error().is_none() && p.pending.is_none() && p.wanted[0].is_none());
+    p.pending = Some((S3Sub::Detect, key_a));
+    p.accept(Ok(Err(String::from("late failure for the old crystal"))));
+    assert_eq!(p.errors[0].as_deref(), Some("old error"), "dropped, not stored");
+    assert!(p.detect.is_some());
+}
+
+#[test]
+fn site_strain_is_zero_under_a_rigid_rotation() {
+    use super::fields::{max_shear, site_strain, trace};
+    use papertilling_core::defect_fields::{local_deformation_and_strain, pairs_within};
+    let r = hex_patch();
+    let edges = pairs_within(&r, 1.3);
+    let (s, c) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let rot: Vec<[f64; 2]> = r.iter().map(|p| [c * p[0] - s * p[1], s * p[0] + c * p[1]]).collect();
+    for l in &local_deformation_and_strain(&r, &rot, &edges).unwrap() {
+        let e = site_strain(l).expect("every site has two independent bonds");
+        assert!(trace(e).abs() < 1e-12 && max_shear(e) < 1e-12, "{e:?}");
+        // the linear strain would paint 2 (cos 30° - 1) = -0.268 here
+        assert!((trace(l.eps.as_ref().unwrap()) - 2.0 * (c - 1.0)).abs() < 1e-12);
+    }
+    // uniform stretch F = diag(1.1, 1): E11 = (1.21 - 1) / 2 = 0.105, E22 = E12 = 0, so max shear 0.0525
+    let st: Vec<[f64; 2]> = r.iter().map(|p| [1.1 * p[0], p[1]]).collect();
+    for l in &local_deformation_and_strain(&r, &st, &edges).unwrap() {
+        let e = site_strain(l).unwrap();
+        assert!((trace(e) - 0.105).abs() < 1e-12 && (max_shear(e) - 0.0525).abs() < 1e-12, "{e:?}");
+    }
 }

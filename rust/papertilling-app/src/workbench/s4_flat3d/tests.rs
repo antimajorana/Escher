@@ -18,6 +18,7 @@ use papertilling_core::space3d::nets3d::CanonicalNet3d;
 use papertilling_core::types::Cell2D;
 
 use super::flakes::{Centre, FlakeParams, Shape};
+use super::jobs::S4Out;
 use super::tubes::{RibbonParams, TubeParams};
 use super::{Panel, S4Sub, flakes, platycosms, slabs, torsion_free, tubes};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
@@ -291,4 +292,121 @@ fn pilot_timing_heaviest_s4_jobs() {
         let r = platycosms::build(net, code, None, false);
         eprintln!("# time platycosm auto search {net:?} on {code} ({}): {:.3}s", if r.is_ok() { "OK" } else { "refused" }, t.elapsed().as_secs_f64());
     }
+}
+
+// ---- review fixes (hand-checked expectations) ----
+
+/// Inputs W built, drag to X (job in flight), drag back to W: the X job is forgotten and its late result never lands.
+#[test]
+fn returning_to_the_built_inputs_drops_the_job_in_flight() {
+    let ctx = egui::Context::default();
+    let mut app = s4_app(None, &ctx);
+    let w = app.workbench.s4.built[S4Sub::Slabs.idx()].clone().expect("default slab built");
+    app.workbench.s4.slab.repeats = [4, 3, 3];
+    app.workbench_call(|wb, cx, _, _| wb.s4.submit(cx, None));
+    assert!(app.workbench.s4.pending.as_ref().is_some_and(|(s, k)| *s == S4Sub::Slabs && *k != w), "X in flight");
+    app.workbench.s4.slab.repeats = [3, 3, 3];
+    app.workbench_call(|wb, cx, _, _| wb.s4.submit(cx, None));
+    assert!(app.workbench.s4.pending.is_none(), "the X job is forgotten");
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(!app.workbench.s4.poll(), "no late result is accepted");
+    }
+    let p = &app.workbench.s4;
+    assert_eq!(p.built[S4Sub::Slabs.idx()].as_deref(), Some(w.as_str()));
+    assert_eq!(p.slab.out.as_ref().map(|s| s.positions.len()), Some(27), "still the 3 x 3 x 3 patch");
+}
+
+#[test]
+fn accept_drops_a_result_for_inputs_no_longer_wanted() {
+    let patch = || S4Out::Slab(Box::new(slabs::build(CanonicalNet3d::SimpleCubic, FlatSlabKind::TorusSlab, [2, 2, 2]).unwrap()), None);
+    let mut p = Panel { pending: Some((S4Sub::Slabs, String::from("X"))), ..Default::default() };
+    p.wanted[S4Sub::Slabs.idx()] = Some(String::from("W"));
+    p.accept(Ok(Ok(patch())));
+    assert!(p.slab.out.is_none() && p.built[S4Sub::Slabs.idx()].is_none(), "stale X dropped");
+    p.pending = Some((S4Sub::Slabs, String::from("W")));
+    p.accept(Ok(Ok(patch())));
+    assert_eq!(p.slab.out.as_ref().map(|s| s.positions.len()), Some(8), "wanted W accepted: 2*2*2 sites");
+    assert_eq!(p.built[S4Sub::Slabs.idx()].as_deref(), Some("W"));
+}
+
+#[test]
+fn a_lattice_change_forgets_a_lattice_job_only() {
+    let mut app = new_app();
+    for (sub, forgotten) in [(S4Sub::Nanotubes, true), (S4Sub::Slabs, false)] {
+        let mut p = Panel { lattice_key: String::from("old lattice"), pending: Some((sub, String::from("X"))), ..Default::default() };
+        p.wanted[sub.idx()] = Some(String::from("X"));
+        app.workbench_call(|_, cx, _, _| p.track_lattice(cx));
+        assert_eq!(p.pending.is_none(), forgotten, "{sub:?}");
+        assert_eq!(p.wanted[sub.idx()].is_none(), forgotten, "{sub:?}");
+    }
+}
+
+/// The overlay lives in the sheet frame (s along C_h, z along T): C_h -> (|C_h|, 0), T -> (0, |T|), and the second
+/// period of sites is the first shifted by exactly the drawn T.
+#[test]
+fn tube_overlay_is_drawn_in_the_unrolled_sheet_frame() {
+    let (cell, _, _) = honeycomb();
+    let t = tubes::build_tube(&cell, &TubeParams { n: 4, m: 2, periods: 2, periodic: false, std60: true }).unwrap();
+    let (c, tt) = (tubes::to_sheet(&t, t.chiral_vec), tubes::to_sheet(&t, t.trans_vec));
+    let tol = 1e-9 * t.circumference.max(t.period_length);
+    assert!((c[0] - t.circumference).abs() < tol && c[1].abs() < tol, "C_h -> {c:?}");
+    assert!(tt[0].abs() < tol && (tt[1] - t.period_length).abs() < tol, "T -> {tt:?}");
+    let k = t.atoms_per_unit;
+    for (i, (a, b)) in t.positions_2d.iter().zip(&t.positions_2d[k..]).enumerate() {
+        assert!((b[0] - a[0] - tt[0]).abs() < tol && (b[1] - a[1] - tt[1]).abs() < tol, "site {i}");
+    }
+}
+
+/// a1 = (1, 0), a2 = s(-1/2, sqrt3/2), (n, m) = (2, 1): T = (t1, t2) needs t2 / t1 = -(2 - s/2) / (s(s - 1)), so for
+/// s = 1 + 1e-4 the search takes T = (-1, 14998) and d = 2*14998 + 1 = 29997 sites per cell (over the cap);
+/// s = 1 + 1e-3 gives T = (-1, 1498), 2997 sites. Graphene (12, 11) over 4 periods: 4*397*4 = 6352 sites.
+#[test]
+fn a_huge_tube_cell_is_refused_before_it_is_built() {
+    let near_hex = |s: f64| Cell2D { a1: [1.0, 0.0], a2: [-0.5 * s, 0.75_f64.sqrt() * s], basis: vec![[0.0, 0.0]], bonds: Vec::new() };
+    let p = TubeParams { n: 2, m: 1, periods: 1, periodic: false, std60: true };
+    let e = tubes::build_tube(&near_hex(1.0 + 1e-4), &p).unwrap_err();
+    assert!(e.contains("REFUSED") && e.contains("(-1, 14998)") && e.contains("29997 sites"), "{e}");
+    assert_eq!(tubes::tube_size(&near_hex(1.0 + 1e-3), &p).unwrap(), ([-1, 1498], 2997));
+    let (cell, _, _) = honeycomb();
+    let big = TubeParams { n: 12, m: 11, periods: 4, periodic: false, std60: true };
+    assert_eq!(tubes::tube_size(&cell, &big).unwrap().1, 4 * 397 * 4);
+}
+
+#[test]
+fn flake_bonds_are_checked_and_the_cut_is_named_by_its_shape() {
+    let square = [(0, 1), (1, 2), (2, 3), (3, 0)];
+    assert!(flakes::check_bonds(4, &square, &[vec![0, 1, 2, 3], vec![1, 2, 3, 0]]).is_ok(), "C4 maps the 4-cycle onto itself");
+    let e = flakes::check_bonds(4, &square, &[vec![1, 0, 2, 3]]).unwrap_err();
+    assert!(e.contains("(1, 2) to (0, 2)"), "swapping 0, 1 sends bond 1-2 to the non-bond 0-2: {e}");
+    assert!(flakes::check_bonds(4, &square, &[vec![0, 0, 2, 3]]).unwrap_err().contains("does not permute"));
+    assert!(flakes::cut_label(Shape::Polygon, Some(6), 2.0).contains("regular 6-gon cut, apothem"));
+    let ws = flakes::cut_label(Shape::WignerSeitz, Some(6), 2.31);
+    assert!(ws.contains("Wigner-Seitz") && ws.contains("circumradius") && !ws.contains("apothem"), "{ws}");
+    assert!(flakes::cut_label(Shape::Disk, None, 1.0).starts_with("disk cut, radius"));
+}
+
+#[test]
+fn platycosm_cell_count_is_evidence_and_only_the_theorem_is_proved() {
+    let l = platycosms::cw_count_line(4, 12, 12, 4, 0);
+    assert!(l.starts_with("[COMPUTATIONAL EVIDENCE]") && !l.contains("[PROVED]") && l.contains("not the crystal net"), "{l}");
+    assert!(platycosms::CHI_THEOREM_LINE.starts_with("[PROVED]"));
+}
+
+/// Square net, mirror y -> -y: the core's glide axis is +-a1 and the across vector +-a2. HCP lattice: a1 + 2a2 =
+/// (1, 0, 0) + 2(-1/2, sqrt3/2, 0) = (0, sqrt3, 0); (1/2, 0, 0) is no integer combination.
+#[test]
+fn glide_slabs_label_their_repeats_along_the_glide_axes() {
+    assert!(slabs::repeats_label(FlatSlabKind::KleinSlab).contains("along glide"));
+    assert!(slabs::repeats_label(FlatSlabKind::MoebiusTube).contains("along glide"));
+    assert!(slabs::repeats_label(FlatSlabKind::TorusSlab).contains("(a1, a2, a3)"));
+    let k = slabs::build(CanonicalNet3d::SimpleCubic, FlatSlabKind::KleinSlab, [4, 4, 3]).unwrap();
+    let g = slabs::glide_axes(CanonicalNet3d::SimpleCubic, &k).expect("Klein slab glide axes");
+    assert_eq!(g.along.map(|[x, y]| [x.abs(), y]), Some([1, 0]), "{g:?}");
+    assert_eq!(g.across.map(|[x, y]| [x, y.abs()]), Some([0, 1]), "{g:?}");
+    let t = slabs::build(CanonicalNet3d::SimpleCubic, FlatSlabKind::TorusSlab, [2, 2, 2]).unwrap();
+    assert!(slabs::glide_axes(CanonicalNet3d::SimpleCubic, &t).is_none());
+    let hex = papertilling_core::flat3d::Cell3D::from_canonical_net(CanonicalNet3d::HCP).lattice;
+    assert_eq!(slabs::lattice_coords(&hex, [0.0, 3.0_f64.sqrt(), 0.0]), Some([1, 2]));
+    assert_eq!(slabs::lattice_coords(&hex, [0.5, 0.0, 0.0]), None);
 }

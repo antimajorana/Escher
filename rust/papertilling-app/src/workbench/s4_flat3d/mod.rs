@@ -3,7 +3,8 @@
 //! flakes of the Gallery lattice, and the exact torsion-free classification of the 230 space groups.
 //!
 //! Every build runs on one lazily spawned [`LatestWorker`]; only the static platycosm table is read on the UI thread.
-//! Each sub-row keeps its last result keyed by the job's inputs. A refusal (bad input, or a core `IMPOSSIBLE` /
+//! Each sub-row keeps its last result keyed by the job's inputs; a late result for inputs no longer selected is
+//! dropped (going back to the shown inputs cancels the job in flight). A refusal (bad input, or a core `IMPOSSIBLE` /
 //! `NOT_FOUND` / error) clears that sub-row's result: the reason is shown verbatim and no geometry is drawn.
 
 use papertilling_core::flat3d::parse_canonical_net_3d;
@@ -163,6 +164,8 @@ pub(crate) struct Panel {
     worker: Option<S4Worker>,
     /// Sub-row and input key of the job in flight.
     pending: Option<(S4Sub, String)>,
+    /// Per sub-row, the input key last asked for by `submit`; a worker result for any other key is dropped.
+    wanted: [Option<String>; 6],
     built: [Option<String>; 6],
     errors: [Option<String>; 6],
 }
@@ -218,39 +221,58 @@ impl Panel {
         }
         self.lattice_key = lk;
         self.flake.clear_for_new_lattice();
+        if self.pending.as_ref().is_some_and(|(s, _)| s.uses_lattice()) {
+            self.forget_pending();
+        }
         for s in S4Sub::ALL.into_iter().filter(|s| s.uses_lattice()) {
             self.clear_out(s);
             self.built[s.idx()] = None;
             self.errors[s.idx()] = None;
+            self.wanted[s.idx()] = None;
+        }
+    }
+
+    /// Cancel the job in flight: its late result is ignored by the worker and, with `pending` cleared, by `accept`.
+    fn forget_pending(&mut self) {
+        self.pending = None;
+        if let Some(w) = self.worker.as_mut() {
+            w.cancel();
         }
     }
 
     fn refuse(&mut self, reason: String) {
         let i = self.sub.idx();
         if self.pending.as_ref().is_some_and(|(s, _)| *s == self.sub) {
-            self.pending = None;
-            if let Some(w) = self.worker.as_mut() {
-                w.cancel();
-            }
+            self.forget_pending();
         }
         self.clear_out(self.sub);
         self.built[i] = None;
         self.errors[i] = Some(reason);
+        self.wanted[i] = None;
     }
 
     fn accept(&mut self, res: Result<Result<S4Out, String>, String>) {
         let Some((sub, key)) = self.pending.take() else { return };
         let i = sub.idx();
+        if self.wanted[i].as_deref() != Some(key.as_str()) {
+            return; // built for inputs that are no longer selected: never shown
+        }
         match res.and_then(|r| r) {
             Ok(out) => {
                 self.errors[i] = None;
                 self.built[i] = Some(key);
                 match out {
-                    S4Out::Slab(o) => self.slab.out = Some(*o),
+                    S4Out::Slab(o, glide) => {
+                        self.slab.out = Some(*o);
+                        self.slab.glide = glide;
+                    }
                     S4Out::Platy(o) => self.platy.out = Some(*o),
                     S4Out::Tube(o) => self.tube.out = Some(*o),
                     S4Out::Ribbon(o) => self.ribbon.out = Some(*o),
-                    S4Out::Flake(o) => self.flake.out = Some(*o),
+                    S4Out::Flake(o, shape) => {
+                        self.flake.out = Some(*o);
+                        self.flake.out_shape = shape;
+                    }
                     S4Out::Torsion(o) => self.torsion.out = Some(o),
                 }
             }
@@ -319,8 +341,15 @@ impl WbPanel for Panel {
         let job = self.job(cx);
         let key = format!("{job:?}");
         let i = self.sub.idx();
-        let in_flight = self.pending.as_ref().is_some_and(|(s, k)| *s == self.sub && *k == key);
-        if in_flight || self.built[i].as_deref() == Some(key.as_str()) {
+        self.wanted[i] = Some(key.clone());
+        if self.pending.as_ref().is_some_and(|(s, k)| *s == self.sub && *k == key) {
+            return; // already in flight
+        }
+        if self.built[i].as_deref() == Some(key.as_str()) {
+            // back to the shown result: a job for other inputs of this sub-row must not replace it when it lands
+            if self.pending.as_ref().is_some_and(|(s, _)| *s == self.sub) {
+                self.forget_pending();
+            }
             return;
         }
         self.errors[i] = None;

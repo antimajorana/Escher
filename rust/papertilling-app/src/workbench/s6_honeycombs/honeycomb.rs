@@ -259,6 +259,8 @@ pub(crate) fn present_complex(cx: CellComplex3d, cls: Option<&Classification>, s
     notes.push(String::from(COUNTS_EVIDENCE));
     notes.push(String::from(if spherical {
         "Expected V − E + F − C = 0 = χ(S³) for a cell decomposition of S³ [PROVED: Euler characteristic of S³]."
+    } else if truncated > 0 {
+        "No 3-ball test here: a truncated infinite cell is an open patch of its faces, not a closed 3-cell, so V − E + F − C counts a complex that is not a cell decomposition of B³ and need not equal 1."
     } else {
         "Expected V − E + F − C = 1 for a patch that is a 3-ball [PROVED: χ(B³) = 1]; any other value means the patch is not a ball."
     }));

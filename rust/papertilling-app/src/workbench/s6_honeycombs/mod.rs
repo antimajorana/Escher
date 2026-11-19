@@ -6,6 +6,10 @@
 //! `classify_schlafli` runs on the UI thread. Each sub-row keeps its own last result keyed by the job's inputs, so
 //! switching sub-rows does not rebuild. A refused input (hyperideal or degenerate symbol, a surface the core does not
 //! have) drops that sub-row's result and shows a placeholder with the reason: an old mesh never sits under it.
+//!
+//! Stale results: a stored result is shown only while its key equals the sub-row's current job key; a job whose
+//! inputs are no longer wanted (cache hit, refusal, another sub-row) is cancelled, and a late result whose key is not
+//! the wanted one is dropped.
 
 use serde_json::{Value, json};
 
@@ -93,7 +97,12 @@ pub(crate) struct Panel {
 
 impl Panel {
     fn job(&self) -> S6Job {
-        match self.sub {
+        self.job_for(self.sub)
+    }
+
+    /// The job the inputs of sub-row `sub` currently ask for.
+    fn job_for(&self, sub: S6Sub) -> S6Job {
+        match sub {
             S6Sub::Schlafli => {
                 let (p, q, r, shells, layers) = self.schlafli.params();
                 S6Job::Schlafli { p, q, r, shells, layers }
@@ -117,8 +126,8 @@ impl Panel {
     }
 
     /// Refusals decided on the UI thread (no worker round trip): a non-buildable Schläfli symbol.
-    fn refusal(&self) -> Option<String> {
-        if self.sub != S6Sub::Schlafli {
+    fn refusal(&self, sub: S6Sub) -> Option<String> {
+        if sub != S6Sub::Schlafli {
             return None;
         }
         let c = self.schlafli.classify();
@@ -127,6 +136,14 @@ impl Panel {
 
     fn accept(&mut self, res: Result<Result<Built, String>, String>) {
         let Some((sub, key)) = self.pending.take() else { return };
+        // a late result for inputs that are no longer wanted is dropped, never stored under the current controls
+        if self.refusal(sub).is_some() || key != format!("{:?}", self.job_for(sub)) {
+            if sub == self.sub {
+                // defensive: the shown sub-row then asks for its current inputs (no-op when built or refused)
+                self.request(None);
+            }
+            return;
+        }
         let i = sub.idx();
         match res.and_then(|r| r) {
             Ok(b) => {
@@ -140,12 +157,51 @@ impl Panel {
         }
     }
 
+    /// The shown sub-row's result, only when it was built from the current inputs (else `None`: "Building…").
     fn current(&self) -> Option<&Built> {
         let i = self.sub.idx();
         if self.errors[i].is_some() {
             return None;
         }
-        self.built[i].as_ref().map(|(_, b)| b)
+        let key = format!("{:?}", self.job());
+        self.built[i].as_ref().filter(|(k, _)| *k == key).map(|(_, b)| b)
+    }
+
+    /// Build the shown sub-row's current inputs unless they are refused, built or already in flight.
+    fn request(&mut self, repaint: Option<&egui::Context>) {
+        let i = self.sub.idx();
+        if let Some(reason) = self.refusal(self.sub) {
+            self.errors[i] = Some(reason);
+            self.built[i] = None;
+            self.drop_pending();
+            return;
+        }
+        let job = self.job();
+        let key = format!("{job:?}");
+        if self.pending.as_ref().is_some_and(|(s, k)| *s == self.sub && *k == key) {
+            return;
+        }
+        if self.built[i].as_ref().is_some_and(|(k, _)| *k == key) {
+            // cache hit: a job for other inputs (this or another sub-row) is no longer wanted
+            self.drop_pending();
+            return;
+        }
+        self.errors[i] = None;
+        let worker = self.worker.get_or_insert_with(|| LatestWorker::spawn("wb-s6", (), |_: &mut (), job| run_job(job)));
+        if let Some(ctx) = repaint {
+            worker.set_repaint_ctx(ctx);
+        }
+        worker.submit(job);
+        self.pending = Some((self.sub, key));
+    }
+
+    /// Cancel the job in flight (any sub-row): its result, if it still lands, is ignored by the worker.
+    fn drop_pending(&mut self) {
+        if self.pending.take().is_some()
+            && let Some(w) = self.worker.as_mut()
+        {
+            w.cancel();
+        }
     }
 }
 
@@ -183,31 +239,7 @@ impl WbPanel for Panel {
     }
 
     fn submit(&mut self, _cx: &WbCtx, repaint: Option<&egui::Context>) {
-        let i = self.sub.idx();
-        if let Some(reason) = self.refusal() {
-            self.errors[i] = Some(reason);
-            self.built[i] = None;
-            if self.pending.as_ref().is_some_and(|(s, _)| *s == self.sub) {
-                self.pending = None;
-                if let Some(w) = self.worker.as_mut() {
-                    w.cancel();
-                }
-            }
-            return;
-        }
-        let job = self.job();
-        let key = format!("{job:?}");
-        let in_flight = self.pending.as_ref().is_some_and(|(s, k)| *s == self.sub && *k == key);
-        if in_flight || self.built[i].as_ref().is_some_and(|(k, _)| *k == key) {
-            return;
-        }
-        self.errors[i] = None;
-        let worker = self.worker.get_or_insert_with(|| LatestWorker::spawn("wb-s6", (), |_: &mut (), job| run_job(job)));
-        if let Some(ctx) = repaint {
-            worker.set_repaint_ctx(ctx);
-        }
-        worker.submit(job);
-        self.pending = Some((self.sub, key));
+        self.request(repaint);
     }
 
     fn poll(&mut self) -> bool {
@@ -227,8 +259,9 @@ impl WbPanel for Panel {
         WbScenes { scene2d: empty_scene(title, note), mesh: Some(placeholder_mesh()), caption: String::from(caption) }
     }
 
+    /// Busy only for the shown sub-row's own job (a job for another sub-row never holds back the scene sync).
     fn is_busy(&self) -> bool {
-        self.worker.as_ref().is_some_and(LatestWorker::is_busy)
+        self.pending.as_ref().is_some_and(|(s, _)| *s == self.sub) && self.worker.as_ref().is_some_and(LatestWorker::is_busy)
     }
 
     fn error(&self) -> Option<&str> {

@@ -137,7 +137,10 @@ fn class_name(c: ElasticClass) -> &'static str {
 
 pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &ElasticOut) {
     let c = &o.c;
-    ui.label("[PROVED] GSV bond-model moduli, Cauchy-Born with Born-Huang internal relaxation (closed-form sums):");
+    ui.label(
+        "[COMPUTATIONAL EVIDENCE] GSV bond-model moduli, Cauchy-Born with Born-Huang internal relaxation (finite bond sums; \
+         the relaxation of a non-Bravais cell goes through a floating-point pseudoinverse):",
+    );
     egui::Grid::new("wb_s3_voigt").striped(true).show(ui, |ui| {
         let v = [
             ("C11", c[0][0][0][0]),
@@ -169,7 +172,10 @@ pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &ElasticOut) {
     ui.separator();
     ui.label(format!("Burgers vector: {}", o.b_source));
     if let Some(k) = o.prelog {
-        ui.label(format!("Prelogarithmic coefficient K = b·B·b / (2π) = {k:.5}"));
+        ui.label(format!(
+            "Dipole prelogarithmic slope b·B·b / (2π) = {k:.5} (energy per length of a ±b dipole at separation d: this x ln(d/r0); \
+             one dislocation has half of it, as above)"
+        ));
     }
     match &o.field {
         Ok(g) => {

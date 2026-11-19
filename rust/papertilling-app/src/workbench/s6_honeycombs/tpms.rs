@@ -210,7 +210,7 @@ pub(crate) fn build_net(kind: TpmsKind, labyrinths: u32, reps: u32) -> Result<Bu
     let notes = vec![
         String::from("[COMPUTATIONAL EVIDENCE: nearest-neighbour search on the exact site coordinates; classical values: pcu 6-coordinated (bond 1), dia 4 (√3/4), srs 3 (√2/4)]"),
         String::from("Clean-room: sites are International Tables Wyckoff positions (221 1a, 227 8a, 214 8a); net names are labels only; no net database is used."),
-        String::from("Second labyrinth (red bonds): P and D shifted by (½,½,½); G mirrored x ↦ −x."),
+        String::from("Second labyrinth (red bonds): P and D shifted by (½,½,½); G inverted through the origin, r ↦ −r (the enantiomeric srs net)."),
     ];
     let caption = format!("{} — {}³ cells, {real} sites", net.name, reps);
     Ok(Built { core: CoreOut::Net(Box::new(net)), scene2d, mesh, caption, rows, notes })
@@ -277,7 +277,11 @@ pub(crate) fn build_surface(kind: TpmsKind, mode: TpmsMode, n: usize, reps: u32)
         mesh_from_polygons(&pts, &faces, &[], |_| [0.30, 0.62, 0.86, 1.0])
     };
     let title = format!("{}: nodal function on the slice z = 0", kind_label(kind));
-    let note = "blue < 0 < red; the surface meets this slice where the colour is white";
+    let note = if exact {
+        "heat map of the nodal approximation only (blue < 0 < red, white = its zero set); it is not computed from the exact polyhedron drawn in 3D"
+    } else {
+        "blue < 0 < red; the surface meets this slice where the colour is white"
+    };
     let scene2d = tiles_scene(nodal_slice(kind, reps, 40), square_outline(f64::from(reps)), &title, note);
     let rows = vec![
         (String::from("Surface"), s.name.clone()),

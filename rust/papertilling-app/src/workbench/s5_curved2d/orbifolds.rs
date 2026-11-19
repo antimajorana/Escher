@@ -18,6 +18,10 @@ use crate::workbench::scene_helpers::{EDGE_RGBA, ring_size_tint};
 
 const BOUNDARY_RGBA: [u8; 4] = [192, 57, 43, 255];
 const MAX_SYMBOL_LEN: usize = 64;
+/// Cap on the lcm L of the orders' denominators. The core sums the orders' costs in exact `i128` rationals reduced
+/// by their gcd, so every intermediate is at most about 200 L² (|χ| <= 200 for 64 characters): L <= 10^15 keeps it
+/// below 2.1e32, far from `i128::MAX` ≈ 1.7e38. Larger orders are refused here instead of overflowing.
+pub(crate) const MAX_ORDER_LCM: u128 = 1_000_000_000_000_000;
 
 pub(crate) struct OrbState {
     pub(crate) orb_text: String,
@@ -34,19 +38,98 @@ impl Default for OrbState {
     }
 }
 
-/// Parse with a length guard (the parsers are linear, but a pasted page of text is refused with a reason).
+fn gcd_u128(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// Refuse when lcm(factor · n) over the orders exceeds [`MAX_ORDER_LCM`] (checked arithmetic, no overflow).
+pub(crate) fn check_order_lcm(orders: &[u128], factor: u128) -> Result<(), String> {
+    let mut l: u128 = 1;
+    for &n in orders {
+        let d = n.max(1).checked_mul(factor);
+        let next = d.and_then(|d| (l / gcd_u128(l, d)).checked_mul(d));
+        match next {
+            Some(x) if x <= MAX_ORDER_LCM => l = x,
+            _ => {
+                return Err(format!(
+                    "orders too large: the lcm of their denominators exceeds 10^15, beyond the exact i128 rational arithmetic (order {n})"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The orders the core's `parse_orbifold` reads from `s` (cones and corners alike), by its chunk rule: inside
+/// parentheses, or in a run containing '.', ',' or whitespace, whole numbers; otherwise one order per digit. Tokens
+/// that are not numbers are skipped (the core refuses them with its own reason).
+pub(crate) fn orbifold_orders(s: &str) -> Vec<u128> {
+    let is_sep = |c: char| c == '.' || c == ',' || c.is_whitespace();
+    let chars: Vec<char> = s.trim().chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '(' {
+            let end = chars[i + 1..].iter().position(|&x| x == ')').map_or(chars.len(), |k| i + 1 + k);
+            let inner: String = chars[i + 1..end].iter().collect();
+            out.extend(inner.split(is_sep).filter_map(|t| t.trim().parse::<u128>().ok()));
+            i = end + 1;
+        } else if c.is_ascii_digit() || is_sep(c) {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_digit() || is_sep(chars[i])) {
+                i += 1;
+            }
+            let run: String = chars[start..i].iter().collect();
+            let run = run.trim();
+            if run.chars().any(is_sep) {
+                out.extend(run.split(is_sep).filter_map(|t| t.parse::<u128>().ok()));
+            } else {
+                out.extend(run.chars().filter_map(|d| d.to_digit(10)).map(u128::from));
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Parse with a length guard (the parsers are linear, but a pasted page of text is refused with a reason) and an
+/// order-size guard (corner n costs (n−1)/(2n), so the denominators are 2n at most).
 pub(crate) fn orbifold_card(s: &str) -> Result<ConwayOrbifold, String> {
     if s.chars().count() > MAX_SYMBOL_LEN {
         return Err(format!("symbol longer than {MAX_SYMBOL_LEN} characters refused"));
     }
+    check_order_lcm(&orbifold_orders(s), 2)?;
     parse_orbifold(s)
 }
 
+/// Same guards for a vertex configuration (the angle defect has denominator dividing lcm(n_i)).
 pub(crate) fn vertex_card(s: &str) -> Result<VertexConfigInfo, String> {
     if s.chars().count() > MAX_SYMBOL_LEN {
         return Err(format!("configuration longer than {MAX_SYMBOL_LEN} characters refused"));
     }
+    let cleaned = s.trim().trim_matches(['(', ')', '[', ']']);
+    let orders: Vec<u128> = cleaned.split('.').filter_map(|t| t.trim().parse::<u128>().ok()).collect();
+    check_order_lcm(&orders, 1)?;
     parse_vertex_config(s)
+}
+
+fn yes_no(b: bool) -> &'static str {
+    if b { "yes" } else { "no" }
+}
+
+/// The two chirality fields of the core, each under its own label: `is_chiral` only says the cyclic sequence
+/// differs from its reverse; `is_snub_chiral` is the core's chirality of the tiling (that, or a snub 3.3.p.3.q).
+pub(crate) fn chirality_text(v: &VertexConfigInfo) -> String {
+    format!(
+        "vertex sequence equals its reverse (mirror-symmetric vertex figure): {}; chiral tiling (core rule: sequence differs from its reverse, or snub 3.3.p.3.q with p ≠ q): {}",
+        yes_no(!v.is_chiral),
+        yes_no(v.is_snub_chiral)
+    )
 }
 
 fn refusal(ui: &mut egui::Ui, e: &str) {
@@ -119,7 +202,8 @@ impl OrbState {
         ui.strong("Vertex configuration card");
         match self.vc.as_ref().map(|(_, r)| r) {
             Some(Ok(v)) => {
-                ui.label(format!("{} (canonical {}), chiral: {}", v.input.trim(), v.canonical, v.is_chiral));
+                ui.label(format!("{} (canonical {})", v.input.trim(), v.canonical));
+                ui.label(chirality_text(v));
                 ui.label(format!(
                     "angle defect {}/{} π: {}",
                     v.angle_defect_pi_num,
@@ -194,7 +278,7 @@ pub(crate) fn build_tg(name: &str) -> Result<S5Out, String> {
         (String::from("Side pairings"), qc.side_pairings.len().to_string()),
     ];
     let mut notes = vec![
-        format!("Counts: E = |G|/2, V = |G|/q, F = |G|/p (Coxeter & Moser, ch. 8); core: {}", qc.provenance),
+        String::from("Counts E = |G|/2, V = |G|/q, F = |G|/p are exact integers (Coxeter & Moser, ch. 8) [PROVED]"),
         String::from("Fundamental polygon placement in the disk is floating point [COMPUTATIONAL EVIDENCE]; 3D: hemisphere model (conformal)."),
     ];
     notes.push(match verified {

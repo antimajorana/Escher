@@ -1,9 +1,11 @@
 //! Chiral `(n, m)` nanotubes and nanoribbons rolled or cut from the Gallery's current 2D lattice.
 //!
 //! The tube period `T` comes from the core's metric search (`find_orthogonal_period`); when the search is refused
-//! (e.g. an irrational metric ratio) the core error is shown as the refusal, and nothing is drawn.
+//! (e.g. an irrational metric ratio) the core error is shown as the refusal, and nothing is drawn. Before the build,
+//! [`tube_size`] repeats that search and refuses a tube cell too large to build and draw (a nearly degenerate metric
+//! can give a period T with a huge coefficient).
 
-use papertilling_core::flat3d::{NanoribbonPatch, NanotubeMesh, build_nanoribbon, build_nanotube_opts};
+use papertilling_core::flat3d::{NanoribbonPatch, NanotubeMesh, build_nanoribbon, build_nanotube_opts, build_supercell_2d, find_orthogonal_period};
 use papertilling_core::types::Cell2D;
 use serde_json::{Value, json};
 
@@ -16,8 +18,54 @@ pub(super) const RIBBON_TITLE: &str = "S4 nanoribbon";
 pub(super) const MAX_NM: i32 = 12;
 pub(super) const MAX_PERIODS: usize = 4;
 pub(super) const MAX_RIBBON: usize = 8;
+/// Largest tube built and drawn (graphene at the (n, m) caps needs 6352: 4·397 sites per cell, 4 periods).
+pub(super) const MAX_TUBE_SITES: usize = 20_000;
+/// Largest lattice-cell box the core scans to pick the tube-cell cosets.
+pub(super) const MAX_COSET_SCAN: i64 = 1_000_000;
+
+/// The core's `standard_hex_60` test: equal lengths at 120° (to 1e-5) switch to the 60° basis `(a1 + a2, a2)`.
+fn is_hex_120(cell: &Cell2D) -> bool {
+    let (l1, l2) = (cell.a1[0].hypot(cell.a1[1]), cell.a2[0].hypot(cell.a2[1]));
+    let cos_g = (cell.a1[0] * cell.a2[0] + cell.a1[1] * cell.a2[1]) / (l1 * l2).max(1e-30);
+    (l1 - l2).abs() <= 1e-5 * l1.max(l2) && (cos_g + 0.5).abs() <= 1e-5
+}
+
+/// The period `T` (in the basis the core rolls in) and the number of sites the core would build, found with the
+/// core's own period search before any site is built; a tube over [`MAX_TUBE_SITES`] sites, or one whose coset scan
+/// exceeds [`MAX_COSET_SCAN`] cells, is refused with its size.
+pub(super) fn tube_size(cell: &Cell2D, t: &TubeParams) -> Result<([i32; 2], usize), String> {
+    let work = if t.std60 && is_hex_120(cell) { build_supercell_2d(cell, [[1, 1], [0, 1]])? } else { cell.clone() };
+    let tv = find_orthogonal_period(&work, t.n, t.m)?;
+    let (n, m) = (i64::from(t.n), i64::from(t.m));
+    let (t1, t2) = (i64::from(tv[0]), i64::from(tv[1]));
+    let d_det = n * t2 - m * t1;
+    if d_det <= 0 {
+        return Err(format!("REFUSED: the period T = ({t1}, {t2}) does not span a tube cell with C_h = ({n}, {m}) (nothing drawn)"));
+    }
+    let span = |a: [i64; 4]| a.iter().max().copied().unwrap_or(0) - a.iter().min().copied().unwrap_or(0) + 5;
+    let scan = span([0, n, t1, n + t1]).saturating_mul(span([0, m, t2, m + t2]));
+    let per_cell = u64::try_from(d_det).unwrap_or(u64::MAX).saturating_mul(work.basis.len() as u64);
+    let sites = per_cell.saturating_mul(t.periods as u64);
+    if sites > MAX_TUBE_SITES as u64 || scan > MAX_COSET_SCAN {
+        return Err(format!(
+            "REFUSED: the period search gives T = ({t1}, {t2}), so one tube cell holds {per_cell} sites ({sites} over {} periods; the cap is {MAX_TUBE_SITES}; coset scan {scan} cells, cap {MAX_COSET_SCAN}). A nearly degenerate metric makes T this long; nothing is built or drawn",
+            t.periods
+        ));
+    }
+    Ok((tv, sites as usize))
+}
+
+/// A vector of the rolled plane in the unrolled-sheet frame of `positions_2d`: `(v · ĉ, v · t̂)`, with ĉ along `C_h`
+/// and t̂ along `T`.
+pub(super) fn to_sheet(t: &NanotubeMesh, v: [f64; 2]) -> [f64; 2] {
+    let c = t.circumference.max(1e-300);
+    let p = t.period_length.max(1e-300);
+    let along = |w: [f64; 2], l: f64| (v[0] * w[0] + v[1] * w[1]) / l;
+    [along(t.chiral_vec, c), along(t.trans_vec, p)]
+}
 
 pub(super) fn build_tube(cell: &Cell2D, t: &TubeParams) -> Result<NanotubeMesh, String> {
+    tube_size(cell, t)?;
     let out = build_nanotube_opts(cell, t.n, t.m, t.periods, t.periodic, t.std60)?;
     if out.positions_3d.is_empty() {
         return Err(String::from("the tube has no sites (refused, nothing drawn)"));
@@ -114,6 +162,8 @@ impl TubeState {
             t.circumference, t.radius, t.period_length
         ));
         ui.label(format!("[COMPUTATIONAL EVIDENCE] chiral angle {:.4}° (from a1), {} sites per tube cell", t.chiral_angle_deg, t.atoms_per_unit));
+        let cos = to_sheet(t, t.trans_vec)[0] / t.period_length.max(1e-300);
+        ui.label(format!("[COMPUTATIONAL EVIDENCE] |cos(C_h, T)| = {:.1e} (the core accepts T up to 1e-6 in floating point)", cos.abs()));
         ui.small("Graphene in the 60° basis: |C_h| = a√(n²+nm+m²), 4(n²+nm+m²)/d_R atoms per cell (Saito et al. 1998, Ch. 3).");
         let seams = t.bonds.iter().filter(|b| b.2).count();
         ui.label(format!("Built: {} sites over {} periods, {} bonds ({} across the seam, red)", t.positions_3d.len(), t.periods_z, t.bonds.len(), seams));
@@ -129,7 +179,10 @@ impl TubeState {
         let scene = points_scene(&t.positions_2d, &flat, &[], TUBE_TITLE, "red: chiral vector C_h; blue: tube period T");
         let scene = with_lines(
             scene,
-            vec![line_prim([0.0, 0.0], t.chiral_vec, [192, 57, 43, 255], 2.4), line_prim([0.0, 0.0], t.trans_vec, [41, 98, 255, 255], 2.4)],
+            vec![
+                line_prim([0.0, 0.0], to_sheet(t, t.chiral_vec), [192, 57, 43, 255], 2.4),
+                line_prim([0.0, 0.0], to_sheet(t, t.trans_vec), [41, 98, 255, 255], 2.4),
+            ],
         );
         let edges: Vec<(usize, usize, u8)> = t.bonds.iter().map(|b| (b.0, b.1, u8::from(b.2))).collect();
         let kinds: Vec<u8> = t.site_basis_idx.iter().map(|&b| (b % 4) as u8).collect();

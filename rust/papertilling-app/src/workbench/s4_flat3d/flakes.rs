@@ -1,6 +1,9 @@
 //! Symmetry-centred finite flakes of the Gallery's current 2D lattice: a disk, a regular n-gon or a scaled
-//! Wigner-Seitz cell around a chosen centre, invariant under the centre's site-symmetry point group. The core checks
-//! that every kept symmetry maps the flake (sites and bonds) onto itself and refuses otherwise.
+//! Wigner-Seitz cell around a chosen centre. Its point group is the subgroup of the centre's site-symmetry group
+//! that preserves the cut. The core checks that each element permutes the flake's sites; [`check_bonds`] then
+//! checks here that each permutation maps every bond onto a bond, and the flake is refused otherwise.
+
+use std::collections::HashSet;
 
 use papertilling_core::flat3d::{SymmetricFlake, build_symmetric_flake, build_wigner_seitz_flake};
 use papertilling_core::types::Cell2D;
@@ -89,13 +92,51 @@ pub(super) fn build(group: &str, cell: &Cell2D, centre: [f64; 2], p: &FlakeParam
     if f.crystal.pos.is_empty() {
         return Err(String::from("the flake contains no site: increase its size or move its centre"));
     }
+    check_bonds(f.crystal.pos.len(), &f.crystal.edges, &f.vertex_perms)?;
     Ok(f)
+}
+
+/// Each site permutation must be a bijection of `0..n` that maps every bond `{u, v}` onto a bond.
+pub(super) fn check_bonds(n: usize, edges: &[(usize, usize)], perms: &[Vec<usize>]) -> Result<(), String> {
+    let key = |u: usize, v: usize| if u <= v { (u, v) } else { (v, u) };
+    if edges.iter().any(|&(u, v)| u >= n || v >= n) {
+        return Err(format!("REFUSED: a flake bond names a site outside 0..{n} (nothing drawn)"));
+    }
+    let set: HashSet<(usize, usize)> = edges.iter().map(|&(u, v)| key(u, v)).collect();
+    for (k, perm) in perms.iter().enumerate() {
+        let mut seen = vec![false; n];
+        let bijective = perm.len() == n && perm.iter().all(|&w| w < n && !std::mem::replace(&mut seen[w], true));
+        if !bijective {
+            return Err(format!("REFUSED: symmetry element {k} does not permute the {n} flake sites (nothing drawn)"));
+        }
+        if let Some(&(u, v)) = edges.iter().find(|&&(u, v)| !set.contains(&key(perm[u], perm[v]))) {
+            return Err(format!(
+                "REFUSED: symmetry element {k} maps bond ({u}, {v}) to ({}, {}), which is not a bond: the bonds break the site symmetry (nothing drawn)",
+                perm[u], perm[v]
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Names the cut the flake was built with; `radius` is the core's: the apothem of an n-gon cut, the circumradius of a
+/// Wigner-Seitz cut.
+pub(super) fn cut_label(shape: Shape, n_fold: Option<usize>, radius: f64) -> String {
+    match (shape, n_fold) {
+        (Shape::Disk, _) => format!("disk cut, radius {radius:.4}"),
+        (Shape::Polygon, Some(n)) => format!("regular {n}-gon cut, apothem {radius:.4}"),
+        (Shape::Polygon, None) => format!("regular n-gon cut, apothem {radius:.4}"),
+        (Shape::WignerSeitz, Some(n)) => format!("scaled Wigner-Seitz cell cut ({n} vertices, not regular in general), circumradius {radius:.4}"),
+        (Shape::WignerSeitz, None) => format!("scaled Wigner-Seitz cell cut, circumradius {radius:.4}"),
+    }
 }
 
 #[derive(Default)]
 pub(super) struct FlakeState {
     pub(super) p: FlakeParams,
     pub(super) out: Option<SymmetricFlake>,
+    /// The cut shape `out` was built with.
+    pub(super) out_shape: Shape,
 }
 
 impl FlakeState {
@@ -152,10 +193,9 @@ impl FlakeState {
             return;
         };
         ui.strong(format!("Flake of {} at ({:.3}, {:.3})", f.group, f.centre[0], f.centre[1]));
-        let shape = f.n_fold_polygon.map_or_else(|| String::from("disk / cell cut"), |n| format!("{n}-gon"));
-        ui.label(format!("{shape}, radius {:.4}", f.radius));
+        ui.label(cut_label(self.out_shape, f.n_fold_polygon, f.radius));
         ui.label(format!(
-            "[COMPUTATIONAL EVIDENCE] site point group of order {} ({}), each element checked to map the flake's sites and bonds onto themselves",
+            "[COMPUTATIONAL EVIDENCE] point group of the cut flake: order {} ({}), the elements of the centre's site-symmetry group that preserve the cut; each permutes the sites (core, positions to 1e-4) and maps every bond onto a bond (panel check)",
             f.point_group_order,
             if f.is_dihedral { "dihedral" } else { "cyclic" }
         ));

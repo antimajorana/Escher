@@ -15,6 +15,17 @@ use crate::mesh3d::wb_mesh::mesh_from_points_edges;
 pub(super) const SCENE_TITLE: &str = "S4 platycosm quotient (xy of the fundamental domain)";
 pub(super) const MAX_SUPERCELL: usize = 6;
 
+/// The theorem behind χ₃ = 0 (the only `[PROVED]` Euler statement shown).
+pub(super) const CHI_THEOREM_LINE: &str = "[PROVED] χ = 0 for every closed odd-dimensional manifold (Poincaré duality)";
+
+/// The core's cell count: a grid cellulation of the platycosm built from the ITA operations and the supercell, with
+/// freeness on cells checked at run time. It is not the crystal net, so V need not equal the net's vertex count.
+pub(super) fn cw_count_line(v: usize, e: usize, f: usize, c: usize, chi: i64) -> String {
+    format!(
+        "[COMPUTATIONAL EVIDENCE] χ₃ = V − E + F − C = {v} − {e} + {f} − {c} = {chi}: exact cell count of a G-invariant cubical/prism grid cellulation of the platycosm (not the crystal net)"
+    )
+}
+
 /// Build the quotient; a non-`OK` core status is returned as `Err(reason)`.
 pub(super) fn build(net: CanonicalNet3d, code: &str, supercell: Option<[usize; 3]>, ignore_kinds: bool) -> Result<PlatycosmQuotient3d, String> {
     let cell = Cell3D::from_canonical_net(net);
@@ -121,10 +132,8 @@ impl PlatyState {
                     q.ita_symbol.as_deref().unwrap_or("?"),
                     q.supercell
                 ));
-                ui.label(format!(
-                    "[PROVED] χ₃ = V − E + F − C = {} − {} + {} − {} = {} (exact CW count of the quotient complex)",
-                    q.cw_v, q.cw_e, q.cw_f, q.cw_c, q.euler_chi_3
-                ));
+                ui.label(cw_count_line(q.cw_v, q.cw_e, q.cw_f, q.cw_c, q.euler_chi_3));
+                ui.label(CHI_THEOREM_LINE);
                 ui.label(format!("[PROVED] H1 = {}, b1 = {} (published table)", q.h1_label, q.b1));
                 let loops = q.bonds.iter().filter(|b| b.u == b.v).count();
                 let seams = q.bonds.iter().filter(|b| b.across_seam).count();

@@ -75,7 +75,13 @@ pub(crate) fn build(src: &Source, set: &Settings, det: DetectOut) -> Result<Fiel
     Ok(FieldsOut { det, selected, strain, strain_bonds: (kept.len(), cut.len()), max_u, nye, vitek, psi, psi_n: set.psi_n })
 }
 
-fn trace(e: &[[f64; 2]; 2]) -> f64 {
+/// The strain painted and summarised per site: Green-Lagrange `E = (F^T F - I) / 2`, which is zero under a rigid
+/// rotation (the linear `(F + F^T) / 2 - I` reads `2 (cos θ - 1)` in its trace for a rotation by θ).
+pub(crate) fn site_strain(l: &LocalStrain) -> Option<&[[f64; 2]; 2]> {
+    l.green.as_ref()
+}
+
+pub(crate) fn trace(e: &[[f64; 2]; 2]) -> f64 {
     e[0][0] + e[1][1]
 }
 
@@ -131,10 +137,10 @@ pub(crate) fn scene(o: &FieldsOut, set: &Settings) -> Scene2D {
         FieldKind::StrainTrace | FieldKind::MaxShear => {
             let f = if set.field == FieldKind::StrainTrace { trace } else { max_shear };
             let vals: Vec<f64> = match &o.strain {
-                Ok(ls) => ls.iter().map(|l| l.eps.as_ref().map_or(f64::NAN, f)).collect(),
+                Ok(ls) => ls.iter().map(|l| site_strain(l).map_or(f64::NAN, f)).collect(),
                 Err(_) => vec![f64::NAN; pos.len()],
             };
-            site_scene(o, &vals, set.field.label())
+            site_scene(o, &vals, &format!("{} (Green-Lagrange E = (F^T F - I)/2)", set.field.label()))
         }
         FieldKind::Vitek => vitek_scene(o),
         FieldKind::PsiN => {
@@ -187,11 +193,12 @@ pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &FieldsOut, set: &Settings) {
     ui.label(format!("Largest site displacement |pos - ref_pos|: {:.4}", o.max_u));
     match &o.strain {
         Ok(ls) => {
-            let eps: Vec<&[[f64; 2]; 2]> = ls.iter().filter_map(|l| l.eps.as_ref()).collect();
+            let eps: Vec<&[[f64; 2]; 2]> = ls.iter().filter_map(site_strain).collect();
             let tr = abs_max(eps.iter().map(|e| trace(e)));
             let sh = abs_max(eps.iter().map(|e| max_shear(e)));
             ui.label(format!(
-                "[COMPUTATIONAL EVIDENCE] least-squares strain at {} of {} sites; max |trace| {tr:.3e}, max shear {sh:.3e}",
+                "[COMPUTATIONAL EVIDENCE] least-squares Green-Lagrange strain E = (F^T F - I)/2 at {} of {} sites; \
+                 max |trace| {tr:.3e}, max shear {sh:.3e}",
                 eps.len(),
                 ls.len()
             ));

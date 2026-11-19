@@ -101,7 +101,7 @@ pub(crate) fn build(j: &WyJob) -> Result<S5Out, String> {
     let t = build_wythoff(j.p, j.q, op, j.layers)?;
     if let Some(f) = t.faces.iter().find(|f| f.len() < 3) {
         return Err(format!(
-            "{op_label} of {{{},{}}} has {}-gon (digon) faces, which this view cannot draw or count as a polygon mesh;              the Regular {{p,q}} row draws hosohedra and dihedra",
+            "{op_label} of {{{},{}}} has {}-gon (digon) faces, which this view cannot draw or count as a polygon mesh; the Regular {{p,q}} row draws hosohedra and dihedra",
             j.p,
             j.q,
             f.len()
@@ -141,7 +141,12 @@ pub(crate) fn build(j: &WyJob) -> Result<S5Out, String> {
     if !closed {
         rows.push((String::from("Base patch layers"), j.layers.to_string()));
     }
-    let mut notes = vec![format!("Core: {}", t.provenance)];
+    // The core's stamp is a blanket one; state what each part rests on instead of forwarding it.
+    let seed = if matches!(op, WythoffOp::Snub { .. }) { "; the snub generating point is a numerical root" } else { "" };
+    let mut notes = vec![format!(
+        "Wythoff construction (Coxeter, Longuet-Higgins & Miller 1954){seed}; the built vertex coordinates are floating point{} [COMPUTATIONAL EVIDENCE]",
+        if closed { "" } else { " and the patch is cut at the requested layers" }
+    )];
     notes.push(euler_note(closed, t.euler_chi));
     if dropped > 0 {
         notes.push(format!("{dropped} face(s) outside the 2D clip window were not drawn."));
