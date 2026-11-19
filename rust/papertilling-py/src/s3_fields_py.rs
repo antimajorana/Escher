@@ -76,12 +76,20 @@ pub fn nye_strain_json(
             BondGraph::from_cutoff(&pos, cutoff.unwrap_or_else(|| default_cutoff(&cell, &rl))).edges
         }
     };
-    let nye = nye_tensor(&pos, &cell, frame, Some(&all_edges), None, None).map_err(err)?;
-    let mut out = json!({
-        "faces": nye.faces, "areas": nye.areas, "alpha": nye.alpha, "frame_angle_deg": nye.frame_angle_deg,
-        "boundary_walk": nye.boundary_walk, "net_frank_deg": nye.net_frank_deg, "nye_total": nye.total,
-        "boundary_closure": nye.boundary_closure, "reason": nye.reason, "edges": all_edges,
-    });
+    // A graph that encloses no area has no Nye field, but strain and Vitek arrows (per bond) are still defined:
+    // refuse only the Nye part, with the core's reason, as the pure-Python path does.
+    let mut out = match nye_tensor(&pos, &cell, frame, Some(&all_edges), None, None) {
+        Ok(nye) => json!({
+            "faces": nye.faces, "areas": nye.areas, "alpha": nye.alpha, "frame_angle_deg": nye.frame_angle_deg,
+            "boundary_walk": nye.boundary_walk, "net_frank_deg": nye.net_frank_deg, "nye_total": nye.total,
+            "boundary_closure": nye.boundary_closure, "reason": nye.reason, "edges": all_edges,
+        }),
+        Err(e) if e.contains("no bounded faces") => json!({
+            "faces": [], "areas": [], "alpha": [], "frame_angle_deg": null, "boundary_walk": [], "net_frank_deg": null,
+            "nye_total": null, "boundary_closure": null, "reason": e, "edges": all_edges,
+        }),
+        Err(e) => return Err(err(e)),
+    };
     if let Some(r) = ref_pos {
         let st: Vec<LocalStrain> = local_deformation_and_strain(&r, &pos, &all_edges).map_err(err)?;
         out["strain"] = serde_json::to_value(&st).map_err(err)?;

@@ -69,6 +69,7 @@ def test_strain_and_vitek_of_affine_maps(mode):
     two = dfm.compute_nye_and_strain([[0.2, 0.1], [1.9, 0.1]], "square", ref_pos=[[0, 0], [1, 0]], edges=[(0, 1)],
                                      burgers=(1.0, 0.0))
     assert abs(two["vitek"]["wrapped"][0] + 0.3) < 1e-12          # 0.7 |b| wraps to -0.3 |b|
+    assert two["nye_total"] is None and "no bounded faces" in two["reason"]   # one bond encloses no area: no Nye field
 
 
 def test_moduli_square_by_hand_and_python_parity(mode):

@@ -427,6 +427,11 @@ def compute_nye_and_strain(pos, lattice, *, ref_pos=None, edges=None, cutoff=Non
     ref = _Ref(cell, frame)
     es, nbrs = _graph(P, _edge_list(edges), float(cutoff) if cutoff is not None else ref.default_cutoff())
     faces, areas, rim, left = _faces(P, nbrs)
+    if not faces:  # no Nye field without an enclosed area; strain and Vitek arrows are still defined (as in Rust)
+        out = dict(edges=np.array(es, int).reshape(-1, 2), faces=[], areas=[], alpha=np.zeros((0, 2)), frame_angle_deg=None,
+                   boundary_walk=[], net_frank_deg=None, nye_total=None, boundary_closure=None,
+                   reason="REFUSED: no bounded faces (the bond graph encloses no area)")
+        return _with_strain(out, P, es, ref_pos, burgers)
     th = _fit_angle(P, ref, [(u, v) for u, v in es if rim[u] and rim[v]], ref.frame_angle)
     snap = {(u, v): ref.star[ref.nearest(P[v] - P[u], th)] for u, v in es}
     gdir = lambda u, v: snap[(u, v)] if u < v else -snap[(v, u)]  # noqa: E731
@@ -442,6 +447,11 @@ def compute_nye_and_strain(pos, lattice, *, ref_pos=None, edges=None, cutoff=Non
                boundary_closure=closure.tolist(),
                reason=("[PROVED] antisymmetric snapping telescopes: sum_f alpha A_f = boundary closure" if total is not None
                        else f"[PROVED] region encloses net Frank angle {net} deg: the Burgers vector depends on the frame"))
+    return _with_strain(out, P, es, ref_pos, burgers)
+
+
+def _with_strain(out, P, es, ref_pos, burgers) -> dict:
+    """Add per-site strain (with `ref_pos`) and Vitek arrows (with `burgers`) to a Nye result."""
     if ref_pos is not None:
         R = _pos(ref_pos)
         out.update(_py_strain(R, P, es))
