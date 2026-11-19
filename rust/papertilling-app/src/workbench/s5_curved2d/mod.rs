@@ -109,6 +109,17 @@ pub(crate) fn delta_badge(p: usize, q: usize) -> String {
     }
 }
 
+/// Euler-characteristic note, stamped by what it rests on: Euler's formula for a closed sphere tiling, or the
+/// count of the built patch (which says so when it is not the expected value).
+pub(crate) fn euler_note(closed: bool, chi: i64) -> String {
+    match (closed, chi) {
+        (true, 2) => String::from("Closed tiling of S²: V − E + F = 2 (Euler) [PROVED]"),
+        (true, c) => format!("V − E + F = {c} ≠ 2: the built complex is not a valid sphere tiling [COMPUTATIONAL EVIDENCE]"),
+        (false, 1) => String::from("V − E + F = 1, as for a disk-shaped patch [COMPUTATIONAL EVIDENCE]"),
+        (false, c) => format!("V − E + F = {c} ≠ 1: the patch is not a disk [COMPUTATIONAL EVIDENCE]"),
+    }
+}
+
 /// p and q DragValues (2..=MAX_PQ, or 3..=MAX_PQ for H²-only rows); true when changed.
 pub(crate) fn pq_controls(ui: &mut egui::Ui, p: &mut usize, q: &mut usize, lo: usize) -> bool {
     let mut changed = false;

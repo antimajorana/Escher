@@ -6,7 +6,7 @@ use papertilling_core::noneuclidean2d::{SnubHandedness, WythoffOp, build_wythoff
 use serde_json::{Value, json};
 
 use super::draw::{DiskModel, Picture, e2_picture, h2_picture, mesh_with_arcs, s2_picture, slerp};
-use super::{S5Out, check_symbol, delta_badge, geom_label, get_usize, pq_controls};
+use super::{S5Out, check_symbol, delta_badge, euler_note, geom_label, get_usize, pq_controls};
 use crate::workbench::scene_helpers::{EDGE_RGBA, ring_size_tint};
 
 /// The nine choices of the operation box (snub split by hand).
@@ -99,6 +99,14 @@ pub(crate) fn build(j: &WyJob) -> Result<S5Out, String> {
         return Err(format!("{} layers refused: allowed 1..={MAX_LAYERS}", j.layers));
     }
     let t = build_wythoff(j.p, j.q, op, j.layers)?;
+    if let Some(f) = t.faces.iter().find(|f| f.len() < 3) {
+        return Err(format!(
+            "{op_label} of {{{},{}}} has {}-gon (digon) faces, which this view cannot draw or count as a polygon mesh;              the Regular {{p,q}} row draws hosohedra and dihedra",
+            j.p,
+            j.q,
+            f.len()
+        ));
+    }
     let title = format!("S5 Wythoff {op_label} of {{{},{}}}", j.p, j.q);
     let tint = |fi: usize| ring_size_tint(t.faces[fi].len());
     let (scene2d, dropped, arcs3d) = match kind {
@@ -134,9 +142,7 @@ pub(crate) fn build(j: &WyJob) -> Result<S5Out, String> {
         rows.push((String::from("Base patch layers"), j.layers.to_string()));
     }
     let mut notes = vec![format!("Core: {}", t.provenance)];
-    if closed {
-        notes.push(String::from("Uniform polyhedron on S²: V − E + F = 2 (Euler) [PROVED]"));
-    }
+    notes.push(euler_note(closed, t.euler_chi));
     if dropped > 0 {
         notes.push(format!("{dropped} face(s) outside the 2D clip window were not drawn."));
     }

@@ -149,7 +149,7 @@ pub(crate) fn build(j: &LargeJob) -> Result<S5Out, String> {
     ];
     let mut notes = vec![
         String::from("Counts of the built patch [COMPUTATIONAL EVIDENCE]; a disk patch has V − E + F = 1."),
-        String::from("3D: hemisphere model of H² (conformal, not an isometric embedding)."),
+        String::from("3D: hemisphere model of H² (conformal, not an isometric embedding) [PROVED]."),
     ];
     if faces.len() > MAX_3D_FACES {
         notes.push(format!("3D shows the innermost {MAX_3D_FACES} of {} faces.", faces.len()));

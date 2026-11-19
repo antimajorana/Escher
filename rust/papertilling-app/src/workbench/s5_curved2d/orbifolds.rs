@@ -195,10 +195,10 @@ pub(crate) fn build_tg(name: &str) -> Result<S5Out, String> {
     ];
     let mut notes = vec![
         format!("Counts: E = |G|/2, V = |G|/q, F = |G|/p (Coxeter & Moser, ch. 8); core: {}", qc.provenance),
-        String::from("Fundamental polygon placement in the disk is floating point; 3D: hemisphere model (conformal)."),
+        String::from("Fundamental polygon placement in the disk is floating point [COMPUTATIONAL EVIDENCE]; 3D: hemisphere model (conformal)."),
     ];
     notes.push(match verified {
-        Ok(()) => String::from("Invariant check χ = 2 − 2g = V − E + F, uniform p-gons, vertex degree q: passed"),
+        Ok(()) => String::from("Invariant check χ = 2 − 2g = V − E + F, uniform p-gons, vertex degree q: passed (exact integer check of the built map) [PROVED]"),
         Err(e) => format!("Invariant check FAILED: {e}"),
     });
     if dropped > 0 {

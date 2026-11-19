@@ -32,9 +32,9 @@ pub(crate) fn surface_kind(k: usize, twist: f64) -> Option<H2SurfaceKind> {
 fn placement_note(k: usize) -> &'static str {
     match k {
         0 => "Isometric embedding of H² as the hyperboloid sheet in Minkowski space R^{2,1} [PROVED]; its Euclidean curvature is not constant.",
-        1 => "Conformal hemisphere model: angles are kept, lengths are not; the hemisphere's Euclidean curvature is +1 (not an isometry).",
-        2 | 3 => "The surface has Gaussian curvature −1, but the tiling is placed by a polar chart: a visual placement, not an isometry.",
-        _ => "Kuen's surface has Gaussian curvature −1, but the tiling is placed by an affine chart: a visual placement, not an isometry.",
+        1 => "Conformal hemisphere model: angles are kept, lengths are not; the hemisphere's Euclidean curvature is +1, so this is not an isometry [PROVED].",
+        2 | 3 => "The surface has Gaussian curvature −1 [PROVED] (Gray, Abbena & Salamon 2006), but the tiling is placed by a polar chart: a visual placement that distorts lengths and angles, not an isometry.",
+        _ => "Kuen's surface has Gaussian curvature −1 [PROVED] (Gray, Abbena & Salamon 2006), but the tiling is placed by an affine chart: a visual placement that distorts lengths and angles, not an isometry.",
     }
 }
 
@@ -194,7 +194,7 @@ pub(crate) fn build(j: &SurfJob) -> Result<S5Out, String> {
     let (scene2d, dropped) = pic.finish(0);
     let rows = vec![
         (String::from("Surface"), m.kind_name.clone()),
-        (String::from("Gaussian curvature of its metric"), format!("{}", m.expected_gaussian_curvature)),
+        (String::from("Gaussian curvature of its metric"), format!("{} [PROVED]", m.expected_gaussian_curvature)),
         (String::from("Faces placed"), m.faces.len().to_string()),
         (String::from("Net pieces / glued edges / cut edges"), format!("{} / {} / {}", net.pieces.len(), net.tree_edges.len(), net.cut_pairings.len())),
         (String::from("Max edge-length error of the net"), format!("{:.2e}", net.max_edge_length_error)),

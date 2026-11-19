@@ -7,7 +7,7 @@ use papertilling_core::noneuclidean2d::build_unified_pq;
 use serde_json::{Value, json};
 
 use super::draw::{DiskModel, arcs_picture, e2_picture, h2_picture, mesh_with_arcs, s2_picture};
-use super::{S5Out, check_symbol, delta_badge, excess_fraction, geom_label, get_usize, pq_controls};
+use super::{S5Out, check_symbol, delta_badge, euler_note, excess_fraction, geom_label, get_usize, pq_controls};
 use crate::workbench::scene_helpers::ring_size_tint;
 
 /// Layer range the core honours for each geometry (S² is closed: layers are not used).
@@ -142,12 +142,11 @@ pub(crate) fn build(j: &PqJob) -> Result<S5Out, String> {
     let mut notes = vec![
         format!("Geometry from the sign of δ (Coxeter, Regular Polytopes, §1.7, §4.5) [PROVED]; core: {}", t.provenance),
     ];
-    notes.push(match kind {
-        GeometryKind::Spherical => String::from("Closed tiling of S²: V − E + F = 2 (Euler) [PROVED]"),
-        _ => String::from("Finite patch homeomorphic to a disk: V − E + F = 1 expected [COMPUTATIONAL EVIDENCE]"),
-    });
-    if digon {
-        notes.push(String::from("Digon faces cannot be filled as flat polygons: only their great-circle edges are drawn."));
+    notes.push(euler_note(kind == GeometryKind::Spherical, t.euler_chi));
+    if j.p == 2 {
+        notes.push(String::from("Hosohedron: its digon faces cannot be filled as flat polygons; only the great-circle edges are drawn."));
+    } else if j.q == 2 {
+        notes.push(String::from("Dihedron: its two p-gon faces are the two hemispheres; in 3D they are drawn as two coincident flat disks."));
     }
     if dropped > 0 {
         notes.push(format!("{dropped} face(s) outside the 2D clip window were not drawn."));
