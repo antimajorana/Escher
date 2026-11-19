@@ -24,6 +24,8 @@ _EXPORTS = {
     "build_hyperbolic_tiling": "hyperbolic",
     "explore": "widgets",
     "spectrum": "spectrum",
+    "export_extxyz": "solver_export", "classify_bond_shells": "solver_export",
+    "cluster_site_permutations": "solver_export",
     "DefectCatalogue": "defects.catalogue", "build": "defects.build",
     "equivalent_single": "defects.config", "compare": "defects.config", "classify": "defects.config",
     "space_group_extension": "defects.gauge", "wyckoff_rotocentres": "defects.gauge",
