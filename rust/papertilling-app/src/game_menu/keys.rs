@@ -19,8 +19,8 @@ fn take(ctx: &egui::Context, keys: &[Key]) -> bool {
 }
 
 /// `/` as a key press (unmodified) or as typed text (some layouts need Shift); both events are removed so the
-/// character never reaches the filter field.
-fn take_slash(ctx: &egui::Context) -> bool {
+/// character never reaches the filter field. Returns `(hit, text_seen)`.
+fn take_slash(ctx: &egui::Context) -> (bool, bool) {
     ctx.input_mut(|i| {
         let is_slash = |e: &Event| match e {
             Event::Text(t) => t == "/",
@@ -28,10 +28,30 @@ fn take_slash(ctx: &egui::Context) -> bool {
             _ => false,
         };
         let hit = i.events.iter().any(is_slash);
+        let text_seen = i.events.iter().any(|e| matches!(e, Event::Text(t) if t == "/"));
         if hit {
             i.events.retain(|e| !is_slash(e) && !matches!(e, Event::Key { key: Key::Slash, .. }));
         }
-        hit
+        (hit, text_seen)
+    })
+}
+
+/// The `/` text that belongs to a slash key press handled in an earlier frame (backends may deliver the key and
+/// its text in different frames): drop it if it is the next typed input. Returns whether it is still awaited.
+fn swallow_late_slash_text(ctx: &egui::Context) -> bool {
+    ctx.input_mut(|i| {
+        let next = i.events.iter().position(|e| {
+            matches!(e, Event::Text(_) | Event::Paste(_)) || matches!(e, Event::Key { pressed: true, .. })
+        });
+        match next {
+            None => true,
+            Some(k) => {
+                if matches!(&i.events[k], Event::Text(t) if t == "/") {
+                    i.events.remove(k);
+                }
+                false
+            }
+        }
     })
 }
 
@@ -87,6 +107,9 @@ impl PapertillingApp {
             self.deck.focus_filter = true;
             return;
         }
+        if self.deck.slash_text_pending {
+            self.deck.slash_text_pending = swallow_late_slash_text(ctx);
+        }
         let cols = self.deck.cols.max(1) as isize;
         if filter_focused {
             if take(ctx, &[Key::Enter]) {
@@ -123,8 +146,12 @@ impl PapertillingApp {
             self.deck.equip_request = Some(self.deck.cur());
         } else if take(ctx, &[Key::Tab, Key::M]) {
             self.deck_close();
-        } else if take_slash(ctx) {
-            self.deck.focus_filter = true;
+        } else {
+            let (hit, text_seen) = take_slash(ctx);
+            if hit {
+                self.deck.focus_filter = true;
+                self.deck.slash_text_pending = !text_seen;
+            }
         }
         // arrows, Tab and Shift+Tab never walk focus through the panels hidden under the deck
         cancel_focus_move(ctx);

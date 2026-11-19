@@ -8,6 +8,7 @@ use crate::app::PapertillingApp;
 use crate::atlas_tab::{AtlasSubTab, AtlasTabState};
 use crate::backend::{CatalogueItemUi, CatalogueRuleUi, SurfaceTargetUi};
 use crate::defects_tab::DefectSubTab;
+use crate::gallery_tab::browser::rule_tag;
 use crate::presets::PRESETS;
 use crate::workbench::WorkbenchView;
 
@@ -79,11 +80,8 @@ pub(crate) struct Card {
     pub id: CardId,
     pub realm: Realm,
     pub title: String,
-    #[allow(dead_code)] // M1 prewire: drawn by the card grid and stat card (WP-B / WP-C).
     pub subtitle: String,
-    #[allow(dead_code)] // M1 prewire: drawn by the card grid and stat card (WP-B / WP-C).
     pub badge: Option<Badge>,
-    #[allow(dead_code)] // M1 prewire: the lattice-card thumbnail is drawn by the deck grid (WP-B).
     pub thumb: Option<LatticeRef>,
 }
 
@@ -139,9 +137,84 @@ fn capitalised(s: &str) -> String {
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
+/// Conway orbifold symbol of a wallpaper group (`None` when the core does not know the symbol).
+pub(super) fn orbifold_of(group: &str) -> Option<&'static str> {
+    papertilling_core::noneuclidean2d::orbifold_conway::wallpaper_to_orbifold(group).ok()
+}
+
+/// One-line lattice subtitle: `"{group} · {orbifold} · {rule tag}"` (the orbifold part dropped when unknown).
+pub(super) fn lattice_subtitle(item: &CatalogueItemUi) -> String {
+    let tag = rule_tag(&item.alias_key);
+    match orbifold_of(&item.group) {
+        Some(orb) => format!("{} · {orb} · {tag}", item.group),
+        None => format!("{} · {tag}", item.group),
+    }
+}
+
+/// `AppMode::label()` without its `"N. "` prefix (`"1. Lattices"` -> `"Lattices"`).
+fn mode_name(label: &'static str) -> &'static str {
+    label.split_once(". ").map_or(label, |(_, rest)| rest)
+}
+
 impl PapertillingApp {
-    /// Cards of `realm` under pill `pill`, filtered by `filter` (titles only; WP-C adds subtitles and badges).
+    /// Cards of `realm` under pill `pill`, filtered by `filter`, with their subtitles and (surface cards only)
+    /// verdict badges.
     pub(crate) fn deck_cards(&mut self, realm: Realm, pill: usize, filter: &str) -> Vec<Card> {
+        let mut cards = self.deck_card_titles(realm, pill, filter);
+        self.decorate_cards(&mut cards);
+        cards
+    }
+
+    /// Entry counts of the Defects catalogue (dislocations, disclinations, walls), only when the catalogue was
+    /// built for the selected lattice; `None` while it belongs to another lattice or is being rebuilt (empty).
+    pub(super) fn catalogue_counts(&self) -> Option<[usize; 3]> {
+        let cat = &self.defects.catalogue;
+        let counts = [cat.dislocations.len(), cat.disclinations.len(), cat.walls.len()];
+        let same = self.defects.last_item.alias_key == self.gallery.active_item().alias_key;
+        (same && counts.iter().sum::<usize>() > 0).then_some(counts)
+    }
+
+    /// Fill in subtitles (§1.1) and surface badges (§1.2). Badges come only from `lattice_verdicts` of the
+    /// selected lattice (synchronous and cached); when it has none, the surface cards carry no badge.
+    fn decorate_cards(&mut self, cards: &mut [Card]) {
+        let verdicts: Option<Vec<(Badge, String)>> = if cards.iter().any(|c| matches!(c.id, CardId::Surface(_))) {
+            let item = self.gallery.active_item().clone();
+            self.surfaces
+                .lattice_verdicts(&item)
+                .map(|cells| cells.iter().map(|c| (Badge::from_verdict(c.verdict), c.scoped_badge())).collect())
+        } else {
+            None
+        };
+        let counts = self.catalogue_counts();
+        for card in cards.iter_mut() {
+            card.subtitle = match card.id {
+                CardId::Plane2D => "Gallery · flat periodic lattices".to_owned(),
+                CardId::HyperbolicAtlas | CardId::AtlasPristine(_) => "Atlas · pristine".to_owned(),
+                CardId::AtlasDefects(_) => "Atlas · defects".to_owned(),
+                CardId::WallpaperGroups => "Gallery · browse by group".to_owned(),
+                CardId::CustomBuilder => "Gallery · your own recipe".to_owned(),
+                CardId::Combine => "place, fuse and move pins".to_owned(),
+                CardId::DefectCatalogue(s) => match counts {
+                    Some(n) => format!("{} entries", n[s as usize]),
+                    None => "catalogue of the selected lattice".to_owned(),
+                },
+                CardId::Surface(t) => {
+                    let k = SurfaceTargetUi::ALL.iter().position(|&x| x == t);
+                    let cell = verdicts.as_ref().zip(k).and_then(|(v, k)| v.get(k));
+                    card.badge = cell.map(|(b, _)| *b);
+                    cell.map_or_else(|| "surface".to_owned(), |(_, text)| text.clone())
+                }
+                CardId::Wb(v, _) => v.heading().to_owned(),
+                CardId::Lattice(r) => self.lattice_ref_item(r).map(lattice_subtitle).unwrap_or_default(),
+                CardId::Analysis(_) => "source for the lab".to_owned(),
+                CardId::Preset(i) => PRESETS.get(i).map(|p| mode_name(p.mode().label()).to_owned()).unwrap_or_default(),
+                CardId::Io(_) => "file dialog".to_owned(),
+            };
+        }
+    }
+
+    /// Cards of `realm` under pill `pill`, filtered by `filter`: titles only.
+    fn deck_card_titles(&mut self, realm: Realm, pill: usize, filter: &str) -> Vec<Card> {
         let q = filter.trim();
         if realm == Realm::Tilings && !q.is_empty() {
             let refs = self.deck_search_lattices(q);

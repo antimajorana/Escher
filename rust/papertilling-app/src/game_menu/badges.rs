@@ -5,7 +5,6 @@ use crate::backend::VerdictKindUi;
 use crate::theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // M1 prewire: built from surface verdicts by the realm-4 cards (WP-C).
 pub(crate) enum Badge {
     /// An explicit cell was built (V/E/F counts): constructive.
     ProvedOk,
@@ -15,7 +14,6 @@ pub(crate) enum Badge {
     Computational,
 }
 
-#[allow(dead_code)] // M1 prewire: used by the cards, stat card and tests (WP-C / WP-T).
 impl Badge {
     pub(crate) fn from_verdict(v: VerdictKindUi) -> Self {
         match v {
@@ -43,7 +41,6 @@ impl Badge {
 }
 
 /// The badge as a non-selectable coloured label (so its text is in the accessibility tree).
-#[allow(dead_code)] // M1 prewire: drawn by the card grid and stat card (WP-B / WP-C).
 pub(crate) fn badge_widget(ui: &mut egui::Ui, badge: Badge, tokens: &ThemeTokens) -> egui::Response {
     ui.add(egui::Label::new(egui::RichText::new(badge.label()).small().color(badge.colour(tokens))).selectable(false))
 }

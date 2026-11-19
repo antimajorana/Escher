@@ -73,7 +73,6 @@ impl PapertillingApp {
     }
 
     /// A `px` x `px` thumbnail of the selected lattice (the HUD lattice segment draws it before the name).
-    #[allow(dead_code)] // M1 prewire: drawn by the HUD breadcrumb (WP-A).
     pub(crate) fn paint_lattice_thumb(&mut self, ui: &mut egui::Ui, px: f32) {
         let t = tokens_of(ui);
         let base = self.gallery.base_item().clone();

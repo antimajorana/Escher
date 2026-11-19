@@ -3,17 +3,21 @@
 use std::sync::atomic::Ordering;
 
 use super::{NavTab, PapertillingApp, SurfaceTargetUi};
+use crate::game_menu::{CardId, Realm};
 use crate::mesh3d::DefectViewMode;
 use crate::workbench::WorkbenchView;
 
 const MAX_SMOKE_FRAMES: u32 = 1800;
 /// The final stage (Atlas H² + the offscreen 3D PNG export). Stages: 0..4 surfaces, 5 defects sheet, 6 combine
 /// sheet, 7 FvK, 8 AO Mobius, 9 Analysis, 10 Atlas 3D, 11 flat 3D, 12 curved 2D, 13 honeycombs, 14 Atlas H².
+/// Stages 11-13 enter through the Command Deck (open, switch realm, equip the view's card), so the OK line's
+/// `deck=` field counts three realm switches.
 pub(super) const LAST_SMOKE_STAGE: u32 = 14;
 
 impl PapertillingApp {
     fn smoke_stage_waiting(&self) -> bool {
-        match self.active_tab {
+        // a stage entered through the Command Deck waits until the equip has closed it
+        self.deck.open || match self.active_tab {
             NavTab::Surfaces => {
                 self.surfaces.is_building() || self.surfaces.elastic.is_busy()
             }
@@ -73,8 +77,8 @@ impl PapertillingApp {
             if !self.smoke_reported {
                 self.smoke_reported = true;
                 eprintln!(
-                    "PAPERTILLING_SMOKE_FAIL stage={} frames={} waiting={waiting} error={stage_error} geom={} caption={cap}",
-                    self.last_smoke_stage, self.smoke_frames, self.view3d.has_geometry()
+                    "PAPERTILLING_SMOKE_FAIL stage={} frames={} waiting={waiting} error={stage_error} geom={} deck_open={} caption={cap}",
+                    self.last_smoke_stage, self.smoke_frames, self.view3d.has_geometry(), self.deck.open
                 );
             }
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -118,8 +122,8 @@ impl PapertillingApp {
                 if !self.smoke_reported {
                     self.smoke_reported = true;
                     println!(
-                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=15 (surfaces x5,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,flat3d,curved2d,honeycombs,atlas-h2) export3d={export3d}",
-                        self.adapter_name, self.backend_name, self.view3d.counters.uploads()
+                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=15 (surfaces x5,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,flat3d,curved2d,honeycombs,atlas-h2) export3d={export3d} deck={}",
+                        self.adapter_name, self.backend_name, self.view3d.counters.uploads(), self.deck.realm_switches
                     );
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -135,9 +139,9 @@ impl PapertillingApp {
                     self.atlas.dirty = true;
                     self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
                 }
-                11 => self.smoke_enter_workbench(WorkbenchView::S4Flat3d),
-                12 => self.smoke_enter_workbench(WorkbenchView::S5Curved2d),
-                13 => self.smoke_enter_workbench(WorkbenchView::S6Honeycombs),
+                11 => self.smoke_enter_via_deck(ctx, Realm::Manifolds, WorkbenchView::S4Flat3d),
+                12 => self.smoke_enter_via_deck(ctx, Realm::Geometries, WorkbenchView::S5Curved2d),
+                13 => self.smoke_enter_via_deck(ctx, Realm::Geometries, WorkbenchView::S6Honeycombs),
                 LAST_SMOKE_STAGE => {
                     self.select_lattices_view(super::LatticesView::NonEuclidean);
                     self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
@@ -203,11 +207,17 @@ impl PapertillingApp {
         false
     }
 
-    /// Smoke defaults first (they mark the view dirty, so the stage waits for its first build), then route.
-    fn smoke_enter_workbench(&mut self, view: WorkbenchView) {
+    /// Enter `view` the way a user does: open the deck (at Tilings, which differs from every target realm, so the
+    /// open is never counted), switch to `realm` (the keys 1-7 path, +1 realm switch), then equip the view's card
+    /// (the Enter path, which closes the deck). Smoke defaults are set first (they choose the sub-row and mark the
+    /// view dirty, so the stage waits for its first build); the card carries that same sub-row.
+    fn smoke_enter_via_deck(&mut self, ctx: &egui::Context, realm: Realm, view: WorkbenchView) {
+        self.deck_open(Realm::Tilings, ctx);
+        self.deck_select_realm(realm);
         self.workbench.view = view;
         self.workbench.smoke_defaults();
-        self.enter_workbench(view, None);
+        let sub = u8::try_from(self.workbench.sub_index(view)).unwrap_or(0);
+        self.deck_equip(CardId::Wb(view, sub), ctx);
     }
 }
 
@@ -247,6 +257,8 @@ mod tests {
         }
         assert_eq!(app.last_smoke_stage, LAST_SMOKE_STAGE);
         assert_eq!(outcome.load(Ordering::Acquire), 1);
+        assert_eq!(app.deck.realm_switches, 3, "stages 11-13 each switch the deck realm once");
+        assert!(!app.deck.open, "every deck equip closed the deck");
     }
 
     #[test]

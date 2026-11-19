@@ -29,8 +29,7 @@ mod tests_nav2;
 #[cfg(test)]
 mod tests_session;
 
-#[allow(unused_imports)] // M1 prewire: the card types are named by later packages and tests.
-pub(crate) use realms::{Card, CardId, IoAction, LatticeRef};
+pub(crate) use realms::{CardId, LatticeRef};
 
 /// `id_salt` of the deck's filter TextEdit (its real `Id` is recorded in [`DeckState::filter_id`]).
 pub(crate) const DECK_FILTER_ID: &str = "deck_filter";
@@ -68,7 +67,6 @@ impl Realm {
         n.checked_sub(1).and_then(|i| Self::ALL.get(i).copied())
     }
 
-    #[allow(dead_code)] // M1 prewire: shown by the deck header and stat card (WP-B / WP-C).
     pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Geometries => "Geometries",
@@ -95,7 +93,7 @@ impl Realm {
     }
 
     /// The top-level mode the realm's cards lead to (`None`: Presets & I/O, which keeps the current mode).
-    #[allow(dead_code)] // M1 prewire: read by the breadcrumb and tests (WP-A / WP-T).
+    #[cfg(test)] // the realm table is checked by T1; the app routes through deck_equip instead
     pub(crate) fn app_mode(self) -> Option<AppMode> {
         match self {
             Self::Geometries | Self::Groups | Self::Tilings | Self::Manifolds => Some(AppMode::Lattices),
@@ -144,6 +142,8 @@ pub(crate) struct DeckState {
     pub host_rect: egui::Rect,
     /// Set by the keys (Enter / Space); consumed by the deck drawing (index into the cards).
     pub equip_request: Option<usize>,
+    /// `/` focused the filter from its key event alone; its text event may still arrive in a later frame.
+    pub slash_text_pending: bool,
 }
 
 impl Default for DeckState {
@@ -161,6 +161,7 @@ impl Default for DeckState {
             filter_id: None,
             host_rect: egui::Rect::NOTHING,
             equip_request: None,
+            slash_text_pending: false,
         }
     }
 }
@@ -227,6 +228,7 @@ impl PapertillingApp {
         self.deck.filter.clear();
         self.deck.focus_filter = false;
         self.deck.equip_request = None;
+        self.deck.slash_text_pending = false;
     }
 
     pub(crate) fn deck_select_realm(&mut self, realm: Realm) {

@@ -2,6 +2,7 @@
 //! same functions the panels use (`select_lattices_view`, `select_defects_view`, `switch_mode`, ...).
 
 use super::realms::{CardId, IoAction, LatticeRef};
+use crate::analysis_mode::AnalysisTarget;
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab, PapertillingApp};
 use crate::gallery_tab::BrowseMode;
 
@@ -49,8 +50,13 @@ impl PapertillingApp {
                 );
             }
             CardId::Wb(v, i) => self.enter_workbench(v, Some(usize::from(i))),
-            // WP-C: select the lattice, then show it on a lattice-driven view
-            CardId::Lattice(_) => {}
+            CardId::Lattice(r) => {
+                self.select_lattice_ref(r);
+                // a lattice cannot be shown in a view that does not draw the Gallery lattice
+                if !self.view_is_lattice_driven() {
+                    self.select_lattices_view(LatticesView::Plane2D);
+                }
+            }
             CardId::Analysis(t) => {
                 self.analysis.select_target(t);
                 self.switch_mode(AppMode::Analysis);
@@ -73,13 +79,28 @@ impl PapertillingApp {
         }
     }
 
-    /// WP-C stub: select the lattice, then open the Defects Forge catalogue on it.
-    #[allow(dead_code)] // M1 prewire: called by the stat card (WP-C).
-    pub(crate) fn deck_open_in_forge(&mut self, _r: LatticeRef) {}
+    /// Make the stored lattice `r` the Gallery selection (a no-op when it is already selected, which keeps its
+    /// tuned parameters; a stale ref that no longer resolves is ignored).
+    fn select_lattice_ref(&mut self, r: LatticeRef) {
+        if let Some(item) = self.lattice_ref_item(r).cloned() {
+            self.select_lattice_and_sync(item);
+        }
+    }
 
-    /// WP-C stub: select the lattice, then open the Analysis Lab on the 2D lattice target.
-    #[allow(dead_code)] // M1 prewire: called by the stat card (WP-C).
-    pub(crate) fn deck_open_in_lab(&mut self, _r: LatticeRef) {}
+    /// Stat-card "Open in Defects Forge": select the lattice, open the Defects catalogue on it, close the deck.
+    pub(crate) fn deck_open_in_forge(&mut self, r: LatticeRef) {
+        self.select_lattice_ref(r);
+        self.select_defects_view(DefectsView::Catalogue2D);
+        self.deck_close();
+    }
+
+    /// Stat-card "Open in Analysis Lab": select the lattice, make the 2D lattice the lab's source, close the deck.
+    pub(crate) fn deck_open_in_lab(&mut self, r: LatticeRef) {
+        self.select_lattice_ref(r);
+        self.analysis.select_target(AnalysisTarget::PlaneLattice);
+        self.switch_mode(AppMode::Analysis);
+        self.deck_close();
+    }
 
     /// Run a Presets & I/O file action. Tests and `--smoke-test` never open a dialog: they get a status line.
     pub(crate) fn run_io_action(&mut self, a: IoAction, ctx: &egui::Context) {

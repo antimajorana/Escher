@@ -243,7 +243,6 @@ impl WorkbenchState {
     }
 
     /// Breadcrumb geometry text of `view` (S5: from its current symbol), if the panel knows one.
-    #[allow(dead_code)] // M1 prewire: read by the HUD breadcrumb (WP-A).
     pub(crate) fn breadcrumb_geometry(&self, view: WorkbenchView) -> Option<&'static str> {
         self.panel(view).breadcrumb_geometry()
     }

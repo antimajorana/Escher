@@ -1,19 +1,30 @@
-//! The one-row HUD over the viewport (`Panel::top("top_bar")`). WP0 version: Codex button, mode segment and the
-//! rename bar on the left, the full tool cluster on the right. WP-A adds the breadcrumb segments, the lattice
-//! thumbnail and the narrow-width truncation (`egui::Sides`).
+//! The one-row HUD over the viewport (`Panel::top("top_bar")`, §4.3). Left (shrinks, truncates): the Codex
+//! button and the breadcrumb geometry ▸ group ▸ lattice ▸ mode, each segment opening the deck at its realm.
+//! Right (fixed, drawn first): Theme, Search, View, Export, Session, Presets, Redo, Undo and the 2D/3D/Split
+//! toggles. `egui::Sides::shrink_left` keeps it one row at any width.
 
+use std::cell::RefCell;
+
+use super::breadcrumb::Segment;
 use crate::app::{AppMode, NavTab, PapertillingApp};
 use crate::mesh3d::DefectViewMode;
 
 const UNDO_SCOPE: &str = "Undo and Redo apply to Combine, Fuse & Move";
+/// Narrowest a breadcrumb segment gets before the row runs out (an ellipsis plus a glyph or two).
+const SEG_MIN_WIDTH: f32 = 18.0;
 
 impl PapertillingApp {
     pub(crate) fn show_hud_bar(&mut self, ui: &mut egui::Ui) {
         let resp = egui::Panel::top("top_bar").exact_size(34.0).show(ui, |ui| {
-            ui.horizontal_centered(|ui| {
-                self.hud_left(ui);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.hud_right(ui));
-            });
+            let height = ui.available_height();
+            // `Sides::show` takes both closures at once; they run one after the other, so a RefCell lends `self`
+            // to each in turn (never both at the same time).
+            let this = RefCell::new(&mut *self);
+            egui::Sides::new().height(height).shrink_left().truncate().show(
+                ui,
+                |ui| this.borrow_mut().hud_left(ui),
+                |ui| this.borrow_mut().hud_right(ui),
+            );
         });
         let rect = resp.response.rect;
         let content = ui.ctx().content_rect();
@@ -25,7 +36,74 @@ impl PapertillingApp {
         }
     }
 
+    /// Left side (shrinks): Codex button, then geometry ▸ group ▸ lattice ▸ mode, each a frameless button that
+    /// truncates to an ellipsis; the rename bar follows the lattice segment (or the mode segment without one).
     fn hud_left(&mut self, ui: &mut egui::Ui) {
+        // Sides lets the shrinking side overflow its max rect; clip it so it never paints over the right cluster.
+        // Only the right edge is clamped, so focus / hover outlines on the left are not cut.
+        let mut clip = ui.clip_rect();
+        clip.max.x = clip.max.x.min(ui.max_rect().right());
+        ui.set_clip_rect(clip);
+        self.hud_codex_button(ui);
+        let bc = self.breadcrumb();
+        let has_lattice = bc.lattice.is_some();
+        let segs: Vec<(Segment, bool)> = [
+            Some((bc.geometry, false)),
+            bc.group.map(|s| (s, false)),
+            bc.lattice.map(|s| (s, true)),
+            Some((bc.mode, false)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let n = segs.len();
+        let mut clicked = None;
+        for (k, (seg, is_lattice)) in segs.into_iter().enumerate() {
+            let Segment { text, hover, realm } = seg;
+            let rename_here = is_lattice || (!has_lattice && k + 1 == n);
+            ui.weak("▸");
+            if is_lattice {
+                self.paint_lattice_thumb(ui, 20.0);
+            }
+            let reserve = if rename_here { self.rename_reserve() } else { 0.0 };
+            let share = ((ui.available_width() - reserve) / (n - k) as f32).max(SEG_MIN_WIDTH);
+            let resp = ui
+                .scope(|ui| {
+                    ui.set_max_width(share);
+                    ui.add(egui::Button::new(text).frame(false).truncate()).on_hover_text(hover)
+                })
+                .inner;
+            if resp.clicked() {
+                clicked = Some(realm);
+            }
+            if rename_here {
+                self.hud_rename_bar(ui);
+            }
+        }
+        if let Some(realm) = clicked {
+            if self.deck.open {
+                self.deck_select_realm(realm);
+            } else {
+                self.deck_open(realm, ui.ctx());
+            }
+        }
+    }
+
+    /// Width kept free for the rename bar while the segments share the rest.
+    fn rename_reserve(&self) -> f32 {
+        if self.gallery.renaming { 300.0 } else { 90.0 }
+    }
+
+    /// The Gallery rename bar, with the revision check that keeps the active tab in sync (from the old top bar).
+    fn hud_rename_bar(&mut self, ui: &mut egui::Ui) {
+        let rev0 = self.gallery.revision();
+        self.gallery.show_rename_bar(ui, &mut self.backend, &mut self.canvas2d, "top_rename");
+        if self.gallery.revision() != rev0 {
+            self.sync_active_tab_after_rename();
+        }
+    }
+
+    fn hud_codex_button(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("❖ Codex (Tab)")
             .on_hover_text("Command Deck: every geometry, group, tiling, manifold, defect and preset")
@@ -36,13 +114,6 @@ impl PapertillingApp {
             } else {
                 self.deck_open(self.current_realm(), ui.ctx());
             }
-        }
-        ui.weak("▸");
-        ui.label(self.mode_segment_text());
-        let rev0 = self.gallery.revision();
-        self.gallery.show_rename_bar(ui, &mut self.backend, &mut self.canvas2d, "top_rename");
-        if self.gallery.revision() != rev0 {
-            self.sync_active_tab_after_rename();
         }
     }
 
