@@ -72,6 +72,7 @@ impl PapertillingApp {
 
     fn deck_keys_closed(&mut self, ctx: &egui::Context) -> bool {
         let in_combine = self.active_mode == AppMode::Defects && self.active_tab == NavTab::Combine;
+        // a pending rename keeps Tab / M even after its field lost focus (its Save / Cancel are on the HUD row)
         if ctx.text_edit_focused()
             || self.gallery.renaming
             || egui::Popup::is_any_open(ctx)

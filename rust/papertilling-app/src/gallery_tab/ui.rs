@@ -45,20 +45,27 @@ impl GalleryTabState {
                 };
                 ui.small("±").on_hover_text(tip);
             }
-            if self.active_item.has_custom_name() {
-                small_truncated(ui, format!("[{}]", self.active_item.default_label), 120.0);
-            }
-            if ui.small_button("✎ Rename").on_hover_text("Give this lattice a persistent custom name").clicked() {
+            // the catalogue name of a renamed lattice is in these hovers (and in the lattice segment's hover)
+            let custom = self.active_item.has_custom_name();
+            let tip = if custom {
+                format!("Give this lattice a persistent custom name (catalogue name: {})", self.active_item.default_label)
+            } else {
+                String::from("Give this lattice a persistent custom name")
+            };
+            if ui.small_button("✎ Rename").on_hover_text(tip).clicked() {
                 self.begin_rename();
             }
-            if self.active_item.has_custom_name()
-                && ui.small_button("Reset name").on_hover_text("Restore default catalogue name").clicked()
+            if custom
+                && ui
+                    .small_button("Reset name")
+                    .on_hover_text(format!("Restore the catalogue name {}", self.active_item.default_label))
+                    .clicked()
             {
                 self.reset_active_lattice_name(backend, canvas);
             }
         }
         if let Some(note) = &self.alias_note {
-            small_truncated(ui, note.clone(), 160.0);
+            small_truncated(ui, note.clone(), 80.0);
         }
     }
 

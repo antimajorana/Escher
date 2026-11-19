@@ -13,16 +13,19 @@ use super::Realm;
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab};
 use crate::backend::{CatalogueRuleUi, SurfaceTargetUi};
 use crate::session;
+use crate::theme::StudioTheme;
 
 const CODEX: &str = "❖ Codex (Tab)";
 const RENAME: &str = "✎ Rename";
 /// Every control the right cluster can put on the row, at any density.
-const RIGHT: [&str; 13] = [
-    "Theme: Paper", "Search (Ctrl+K)", "Search", "Menu", "View", "Export", "Session", "Presets", "Redo", "Undo",
+const RIGHT: [&str; 14] = [
+    "Theme: Paper", "Theme: Studio", "Search (Ctrl+K)", "Search", "Menu", "View", "Export", "Session", "Presets", "Redo", "Undo",
     "Split", "3D", "2D",
 ];
 
-/// Rect of the node labelled `label` inside the HUD row (AccessKit rects are clipped to what is visible).
+/// Rect of the node labelled `label` inside the HUD row. AccessKit rects are the widget rects, not clipped: a widget
+/// pushed under the right cluster still reports its rect there, so the tests compare right edges with the left edge
+/// of the right cluster (a full width alone only shows the label was not truncated).
 fn hud_rect(h: &H, label: &str) -> Option<egui::Rect> {
     let top = h.state().test_rects.top.expand(1.0);
     h.query_all_by_label(label).find(|n| top.contains_rect(n.rect())).map(|n| n.rect())
@@ -280,4 +283,46 @@ fn junk_stage_state_notes_are_realm_native() {
         assert_eq!(notes.len(), 1, "{wb}: {notes:?}");
         assert!(notes.iter().all(|n| !n.to_lowercase().contains("workbench")), "{wb}: {notes:?}");
     }
+}
+
+/// Finding 1, renamed lattice: with a long custom name and a long alias note, in both themes, in Combine, at the
+/// narrowest width of each density, Rename and Reset name stay left of the right cluster.
+#[test]
+fn renamed_lattice_keeps_reset_name_reachable() {
+    let mut h = start();
+    goto_defects_view(&mut h, DefectsView::CombineAndFuse);
+    {
+        let g = &mut h.state_mut().gallery;
+        g.set_label_in_memory("A very long custom name for this lattice, for the HUD width test");
+        g.alias_note = Some(String::from("Saved for session only (the alias file could not be written: denied)"));
+    }
+    for theme in [StudioTheme::Paper, StudioTheme::Studio] {
+        h.state_mut().theme = theme;
+        theme.apply(&h.ctx);
+        for w in [1240.0, 960.0, super::HUD_MIN_WINDOW_WIDTH] {
+            set_width(&mut h, w);
+            let right = right_cluster_left(&h);
+            for l in [CODEX, RENAME, "Reset name"] {
+                let r = hud_rect(&h, l).unwrap_or_else(|| panic!("{theme:?} w={w}: no {l}"));
+                assert!(r.right() <= right + 0.5, "{theme:?} w={w}: {l} {r:?} under the right cluster at {right}");
+            }
+        }
+    }
+}
+
+/// Findings 3 and 7 together: a rename left pending by a mouse-opened deck ends when the view no longer shows the
+/// lattice, so Tab and Esc keep working there.
+#[test]
+fn pending_rename_ends_in_a_view_without_the_lattice() {
+    let mut h = start();
+    click_in_hud(&mut h, RENAME);
+    click_in_hud(&mut h, CODEX);
+    assert!(h.state().deck.open && h.state().gallery.renaming);
+    equip_state(&mut h, CardId::HyperbolicAtlas);
+    assert!(!h.state().deck.open, "equip closes the deck");
+    assert_eq!(h.state().lattices_view, LatticesView::NonEuclidean);
+    assert!(!h.state().gallery.renaming, "the rename ended with its controls");
+    open_deck(&mut h);
+    press(&mut h, Key::Escape);
+    assert!(!h.state().deck.open, "Esc closes the deck");
 }

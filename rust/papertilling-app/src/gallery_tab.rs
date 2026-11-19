@@ -255,6 +255,13 @@ impl GalleryTabState {
         self.rename_focus_pending = false;
     }
 
+    /// Give the selected lattice a custom label in memory only (no alias store), as a saved alias would.
+    #[cfg(test)]
+    pub(crate) fn set_label_in_memory(&mut self, label: &str) {
+        self.base_item.label = label.to_string();
+        self.active_item.label = label.to_string();
+    }
+
     /// A rename is in progress and its field has (or is about to get) the keyboard. A pending rename whose field
     /// lost focus does not hold Enter / Esc / arrows.
     pub(crate) fn rename_holds_keys(&self) -> bool {

@@ -92,6 +92,11 @@ impl PapertillingApp {
         self.hud_codex_button(ui);
         let bc = self.breadcrumb();
         let has_lattice = bc.lattice.is_some();
+        if !has_lattice && self.gallery.renaming {
+            // the view no longer shows the lattice, so its rename controls are gone: end the rename rather than
+            // leave it pending with no field (it would keep holding the deck keys)
+            self.gallery.cancel_rename();
+        }
         let slots: Vec<Slot> = [
             Some(Slot { seg: bc.geometry, lattice: false, prio: 3 }),
             bc.group.map(|seg| Slot { seg, lattice: false, prio: 1 }),
