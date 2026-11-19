@@ -12,6 +12,8 @@ The names below are imported on first use, so `import papertilling` stays fast.
 __version__ = "0.2.0"
 
 _EXPORTS = {
+    "defect_fields": "defect_fields", "flat3d": "flat3d",
+    "noneuclidean2d": "noneuclidean2d", "honeycomb3d": "honeycomb3d",
     "Lattice": "lattice", "minimal_lattices": "lattice", "load_catalogue": "lattice", "check_family": "lattice",
     "points_lattices": "points", "voronoi_bonds": "points",
     "named": "sheet", "named_lattices": "sheet", "gallery": "sheet",
@@ -38,7 +40,8 @@ __all__ = sorted(_EXPORTS) + ["__version__"]
 def __getattr__(name):
     if name in _EXPORTS:
         import importlib
-        value = getattr(importlib.import_module(f"{__name__}.{_EXPORTS[name]}"), name)
+        mod = importlib.import_module(f"{__name__}.{_EXPORTS[name]}")
+        value = mod if _EXPORTS[name] == name and not hasattr(mod, name) else getattr(mod, name)
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

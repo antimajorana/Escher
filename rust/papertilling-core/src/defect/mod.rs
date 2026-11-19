@@ -1,6 +1,7 @@
 //! Geometry-agnostic holonomy classification, `DefectCatalogue`, wall classification,
 //! and wall crystal builders (Stages 4–5).
 
+pub mod burgers_indices;
 pub mod catalogue;
 pub mod charge;
 pub mod circuit;
