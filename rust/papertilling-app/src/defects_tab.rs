@@ -73,7 +73,7 @@ pub struct DefectsTabState {
     last_scene: Option<Scene2D>,
     pub(crate) last_crystal: BuiltCrystal,
     pub(crate) last_sheet: Sheet3DResult,
-    flat_crystal: BuiltCrystal,
+    pub(crate) flat_crystal: BuiltCrystal,
     pub(crate) flat_sheet: Sheet3DResult,
     pub(crate) view3d_dirty: bool,
     reset_on_result: bool,
@@ -183,13 +183,7 @@ impl DefectsTabState {
         }
     }
 
-    pub fn rebuild_crystal(
-        &mut self,
-        item: &CatalogueItemUi,
-        _backend: &AppBackend,
-        canvas: &mut Canvas2D,
-        reset_view: bool,
-    ) {
+    pub fn submit_rebuild(&mut self, item: &CatalogueItemUi, reset_view: bool) {
         self.last_item = item.clone();
         self.relaxed = self.draw_mode != Defect2dMode::Raw;
         self.worker.submit(BuildJob {
@@ -205,6 +199,16 @@ impl DefectsTabState {
         self.error = None;
         self.view3d_dirty = true;
         self.reset_on_result |= reset_view;
+    }
+
+    pub fn rebuild_crystal(
+        &mut self,
+        item: &CatalogueItemUi,
+        _backend: &AppBackend,
+        canvas: &mut Canvas2D,
+        reset_view: bool,
+    ) {
+        self.submit_rebuild(item, reset_view);
         let mut scene = self.last_scene.clone().unwrap_or_else(|| Scene2D::PeriodicCell {
             cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: Vec::new(), bonds: Vec::new() },
             repeat: 1,
@@ -241,16 +245,18 @@ impl DefectsTabState {
     pub(crate) fn poll_worker(&mut self, ctx: &egui::Context, canvas: &mut Canvas2D) {
         self.worker.set_repaint_ctx(ctx);
         if let Some(result) = self.worker.poll() {
-            self.take_result(result, canvas);
+            self.take_result(result, Some(canvas));
         }
-        if self.inspectors.spectrum.poll(ctx) {
-            let item = self.last_item.clone();
-            let ao = defect_context(&item).ok().and_then(|c| {
-                build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &c.cell, item.frame)
-            });
-            self.inspectors.sync_to_canvas(canvas, &self.last_crystal, ao);
-            self.view3d_dirty = true;
+    }
+
+    /// Poll the defect worker without updating `canvas2d` (used by `Analysis` mode).
+    pub(crate) fn poll_worker_quiet(&mut self, ctx: &egui::Context) -> bool {
+        self.worker.set_repaint_ctx(ctx);
+        if let Some(result) = self.worker.poll() {
+            self.take_result(result, None);
+            return true;
         }
+        false
     }
 
     pub(crate) fn refresh_and_sync_inspectors(&mut self, item: &CatalogueItemUi, canvas: &mut Canvas2D) {
@@ -285,9 +291,8 @@ impl DefectsTabState {
         } else {
             (&self.last_crystal, &self.last_sheet)
         };
-        let spectral = self.inspectors.spectral_3d_for(self.sheet_opts.color_mode);
-        let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, spectral);
-        let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, spectral);
+        let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, None);
+        let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, None);
         let mut cap = sheet3d_caption(&self.readout.title, s, &self.sheet_opts);
         if self.is_busy() {
             cap.push_str(" | previous result — stale");
@@ -308,10 +313,10 @@ impl DefectsTabState {
     pub(crate) fn fail_build_for_test(&mut self, err: &str, canvas: &mut Canvas2D) {
         self.worker.cancel();
         self.stale = false;
-        self.take_result(Err(err.to_owned()), canvas);
+        self.take_result(Err(err.to_owned()), Some(canvas));
     }
 
-    pub(crate) fn take_result(&mut self, result: Result<BuildOutput, String>, canvas: &mut Canvas2D) {
+    pub(crate) fn take_result(&mut self, result: Result<BuildOutput, String>, canvas: Option<&mut Canvas2D>) {
         self.initializing = false;
         match result {
             Ok((catalogue, crystal, readout, sheet, flat_c, flat_s)) => {
@@ -321,18 +326,17 @@ impl DefectsTabState {
                     title: readout.title.clone(),
                     note: readout.note.clone(),
                 };
-                canvas.set_scene(scene.clone(), self.reset_on_result);
-                self.last_scene = Some(scene);
+                self.last_scene = Some(scene.clone());
                 self.last_crystal = crystal;
                 self.last_sheet = sheet;
                 self.flat_crystal = flat_c;
                 self.flat_sheet = flat_s;
                 self.readout = readout;
                 self.view3d_dirty = true;
-                let item = self.last_item.clone();
-                self.refresh_and_sync_inspectors(&item, canvas);
-                if self.inspectors.spectrum.expanded && !self.last_crystal.pos.is_empty() {
-                    self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), None);
+                if let Some(cv) = canvas {
+                    cv.set_scene(scene, self.reset_on_result);
+                    let item = self.last_item.clone();
+                    self.refresh_and_sync_inspectors(&item, cv);
                 }
             }
             Err(err) => {
@@ -342,7 +346,9 @@ impl DefectsTabState {
                     if let Scene2D::CrystalPatch { note, .. } = &mut scene {
                         *note = format!("Build failed (showing previous result): {err}");
                     }
-                    canvas.set_scene(scene, false);
+                    if let Some(cv) = canvas {
+                        cv.set_scene(scene, false);
+                    }
                 }
             }
         }
@@ -352,7 +358,7 @@ impl DefectsTabState {
     #[cfg(test)]
     pub(crate) fn wait_idle(&mut self, canvas: &mut Canvas2D) {
         if let Some(result) = self.worker.wait(std::time::Duration::from_secs(120)) {
-            self.take_result(result, canvas);
+            self.take_result(result, Some(canvas));
         }
         assert!(!self.is_busy(), "defect build did not complete");
     }

@@ -49,6 +49,15 @@ impl Sheet3dColorMode {
         Self::SpectralCharge,
     ];
 
+    pub const NON_SPECTRAL: [Self; 6] = [
+        Self::FaceRingSize,
+        Self::ElasticEnergyGsv,
+        Self::BondStrain,
+        Self::BondShearStrain,
+        Self::GaussianCurvature,
+        Self::HeightZ,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::FaceRingSize => "Face ring size",
@@ -172,7 +181,7 @@ pub fn show_sheet3d_controls(
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(opts.color_mode.label())
             .show_ui(ui, |ui| {
-                for cm in Sheet3dColorMode::ALL {
+                for cm in Sheet3dColorMode::NON_SPECTRAL {
                     if ui.selectable_value(&mut opts.color_mode, cm, cm.label()).changed() {
                         visual_changed = true;
                     }

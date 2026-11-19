@@ -15,17 +15,12 @@ use papertilling_core::defect::combine_types::{CONFIG_FORMAT, NotebookConfigJson
 use papertilling_core::defect::surgery::DefectSpec;
 
 use super::{NavTab, PapertillingApp, item_key};
-use crate::atlas_tab::AtlasSubTab;
 use crate::backend::{AppBackend, CatalogueItemUi, CatalogueRuleUi, CentreModeUi, SurfaceTargetUi};
-use crate::canvas2d::gauge_overlay::CrystalOverlayMode;
-use crate::defects_tab::DefectSubTab;
 use crate::gallery_tab::browser::BrowserView;
 use crate::gallery_tab::filter::{ChiralFacet, SystemFacet};
 use crate::live_ops_ao::Defect2dMode;
-use crate::mesh3d::sheet_modes::{DefectViewMode, Sheet3dColorMode};
 use crate::scene2d::overlays::GalleryOverlayToggles;
 use crate::session::{self, LatticeSession, SessionError, SessionState, name_of, parse_named};
-use crate::spectrum_worker::SpectrumColorOverlay;
 use crate::theme::StudioTheme;
 use crate::ui::lattice_switcher::RECENT_MAX;
 
@@ -184,6 +179,11 @@ impl PapertillingApp {
                 z_up: Some(self.view3d.z_up),
             },
             atlas_sub_view: Some(name_of(self.atlas.sub_tab)),
+            active_mode: Some(name_of(self.active_mode)),
+            lattices_view: Some(name_of(self.lattices_view)),
+            defects_view: Some(name_of(self.defects_view)),
+            analysis_target: Some(name_of(self.analysis.target)),
+            analysis_view: Some(name_of(self.analysis.view_mode)),
         }
     }
 
@@ -221,19 +221,7 @@ impl PapertillingApp {
                 notes.push(String::from("Combine set-up was for another lattice (not restored)"));
             }
         }
-        match parse_named(&AtlasSubTab::ALL, st.atlas_sub_view.as_deref()) {
-            Some(sub) => {
-                self.atlas.sub_tab = sub;
-                self.atlas.dirty = true;
-            }
-            None if st.atlas_sub_view.is_some() => notes.push(String::from("unknown Atlas sub-view (kept current)")),
-            None => {}
-        }
-        match parse_named(&NavTab::ALL, st.active_tab.as_deref()) {
-            Some(tab) => self.switch_tab(tab),
-            None if st.active_tab.is_some() => notes.push(String::from("unknown tab (Gallery shown)")),
-            None => {}
-        }
+        self.apply_navigation_v1_or_v2(st, &mut notes);
         if let Some(msg) = self.session.combine_note.take() {
             notes.push(msg);
         }
@@ -365,81 +353,6 @@ impl PapertillingApp {
         }
         // (h, k) into the ranges the controls offer for this target and lattice
         st.clamp_params(self.gallery.active_item());
-    }
-
-    fn apply_defects(&mut self, s: &session::DefectsSession, notes: &mut Vec<String>) {
-        let item = self.gallery.active_item().clone();
-        if item_key(&item) != self.defects_seen {
-            // as `switch_tab` would on opening Defects, but now, so the restored selection is not reset there
-            self.defects_seen = item_key(&item);
-            self.defects.reload_for_item(&item, &self.backend, &mut self.canvas2d, false);
-        }
-        let d = &mut self.defects;
-        match parse_named(&DefectSubTab::ALL, s.kind.as_deref()) {
-            Some(k) => d.sub_tab = k,
-            None if s.kind.is_some() => notes.push(String::from("unknown defect kind (kept current)")),
-            None => {}
-        }
-        let wanted = [s.dislocation_index, s.disclination_index, s.wall_index];
-        let cat_empty = d.catalogue.dislocations.is_empty() && d.catalogue.disclinations.is_empty() && d.catalogue.walls.is_empty();
-        if cat_empty && wanted.iter().any(|i| i.is_some_and(|i| i > 0)) {
-            // only the lengths are needed: the build worker computes the same catalogue again
-            d.catalogue = self.backend.defect_catalogue(&item);
-        }
-        let lens = [d.catalogue.dislocations.len(), d.catalogue.disclinations.len(), d.catalogue.walls.len()];
-        let slots = [&mut d.selected_disloc, &mut d.selected_disclin, &mut d.selected_wall];
-        for ((want, len), slot) in wanted.into_iter().zip(lens).zip(slots) {
-            match want {
-                Some(i) if i == 0 || i < len => *slot = i,
-                Some(i) => {
-                    *slot = 0;
-                    notes.push(format!("defect #{i} out of range (first one selected)"));
-                }
-                None => {}
-            }
-        }
-        if let Some(h) = s.wall_half {
-            d.wall_half = h;
-        }
-        if let Some(r) = s.radius.filter(|r| r.is_finite()) {
-            d.radius = r.clamp(2.4, 8.0);
-        }
-        match parse_named(&Defect2dMode::ALL, s.draw_mode.as_deref()) {
-            Some(m) => d.draw_mode = m,
-            None if s.draw_mode.is_some() => notes.push(String::from("unknown 2D drawing mode (kept current)")),
-            None => {
-                if let Some(relaxed) = s.relaxed {
-                    d.draw_mode = if relaxed { Defect2dMode::RelaxedDrawing } else { Defect2dMode::Raw };
-                }
-            }
-        }
-        d.relaxed = d.draw_mode != Defect2dMode::Raw;
-        match parse_named(&DefectViewMode::ALL, s.view_mode.as_deref()) {
-            Some(v) => d.view_mode = v,
-            None if s.view_mode.is_some() => notes.push(String::from("unknown 3D view mode (kept current)")),
-            None => {}
-        }
-        match parse_named(&Sheet3dColorMode::ALL, s.color_mode.as_deref()) {
-            Some(c) => {
-                let spectral = matches!(c, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge);
-                d.sheet_opts.color_mode = if spectral { Sheet3dColorMode::FaceRingSize } else { c };
-                d.inspectors.spectrum.color_overlay = SpectrumColorOverlay::None;
-                if spectral
-                    || matches!(
-                        d.inspectors.overlay_mode,
-                        CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge
-                    )
-                {
-                    d.inspectors.overlay_mode = CrystalOverlayMode::Standard;
-                }
-                if spectral {
-                    notes.push(String::from("3D spectral colouring reset to ring size (recompute in Spectrum panel)"));
-                }
-            }
-            None if s.color_mode.is_some() => notes.push(String::from("unknown 3D colour mode (kept current)")),
-            None => {}
-        }
-        d.view3d_dirty = true;
     }
 
     /// Called when the Combine tab opens: load the restored Combine set-up if it still fits the current lattice.

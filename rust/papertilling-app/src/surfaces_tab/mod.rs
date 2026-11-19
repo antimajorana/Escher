@@ -9,12 +9,10 @@ use crate::backend::{
     AppBackend, CatalogueItemUi, SurfaceBuildParamsUi, SurfaceCellVerdictUi, SurfaceTargetUi,
     VerdictKindUi,
 };
-use crate::canvas2d::overlay_legend::spectral_overlay_data;
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::export_obj::export_surface_obj;
 use crate::live_ops;
 use crate::mesh3d::GpuMeshData;
-use crate::spectrum_worker::SpectrumPanelState;
 use crate::surfaces_elastic::{SurfaceElasticState, SurfaceShapeMode};
 use crate::theme::ThemeTokens;
 use crate::view3d::View3dState;
@@ -88,12 +86,11 @@ pub struct SurfacesTabState {
     /// Sizes as in `surface_table` (the surface behind the verdict cell) instead of the (h, k) controls.
     pub auto_size: bool,
     pub elastic: SurfaceElasticState,
-    pub spectrum: SpectrumPanelState,
     pub(crate) active_disp: String,
     active_lattice_key: Option<(String, Recipe, Frame2D)>,
-    pub(super) current_mesh: Option<SurfaceMesh>,
+    pub(crate) current_mesh: Option<SurfaceMesh>,
     pub(super) current_report: Option<SurfaceCheckReport>,
-    pub(super) refusal_msg: Option<String>,
+    pub(crate) refusal_msg: Option<String>,
     lattice_verdicts: Option<(VerdictKey, [SurfaceCellVerdictUi; 8])>,
     builder: Option<build_async::SurfaceWorker>,
     queued_build: Option<(std::time::Instant, build_async::SurfaceJob)>,
@@ -109,7 +106,6 @@ impl SurfacesTabState {
             show_cover: false,
             auto_size: true,
             elastic: SurfaceElasticState::new(),
-            spectrum: SpectrumPanelState::new(),
             active_disp: String::new(),
             active_lattice_key: None,
             current_mesh: None,
@@ -123,6 +119,36 @@ impl SurfacesTabState {
 
     pub(crate) fn has_refusal(&self) -> bool {
         self.refusal_msg.is_some()
+    }
+
+    /// True if `Surfaces` has not yet built (or refused) for `item`'s current `(group, recipe, frame)`.
+    pub(crate) fn needs_sync_for(&self, item: &CatalogueItemUi) -> bool {
+        let key = (item.group.clone(), item.recipe.clone(), item.frame);
+        self.active_lattice_key.as_ref() != Some(&key)
+            || (self.current_mesh.is_none() && self.refusal_msg.is_none())
+    }
+
+    /// Build the active surface mesh without touching `canvas2d` or `view3d` (for `Analysis` mode).
+    pub(crate) fn build_quiet_for(&mut self, item: &CatalogueItemUi) {
+        self.cancel_build();
+        let job = self.prepare_build(item);
+        let built = build_async::run_job(&job);
+        self.elastic.clear_for_switch();
+        match built {
+            Ok((mesh, report)) => {
+                if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK {
+                    self.elastic.request_relax(mesh.clone(), None);
+                }
+                self.current_mesh = Some(mesh);
+                self.current_report = Some(report);
+                self.refusal_msg = None;
+            }
+            Err(reason) => {
+                self.current_mesh = None;
+                self.current_report = None;
+                self.refusal_msg = Some(reason);
+            }
+        }
     }
 
     /// Clamp `(h, k)` into the values the controls offer for the current target and lattice.
@@ -159,20 +185,16 @@ impl SurfacesTabState {
         build_async::SurfaceJob { item: item.clone(), target: self.target, params: self.params.clone(), auto_size: self.auto_size }
     }
 
-    /// Show a built surface (net, 3D, elastic / spectrum follow-ups) or its refusal.
+    /// Show a built surface (net, 3D, elastic follow-up) or its refusal.
     fn apply_built(&mut self, built: build_async::Built, group: &str, canvas: &mut Canvas2D, view3d: &mut View3dState) {
         // results (and running jobs) of the previous mesh must never be drawn or exported with the new one
         self.elastic.clear_for_switch();
-        self.spectrum.clear_for_switch();
         match built {
             Ok((mesh, report)) => {
                 let net_title = format!("{} ({}) — {} — 2D net", self.active_disp, group, mesh.name);
                 canvas.set_scene_with_title(Scene2D::SurfaceNet { mesh: mesh.clone() }, Some(net_title), true);
                 if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK {
                     self.elastic.request_relax(mesh.clone(), None);
-                }
-                if self.spectrum.expanded {
-                    self.spectrum.submit_surface(&mesh, None);
                 }
                 self.current_mesh = Some(mesh);
                 self.current_report = Some(report);
@@ -192,9 +214,7 @@ impl SurfacesTabState {
     pub fn sync_view3d_and_colors(&self, canvas: &mut Canvas2D, view3d: &mut View3dState) {
         let Some(mesh) = &self.current_mesh else { return };
         let use_cov = self.show_cover && mesh.cover.is_some();
-        let spec_pair = self.spectrum.active_scalar_overlay();
-        let spec_ref = spec_pair.as_ref().map(|(v, d)| (v.as_slice(), *d));
-        let (gpu, fvk_note) = self.elastic.build_gpu_mesh(mesh, self.show_cover, spec_ref);
+        let (gpu, fvk_note) = self.elastic.build_gpu_mesh(mesh, self.show_cover, None);
         let disp = if self.active_disp.is_empty() { mesh.name.as_str() } else { self.active_disp.as_str() };
         let caption = format!(
             "{} on {}{} | V={} E={} F={} χ={} (R={:.2}, c=[{:.1},{:.1},{:.1}]){fvk_note}",
@@ -211,32 +231,13 @@ impl SurfacesTabState {
             gpu.center[2],
         );
         view3d.set_mesh(gpu, caption);
-        view3d.set_legend(self.elastic.color_legend(spec_ref));
-        if let Some((vals, div)) = spec_ref {
-            canvas.set_gauge_overlay(Some(spectral_overlay_data(vals, div)));
-        } else {
-            canvas.set_gauge_overlay(None);
-        }
+        view3d.set_legend(self.elastic.color_legend(None));
+        canvas.set_gauge_overlay(None);
     }
 
     pub fn poll_background(&mut self, ctx: &egui::Context, canvas: &mut Canvas2D, view3d: &mut View3dState) {
         let _ = self.pump_build(ctx, canvas, view3d);
-        let e_hit = self.elastic.poll(ctx);
-        let s_hit = self.spectrum.poll(ctx);
-        if e_hit || s_hit {
-            if let Some(el) = &self.elastic.last_result
-                && self.spectrum.expanded
-                && self.spectrum.opts.beta.abs() > 1e-12
-                && e_hit
-                && let Some(mesh) = &self.current_mesh
-            {
-                let mut m3 = mesh.clone();
-                m3.xyz = el.xyz.clone();
-                if let (Some(c), Some(cx)) = (m3.cover.as_deref_mut(), el.cover_xyz.as_ref()) {
-                    c.xyz = cx.clone();
-                }
-                self.spectrum.submit_surface(&m3, Some(ctx));
-            }
+        if self.elastic.poll(ctx) {
             self.sync_view3d_and_colors(canvas, view3d);
         }
     }

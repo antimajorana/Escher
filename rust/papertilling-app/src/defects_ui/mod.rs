@@ -49,11 +49,6 @@ impl DefectsTabState {
             "def_top_col",
         );
         if vc {
-            if self.inspectors.on_sheet_color_changed(self.sheet_opts.color_mode) {
-                self.inspectors
-                    .spectrum
-                    .submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
-            }
             self.view3d_dirty = true;
         }
         if kc {

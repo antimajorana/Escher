@@ -62,6 +62,19 @@ impl PapertillingApp {
                     NavTab::Atlas => {
                         self.atlas.show_inspector_panel(ui, &tokens);
                     }
+                    NavTab::Analysis => {
+                        let item = self.gallery.active_item().clone();
+                        let mut env = crate::analysis_mode::AnalysisEnv {
+                            item: &item,
+                            backend: &self.backend,
+                            surfaces: &mut self.surfaces,
+                            defects: &mut self.defects,
+                            combine: &mut self.combine,
+                            canvas: &mut self.canvas2d,
+                            view3d: &mut self.view3d,
+                        };
+                        self.analysis.show_inspector_panel(ui, &mut env, &tokens);
+                    }
                 });
             });
         self.right_inspector_width = resp.response.rect.width().clamp(260.0, 440.0);

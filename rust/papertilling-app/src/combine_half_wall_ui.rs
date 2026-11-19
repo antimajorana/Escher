@@ -122,24 +122,6 @@ impl CombineTabState {
             .map(|(i, sp)| crate::live_combine::spec_world_pos(&self.info, i, sp))
             .collect();
         self.inspectors.refresh_circuit(&group, &self.info.cell, frame, &self.last_build.crystal, &pins);
-        if self.inspectors.spectrum.expanded {
-            self.inspectors.spectrum.submit_crystal(&self.last_build.crystal, Some(&self.last_sheet3d.sheet), None);
-        }
-    }
-
-    pub(crate) fn poll_spectrum_inspector(
-        &mut self,
-        ctx: Option<&egui::Context>,
-        gallery_item: &CatalogueItemUi,
-        canvas: Option<&mut Canvas2D>,
-    ) {
-        let Some(c) = ctx else { return; };
-        if self.inspectors.spectrum.poll(c) {
-            if let Some(cv) = canvas {
-                self.sync_inspectors_to_canvas(gallery_item, cv);
-            }
-            self.view3d_dirty = true;
-        }
     }
 
     pub(crate) fn sync_inspectors_to_canvas(
@@ -170,13 +152,6 @@ impl CombineTabState {
         self.sync_inspectors_to_canvas(gallery_item, canvas);
     }
 
-    pub(crate) fn on_combine_sheet_color_changed(&mut self, ctx: &egui::Context) {
-        if self.inspectors.on_sheet_color_changed(self.sheet_opts.color_mode) && !self.last_build.crystal.pos.is_empty() {
-            self.inspectors.spectrum.submit_crystal(&self.last_build.crystal, Some(&self.last_sheet3d.sheet), Some(ctx));
-        }
-        self.view3d_dirty = true;
-    }
-
     pub(crate) fn show_inspectors_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -184,8 +159,8 @@ impl CombineTabState {
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
     ) {
-        let (circ_dirty, ov_dirty, spec_recomp, spec_col) = self.inspectors.show_controls_ui(
-            ui, "comb_insp", self.specs.len(), true, tokens,
+        let (circ_dirty, ov_dirty) = self.inspectors.show_controls_ui(
+            ui, "comb_insp", self.specs.len(), tokens,
         );
         crate::bieberbach_ui::show_bieberbach_inspector_section(
             ui,
@@ -195,17 +170,10 @@ impl CombineTabState {
             "comb_bieberbach",
             tokens,
         );
-        if spec_col {
-            self.inspectors.sync_3d_from_spectrum(&mut self.sheet_opts);
-            self.view3d_dirty = true;
-        }
         if circ_dirty {
             self.on_combine_circuit_changed(gallery_item, canvas);
         } else if ov_dirty {
             self.sync_inspectors_to_canvas(gallery_item, canvas);
-        }
-        if spec_recomp && !self.last_build.crystal.pos.is_empty() {
-            self.inspectors.spectrum.submit_crystal(&self.last_build.crystal, Some(&self.last_sheet3d.sheet), Some(ui.ctx()));
         }
     }
 

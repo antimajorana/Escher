@@ -7,18 +7,18 @@ use papertilling_core::defect::surgery::DefectSpec;
 
 use super::super::item_key;
 use super::{apply, harness, wait_settled};
-use crate::app::NavTab;
+use crate::analysis_mode::{AnalysisTarget, SpectrumColorOverlay};
+use crate::app::{AppMode, NavTab};
 use crate::backend::CentreModeUi;
 use crate::canvas2d::Scene2D;
 use crate::canvas2d::gauge_overlay::CrystalOverlayMode;
 use crate::combine::{MANUAL_R_MIN, MotionMode};
 use crate::mesh3d::{Sheet3dColorMode, Sheet3dViewOpts, SurfaceColor3d};
-use crate::spectrum_worker::SpectrumColorOverlay;
 
 const NO_UNDO: &str = "earlier pins have no undo";
 
 #[test]
-fn surfaces_preset_resets_corner_centre_mode_and_spectrum_panel() {
+fn surfaces_preset_resets_corner_centre_mode_and_elastic_colour() {
     let mut h = harness();
     h.run_steps(2);
     h.state_mut().switch_tab(NavTab::Surfaces);
@@ -26,15 +26,12 @@ fn surfaces_preset_resets_corner_centre_mode_and_spectrum_panel() {
     {
         let s = &mut h.state_mut().surfaces;
         s.params.centre_mode = CentreModeUi::Site;
-        s.spectrum.expanded = true;
-        s.spectrum.color_overlay = SpectrumColorOverlay::LdosMultiplet;
-        s.elastic.color_mode = SurfaceColor3d::SpectralLdos;
+        s.elastic.color_mode = SurfaceColor3d::RadialBuckling;
     }
     apply(&mut h, "Honeycomb sphere (dodecahedron)");
     let app = h.state();
     let s = &app.surfaces;
     assert_eq!(s.params.centre_mode, CentreModeUi::Auto);
-    assert!(!s.spectrum.expanded && matches!(s.spectrum.color_overlay, SpectrumColorOverlay::None));
     assert!(matches!(s.elastic.color_mode, SurfaceColor3d::FaceRingSize));
     let Scene2D::SurfaceNet { mesh } = app.canvas2d.scene() else { panic!("no surface net") };
     // regular dodecahedron: 20 vertices, 30 edges, 12 pentagons, chi = 2, orientable
@@ -42,7 +39,7 @@ fn surfaces_preset_resets_corner_centre_mode_and_spectrum_panel() {
 }
 
 #[test]
-fn combine_preset_resets_radius_options_and_spectral_overlay() {
+fn combine_preset_resets_radius_options_and_overlays() {
     let mut h = harness();
     h.run_steps(2);
     let name = "Combine: square dislocation dipole";
@@ -60,9 +57,8 @@ fn combine_preset_resets_radius_options_and_spectral_overlay() {
         c.show_glide_lines = false;
         c.motion_mode = MotionMode::FreeSetup;
         c.inspectors.circuit.enabled = true;
-        c.sheet_opts.color_mode = Sheet3dColorMode::SpectralLdos;
-        c.inspectors.on_sheet_color_changed(Sheet3dColorMode::SpectralLdos);
-        c.inspectors.spectrum.expanded = true;
+        c.sheet_opts.color_mode = Sheet3dColorMode::BondStrain;
+        c.inspectors.overlay_mode = CrystalOverlayMode::BondStretchStrain;
         c.request_build(&item, false, false, false);
     }
     wait_settled(&mut h, "manual radius");
@@ -73,9 +69,7 @@ fn combine_preset_resets_radius_options_and_spectral_overlay() {
     assert_eq!(c.sheet_opts, Sheet3dViewOpts::default());
     assert!(!c.show_branch_cuts && c.show_glide_lines && c.motion_mode == MotionMode::Conserved);
     assert!(!c.inspectors.circuit.enabled);
-    assert!(matches!(c.inspectors.spectrum.color_overlay, SpectrumColorOverlay::None));
     assert!(matches!(c.inspectors.overlay_mode, CrystalOverlayMode::Standard));
-    assert!(!c.inspectors.spectrum.expanded);
     let bs: Vec<[f64; 2]> = c.specs.iter().map(|s| match s {
         DefectSpec::Dislocation { b, .. } => *b,
         _ => panic!("dislocations only"),
@@ -174,26 +168,26 @@ fn gallery_preset_resets_tuned_sliders_on_same_lattice() {
 }
 
 #[test]
-fn defects_preset_resets_sheet_opts_circuit_and_spectrum() {
+fn defects_and_analysis_presets_reset_sheet_opts_circuit_and_spectrum() {
     let mut h = harness();
     h.run_steps(2);
-    apply(&mut h, "LDOS on a -60 deg honeycomb sheet");
+    apply(&mut h, "Analysis: -60 deg honeycomb eigenmodes");
     {
-        let d = &mut h.state_mut().defects;
+        let app = h.state_mut();
+        app.analysis.spectrum.selected_level = Some(0);
+        let d = &mut app.defects;
         d.sheet_opts.show_flat_baseline = true;
         d.sheet_opts.z_exag = 2.5;
         d.sheet_opts.kappa_b = 0.5;
         d.inspectors.circuit.enabled = true;
-        d.inspectors.spectrum.selected_level = Some(0);
     }
     apply(&mut h, "Honeycomb +60 deg disclination");
     {
-        let d = &h.state().defects;
+        let app = h.state();
+        assert_eq!(app.active_mode, AppMode::Defects);
+        let d = &app.defects;
         assert_eq!(d.sheet_opts, Sheet3dViewOpts::default());
         assert!(!d.inspectors.circuit.enabled);
-        assert!(!d.inspectors.spectrum.expanded);
-        assert!(d.inspectors.spectrum.result.is_none());
-        assert!(d.inspectors.spectrum.selected_level.is_none());
         assert!(matches!(d.inspectors.overlay_mode, CrystalOverlayMode::Standard));
     }
     {
@@ -203,18 +197,19 @@ fn defects_preset_resets_sheet_opts_circuit_and_spectrum() {
         d.sheet_opts.kappa_b = 0.5;
         d.inspectors.circuit.enabled = true;
     }
-    apply(&mut h, "LDOS on a -60 deg honeycomb sheet");
-    let d = &h.state().defects;
+    apply(&mut h, "Analysis: -60 deg honeycomb eigenmodes");
+    let app = h.state();
+    assert_eq!(app.active_mode, AppMode::Analysis);
+    assert_eq!(app.analysis.target, AnalysisTarget::SingleDefect);
+    let d = &app.defects;
     assert!(!d.sheet_opts.show_flat_baseline);
     assert!((d.sheet_opts.z_exag - 1.0).abs() < 1e-6);
     assert!((d.sheet_opts.kappa_b - 0.02).abs() < 1e-9);
     assert!(!d.inspectors.circuit.enabled);
-    assert!(d.inspectors.spectrum.selected_level.is_none());
-    let res = d.inspectors.spectrum.result.as_ref().expect("fresh LDOS computed");
+    assert!(app.analysis.spectrum.selected_level.is_none());
+    let res = app.analysis.spectrum.result.as_ref().expect("fresh LDOS computed");
     assert_eq!(res.ldos.len(), d.last_crystal.pos.len());
-    assert!(d.inspectors.spectral_3d_for(d.sheet_opts.color_mode).is_some());
-    assert!(matches!(d.inspectors.overlay_mode, CrystalOverlayMode::SpectralLdos));
-    assert!(matches!(d.inspectors.spectrum.color_overlay, SpectrumColorOverlay::LdosMultiplet));
+    assert_eq!(app.analysis.spectrum.color_overlay, SpectrumColorOverlay::LdosMultiplet);
 }
 
 #[test]

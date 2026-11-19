@@ -74,6 +74,20 @@ impl PapertillingApp {
                     &tokens,
                 );
             }
+            NavTab::Analysis => {
+                let item = self.gallery.active_item().clone();
+                let mut env = crate::analysis_mode::AnalysisEnv {
+                    item: &item,
+                    backend: &self.backend,
+                    surfaces: &mut self.surfaces,
+                    defects: &mut self.defects,
+                    combine: &mut self.combine,
+                    canvas: &mut self.canvas2d,
+                    view3d: &mut self.view3d,
+                };
+                self.analysis
+                    .show_central(ui, &mut env, &mut self.viewport_split_ratio, &tokens);
+            }
         }
         });
     }

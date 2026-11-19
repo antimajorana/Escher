@@ -24,12 +24,10 @@ pub enum SurfaceColor3d {
 }
 
 impl SurfaceColor3d {
-    pub const ALL: [Self; 5] = [
+    pub const NON_SPECTRAL: [Self; 3] = [
         Self::FaceRingSize,
         Self::BondStrain,
         Self::RadialBuckling,
-        Self::SpectralLdos,
-        Self::SpectralCharge,
     ];
 
     pub fn label(self) -> &'static str {

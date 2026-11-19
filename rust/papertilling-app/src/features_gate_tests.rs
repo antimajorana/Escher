@@ -192,7 +192,7 @@ fn defects_and_combine_live_3d_sheet_geometry_end_to_end() {
 
     let tokens = crate::theme::ThemeTokens::paper();
     let mut split_ratio = 0.5_f32;
-    for cm in Sheet3dColorMode::ALL {
+    for cm in Sheet3dColorMode::NON_SPECTRAL {
         def.sheet_opts.color_mode = cm;
         def.sheet_opts.z_exag = 1.6;
         def.view3d_dirty = true;

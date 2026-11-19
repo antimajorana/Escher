@@ -38,6 +38,7 @@ pub struct CachedTiling {
 }
 
 pub struct HyperbolicPanelState {
+    pub pristine_only: bool,
     pub p: usize,
     pub q: usize,
     pub style: HyperbolicStyle,
@@ -68,6 +69,7 @@ pub struct HyperbolicPanelState {
 impl Default for HyperbolicPanelState {
     fn default() -> Self {
         Self {
+            pristine_only: false,
             p: 7,
             q: 3,
             style: HyperbolicStyle::RegularPQ,
@@ -90,6 +92,10 @@ impl Default for HyperbolicPanelState {
 }
 
 impl HyperbolicPanelState {
+    pub fn effective_wedge(&self) -> i32 {
+        if self.pristine_only { 0 } else { self.wedge_delta }
+    }
+
     pub fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
         let mut dirty = false;
         ui.horizontal_wrapped(|ui| {
@@ -128,12 +134,14 @@ impl HyperbolicPanelState {
             dirty |= ui.selectable_value(&mut self.disk_proj, DiskProjection::Poincare, "Poincare Geodesics").changed();
             dirty |= ui.selectable_value(&mut self.disk_proj, DiskProjection::Klein, "Klein Chords").changed();
         });
-        ui.horizontal(|ui| {
-            ui.small("Central Wedge Δp:");
-            for d in [-1, 0, 1] {
-                dirty |= ui.selectable_value(&mut self.wedge_delta, d, format!("{d:+}")).changed();
-            }
-        });
+        if !self.pristine_only {
+            ui.horizontal(|ui| {
+                ui.small("Central Wedge Δp:");
+                for d in [-1, 0, 1] {
+                    dirty |= ui.selectable_value(&mut self.wedge_delta, d, format!("{d:+}")).changed();
+                }
+            });
+        }
         self.show_view_controls(ui);
         dirty
     }
@@ -184,17 +192,21 @@ impl HyperbolicPanelState {
             let col = if is_hyperbolic { tokens.status_ok } else { tokens.status_err };
             ui.colored_label(col, egui::RichText::new(&self.status).small());
         }
-        ui.small(format!(
-            "Schläfli {{{}, {}}} | Layers: {} | Wedge Δp: {:+}",
-            self.p, self.q, self.layers, self.wedge_delta
-        ));
+        if self.pristine_only {
+            ui.small(format!("Schläfli {{{}, {}}} | Layers: {}", self.p, self.q, self.layers));
+        } else {
+            ui.small(format!(
+                "Schläfli {{{}, {}}} | Layers: {} | Wedge Δp: {:+}",
+                self.p, self.q, self.layers, self.effective_wedge()
+            ));
+        }
         ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
         self.show_pick_readout(ui, tokens);
         self.show_shell_table(ui);
     }
 
     fn key(&self) -> TilingKey {
-        (self.p, self.q, self.style, self.layers, self.wedge_delta)
+        (self.p, self.q, self.style, self.layers, self.effective_wedge())
     }
 
     /// Build (or reuse) the origin-frame tiling of the current key and update the shell table cache;
@@ -216,7 +228,7 @@ impl HyperbolicPanelState {
         self.cache = None;
         self.picked = None;
         self.hovered = None;
-        let base = match build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.wedge_delta) {
+        let base = match build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.effective_wedge()) {
             Ok(b) => b,
             Err(e) => {
                 self.drawn_patch_note.clear();

@@ -15,16 +15,17 @@
 
 use papertilling_core::defect::surgery::DefectSpec;
 
-use super::{NavTab, PapertillingApp, item_key};
+use super::{AppMode, DefectsView, LatticesView, NavTab, PapertillingApp, item_key};
 use crate::aliases::LatticeAliasKey;
+use crate::analysis_mode::AnalysisTarget;
+use crate::atlas_tab::AtlasSubTab;
 use crate::backend::{CatalogueItemUi, CentreModeUi};
 use crate::canvas2d::gauge_overlay::CrystalOverlayMode;
+use crate::defects_inspectors::DefectInspectors;
 use crate::defects_tab::DefectSubTab;
 use crate::live_combine::{CombineLatticeInfo, preset_neighbour_pair};
-use crate::defects_inspectors::DefectInspectors;
-use crate::mesh3d::{Sheet3dColorMode, Sheet3dViewOpts, SurfaceColor3d};
+use crate::mesh3d::{DefectViewMode, Sheet3dColorMode, Sheet3dViewOpts, SurfaceColor3d};
 use crate::presets::{AtlasScene, CombinePins, PRESETS, PresetLattice, PresetSettings, SurfaceSize};
-use crate::spectrum_worker::SpectrumColorOverlay;
 use crate::scene2d::overlays::GalleryOverlayToggles;
 
 /// Async follow-up work for a preset waiting on a tab's background worker.
@@ -36,7 +37,7 @@ pub(crate) enum PendingPreset {
         /// Push one undo checkpoint of the replaced pins (they are the user's: Combine kept its lattice).
         checkpoint: bool,
     },
-    DefectsSpectral {
+    AnalysisSpectral {
         alias_key: LatticeAliasKey,
     },
 }
@@ -103,11 +104,6 @@ impl PapertillingApp {
                 s.elastic.kappa_b = 0.02;
                 // the auto build's corner classes: Auto (face centre before site), as every preset count assumes
                 s.params.centre_mode = CentreModeUi::Auto;
-                // plain ring-size colours: no spectrum panel / overlay left over from the previous surface
-                s.spectrum.clear_for_switch();
-                s.spectrum.expanded = false;
-                s.spectrum.color_overlay = SpectrumColorOverlay::None;
-                s.spectrum.opts = Default::default();
                 s.elastic.color_mode = SurfaceColor3d::FaceRingSize;
                 match size {
                     SurfaceSize::Auto => self.surfaces.auto_size = true,
@@ -164,9 +160,45 @@ impl PapertillingApp {
                     checkpoint,
                 });
             }
+            PresetSettings::Analysis {
+                target,
+                defect_sub_tab,
+                defect_index,
+                radius,
+                draw,
+                view,
+                overlay,
+            } => {
+                let it = self.gallery.active_item().clone();
+                self.defects_seen = item_key(&it);
+                self.defects.reload_for_item(&it, &self.backend, &mut self.canvas2d, false);
+                let d = &mut self.defects;
+                d.sub_tab = defect_sub_tab;
+                d.wall_half = false;
+                d.radius = radius;
+                d.draw_mode = draw;
+                d.view_mode = DefectViewMode::Split2D3D;
+                reset_sheet_and_inspectors(&mut d.inspectors, &mut d.sheet_opts, Sheet3dColorMode::FaceRingSize);
+                match defect_sub_tab {
+                    DefectSubTab::Dislocations => d.selected_disloc = defect_index,
+                    DefectSubTab::Disclinations => d.selected_disclin = defect_index,
+                    DefectSubTab::Walls => d.selected_wall = defect_index,
+                }
+                d.submit_rebuild(&it, true);
+                let a = &mut self.analysis;
+                a.target = target;
+                a.view_mode = view;
+                a.reset_transient_for_session();
+                a.spectrum.opts = Default::default();
+                a.spectrum.color_overlay = overlay;
+                a.view3d_dirty = true;
+                self.preset_pending = Some(PendingPreset::AnalysisSpectral { alias_key: it.alias_key });
+            }
             PresetSettings::Atlas(scene) => match scene {
                 AtlasScene::SpaceGroup { number, net, defect } => {
-                    self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::SpaceGroups3D;
+                    self.atlas.set_pristine_only(false);
+                    self.atlas.sub_tab = AtlasSubTab::SpaceGroups3D;
+                    self.atlas.last_defect_subtab = AtlasSubTab::SpaceGroups3D;
                     let s = &mut self.atlas.space3d;
                     (s.selected_sg, s.selected_net, s.selected_defect) = (number, net, defect);
                     s.filter.clear();
@@ -174,7 +206,8 @@ impl PapertillingApp {
                     s.ensure_cached();
                 }
                 AtlasScene::Hyperbolic { p, q, style, layers } => {
-                    self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::HyperbolicH2;
+                    self.atlas.set_pristine_only(true);
+                    self.atlas.sub_tab = AtlasSubTab::HyperbolicH2;
                     let h = &mut self.atlas.hyperbolic;
                     (h.p, h.q, h.style, h.layers, h.wedge_delta) = (p, q, style, layers, 0);
                     h.disk_proj = crate::atlas_tab::hyperbolic_ui::DiskProjection::Poincare;
@@ -186,8 +219,24 @@ impl PapertillingApp {
                 }
             },
         }
-        self.switch_tab(preset.tab());
-        if let PresetSettings::Defects { sub_tab, index, colour, .. } = preset.settings {
+        match preset.settings {
+            PresetSettings::Gallery { .. } => self.select_lattices_view(LatticesView::Plane2D),
+            PresetSettings::Surfaces { .. } => self.select_lattices_view(LatticesView::Manifolds),
+            PresetSettings::Defects { .. } => self.select_defects_view(DefectsView::Catalogue2D),
+            PresetSettings::Combine { .. } => self.select_defects_view(DefectsView::CombineAndFuse),
+            PresetSettings::Analysis { .. } => self.switch_mode(AppMode::Analysis),
+            PresetSettings::Atlas(AtlasScene::SpaceGroup { .. }) => {
+                self.select_defects_view(DefectsView::AtlasDefects);
+                self.atlas.sub_tab = AtlasSubTab::SpaceGroups3D;
+                self.atlas.last_defect_subtab = AtlasSubTab::SpaceGroups3D;
+                self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
+            }
+            PresetSettings::Atlas(AtlasScene::Hyperbolic { .. }) => {
+                self.select_lattices_view(LatticesView::NonEuclidean);
+                self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
+            }
+        }
+        if let PresetSettings::Defects { sub_tab, index, .. } = preset.settings {
             let d = &mut self.defects;
             match sub_tab {
                 DefectSubTab::Dislocations => d.selected_disloc = index,
@@ -196,9 +245,6 @@ impl PapertillingApp {
             }
             let it = self.gallery.active_item().clone();
             d.rebuild_crystal(&it, &self.backend, &mut self.canvas2d, true);
-            if matches!(colour, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge) {
-                self.preset_pending = Some(PendingPreset::DefectsSpectral { alias_key: it.alias_key });
-            }
         }
         self.export_status = format!("Preset: {}", preset.name);
         self.pump_preset_pending(None);
@@ -245,8 +291,12 @@ impl PapertillingApp {
                     self.export_status = format!("Preset: {name} (Combine reloaded its lattice: earlier pins have no undo)");
                 }
             }
-            PendingPreset::DefectsSpectral { alias_key } => {
-                if self.active_tab != NavTab::Defects || item.alias_key != *alias_key {
+            PendingPreset::AnalysisSpectral { alias_key } => {
+                if self.active_mode != AppMode::Analysis
+                    || self.active_tab != NavTab::Analysis
+                    || self.analysis.target != AnalysisTarget::SingleDefect
+                    || item.alias_key != *alias_key
+                {
                     self.preset_pending = None;
                     return;
                 }
@@ -254,38 +304,32 @@ impl PapertillingApp {
                     return;
                 }
                 self.preset_pending = None;
-                let d = &mut self.defects;
-                if d.error.is_none()
-                    && !d.last_crystal.pos.is_empty()
-                    && d.inspectors.spectrum.result.is_none()
-                    && !d.inspectors.spectrum.is_busy()
+                if self.defects.error.is_none()
+                    && !self.defects.last_crystal.pos.is_empty()
+                    && self.analysis.spectrum.result.is_none()
+                    && !self.analysis.spectrum.is_busy()
                 {
-                    d.inspectors.spectrum.submit_crystal(&d.last_crystal, Some(&d.last_sheet), ctx);
+                    let (surf, def, comb) = (&self.surfaces, &self.defects, &self.combine);
+                    self.analysis.submit_active_source(&item, surf, def, comb, ctx);
                 }
             }
         }
     }
 }
 
-/// Reset 3D sheet options and inspectors (Burgers circuit, 2D overlay, tight-binding spectrum) so a Defects or
-/// Combine preset never depends on earlier state. LDOS / charge configures the spectral color mode and 2D overlay
-/// (while `CollapsingHeader::default_open(false)` in `spectrum_ui.rs` keeps the visual fold state); any other
-/// colouring clears both.
+/// Reset 3D sheet options and non-spectral inspectors so a Defects or Combine preset never depends on earlier state.
 fn reset_sheet_and_inspectors(
     insp: &mut DefectInspectors,
     sheet_opts: &mut Sheet3dViewOpts,
     colour: Sheet3dColorMode,
 ) {
-    *sheet_opts = Sheet3dViewOpts { color_mode: colour, ..Default::default() };
+    let safe_colour = if matches!(colour, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge) {
+        Sheet3dColorMode::FaceRingSize
+    } else {
+        colour
+    };
+    *sheet_opts = Sheet3dViewOpts { color_mode: safe_colour, ..Default::default() };
     insp.clear_for_switch();
     insp.circuit = Default::default();
-    insp.spectrum.opts = Default::default();
-    let spectral = matches!(colour, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge);
-    if spectral {
-        insp.on_sheet_color_changed(colour);
-    } else {
-        insp.spectrum.color_overlay = SpectrumColorOverlay::None;
-        insp.overlay_mode = CrystalOverlayMode::Standard;
-    }
-    insp.spectrum.expanded = spectral;
+    insp.overlay_mode = CrystalOverlayMode::Standard;
 }

@@ -3,10 +3,6 @@ use papertilling_core::types::SurfaceMesh;
 use super::{SurfacesTabState, verdict_colour};
 use crate::backend::VerdictKindUi;
 use crate::canvas2d::Canvas2D;
-use crate::mesh3d::SurfaceColor3d;
-use crate::spectrum_ui::show_spectrum_panel;
-use crate::spectrum_worker::SpectrumColorOverlay;
-use crate::surfaces_elastic::SurfaceShapeMode;
 use crate::theme::ThemeTokens;
 use crate::view3d::View3dState;
 
@@ -22,29 +18,7 @@ impl SurfacesTabState {
         if need_fvk && let Some(mesh) = &self.current_mesh {
             self.elastic.request_relax(mesh.clone(), Some(ui.ctx()));
         }
-        let sp_ev = show_spectrum_panel(ui, &mut self.spectrum, "surf_spec", false, false, tokens);
-        if sp_ev.recompute && let Some(mesh) = &self.current_mesh {
-            let mut m = mesh.clone();
-            if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK
-                && let Some(res) = &self.elastic.last_result
-            {
-                m.xyz = res.xyz.clone();
-                if let (Some(c), Some(cx)) = (m.cover.as_deref_mut(), res.cover_xyz.as_ref()) {
-                    c.xyz = cx.clone();
-                }
-            }
-            self.spectrum.submit_surface(&m, Some(ui.ctx()));
-        }
-        let mut resync_3d = need_resync || sp_ev.redraw_colors;
-        if sp_ev.redraw_colors {
-            self.elastic.color_mode = match self.spectrum.color_overlay {
-                SpectrumColorOverlay::LdosMultiplet => SurfaceColor3d::SpectralLdos,
-                SpectrumColorOverlay::SpectralCharge => SurfaceColor3d::SpectralCharge,
-                SpectrumColorOverlay::None => SurfaceColor3d::FaceRingSize,
-            };
-            resync_3d = true;
-        }
-        if resync_3d {
+        if need_resync {
             self.sync_view3d_and_colors(canvas, view3d);
         }
         ui.separator();

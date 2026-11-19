@@ -48,7 +48,7 @@ impl CombineTabState {
             "comb_top_col",
         );
         if vc {
-            self.on_combine_sheet_color_changed(ui.ctx());
+            self.view3d_dirty = true;
         }
         if kc {
             self.request_sheet3d_only(gallery_item);

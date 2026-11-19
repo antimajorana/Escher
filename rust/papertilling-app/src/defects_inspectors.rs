@@ -1,4 +1,4 @@
-//! Shared interactive Burgers circuit, 2D overlay selector, and Spectrum controls for `Defects` and `Combine`.
+//! Shared interactive Burgers circuit and 2D overlay selector for `Defects` and `Combine`.
 
 use papertilling_core::defect::circuit::{
     CircuitResult, auto_burgers_circuit, burgers_circuit, shift_circuit_basepoint,
@@ -10,17 +10,13 @@ use crate::canvas2d::circuit::{CanvasCircuitOverlay, CircuitTargetMode, CircuitU
 use crate::canvas2d::gauge_overlay::{
     CrystalOverlayData, CrystalOverlayMode, SeamConnectionMark,
 };
-use crate::canvas2d::overlay_legend::{seam_legend_chips, spectral_overlay_data};
-use crate::mesh3d::{Sheet3dColorMode, Sheet3dViewOpts};
-use crate::spectrum_ui::show_spectrum_panel;
-use crate::spectrum_worker::{SpectrumColorOverlay, SpectrumPanelState};
+use crate::canvas2d::overlay_legend::seam_legend_chips;
 use crate::theme::ThemeTokens;
 
 /// Interactive inspection state shared by `DefectsTabState` and `CombineTabState`.
 pub struct DefectInspectors {
     pub circuit: CircuitUiState,
     pub overlay_mode: CrystalOverlayMode,
-    pub spectrum: SpectrumPanelState,
 }
 
 impl Default for DefectInspectors {
@@ -34,7 +30,6 @@ impl DefectInspectors {
         Self {
             circuit: CircuitUiState::default(),
             overlay_mode: CrystalOverlayMode::Standard,
-            spectrum: SpectrumPanelState::new(),
         }
     }
 
@@ -43,7 +38,6 @@ impl DefectInspectors {
         self.circuit.error = None;
         self.circuit.base_v0 = None;
         self.circuit.step_k = 0;
-        self.spectrum.clear_for_switch();
     }
 
     /// Recompute the active Burgers circuit overlay cleanly against `crystal` and `cell`.
@@ -135,10 +129,6 @@ impl DefectInspectors {
     ) -> Option<CrystalOverlayData> {
         match self.overlay_mode {
             CrystalOverlayMode::Standard => None,
-            CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge => {
-                let (vals, div) = self.spectrum.active_scalar_overlay()?;
-                Some(spectral_overlay_data(&vals, div))
-            }
             CrystalOverlayMode::SeamConnections => {
                 let mut seams = Vec::new();
                 for &(u, v) in &crystal.edges {
@@ -175,53 +165,15 @@ impl DefectInspectors {
         canvas.set_gauge_overlay(self.build_crystal_overlay(crystal, ao_override));
     }
 
-    pub fn spectral_3d_for(&self, color_mode: Sheet3dColorMode) -> Option<(&[f64], bool)> {
-        let res = self.spectrum.result.as_ref()?;
-        match color_mode {
-            Sheet3dColorMode::SpectralLdos if !res.ldos.is_empty() => Some((&res.ldos, false)),
-            Sheet3dColorMode::SpectralCharge if !res.delta_rho.is_empty() => Some((&res.delta_rho, true)),
-            _ => None,
-        }
-    }
-
-    pub fn sync_3d_from_spectrum(&self, sheet_opts: &mut Sheet3dViewOpts) {
-        match self.spectrum.color_overlay {
-            SpectrumColorOverlay::LdosMultiplet => sheet_opts.color_mode = Sheet3dColorMode::SpectralLdos,
-            SpectrumColorOverlay::SpectralCharge => sheet_opts.color_mode = Sheet3dColorMode::SpectralCharge,
-            SpectrumColorOverlay::None => {
-                if matches!(sheet_opts.color_mode, Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge) {
-                    sheet_opts.color_mode = Sheet3dColorMode::FaceRingSize;
-                }
-            }
-        }
-    }
-
-    pub fn on_sheet_color_changed(&mut self, color_mode: Sheet3dColorMode) -> bool {
-        match color_mode {
-            Sheet3dColorMode::SpectralLdos => {
-                self.spectrum.color_overlay = SpectrumColorOverlay::LdosMultiplet;
-                self.overlay_mode = CrystalOverlayMode::SpectralLdos;
-                self.spectrum.result.is_none()
-            }
-            Sheet3dColorMode::SpectralCharge => {
-                self.spectrum.color_overlay = SpectrumColorOverlay::SpectralCharge;
-                self.overlay_mode = CrystalOverlayMode::SpectralCharge;
-                self.spectrum.result.is_none()
-            }
-            _ => false,
-        }
-    }
-
-    /// Render the circuit controls, 2D overlay dropdown, and collapsible Spectrum panel.
-    /// Returns `(circuit_changed, overlay_changed, spectrum_recompute, spectrum_colors_changed)`.
+    /// Render the circuit controls and 2D overlay dropdown.
+    /// Returns `(circuit_changed, overlay_changed)`.
     pub fn show_controls_ui(
         &mut self,
         ui: &mut egui::Ui,
         id_prefix: &str,
         num_pins: usize,
-        allow_seam_sign: bool,
-        tokens: &ThemeTokens,
-    ) -> (bool, bool, bool, bool) {
+        _tokens: &ThemeTokens,
+    ) -> (bool, bool) {
         let mut circ_dirty = false;
         let mut ov_dirty = false;
 
@@ -318,37 +270,14 @@ impl DefectInspectors {
             egui::ComboBox::from_id_salt(format!("{id_prefix}_2d_ov"))
                 .selected_text(self.overlay_mode.label())
                 .show_ui(ui, |ui| {
-                    for m in CrystalOverlayMode::ALL {
+                    for m in CrystalOverlayMode::NON_SPECTRAL {
                         ui.selectable_value(&mut self.overlay_mode, m, m.label());
                     }
                 });
             if self.overlay_mode != prev {
                 ov_dirty = true;
-                match self.overlay_mode {
-                    CrystalOverlayMode::SpectralLdos => self.spectrum.color_overlay = SpectrumColorOverlay::LdosMultiplet,
-                    CrystalOverlayMode::SpectralCharge => self.spectrum.color_overlay = SpectrumColorOverlay::SpectralCharge,
-                    _ => {}
-                }
             }
         });
-
-        let sp_ev = show_spectrum_panel(ui, &mut self.spectrum, &format!("{id_prefix}_spec"), true, allow_seam_sign, tokens);
-        let mut spec_recomp = sp_ev.recompute;
-        if ov_dirty && matches!(self.overlay_mode, CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge) && self.spectrum.result.is_none() {
-            spec_recomp = true;
-        }
-        if sp_ev.redraw_colors {
-            match self.spectrum.color_overlay {
-                SpectrumColorOverlay::LdosMultiplet => self.overlay_mode = CrystalOverlayMode::SpectralLdos,
-                SpectrumColorOverlay::SpectralCharge => self.overlay_mode = CrystalOverlayMode::SpectralCharge,
-                SpectrumColorOverlay::None => {
-                    if matches!(self.overlay_mode, CrystalOverlayMode::SpectralLdos | CrystalOverlayMode::SpectralCharge) {
-                        self.overlay_mode = CrystalOverlayMode::Standard;
-                    }
-                }
-            }
-            ov_dirty = true;
-        }
-        (circ_dirty, ov_dirty, spec_recomp, sp_ev.redraw_colors)
+        (circ_dirty, ov_dirty)
     }
 }

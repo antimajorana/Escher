@@ -3,7 +3,7 @@
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
-use crate::app::{NavTab, PapertillingApp};
+use crate::app::{AppMode, NavTab, PapertillingApp};
 use crate::presets::PRESETS;
 use crate::theme::{StudioTheme, typography};
 
@@ -38,6 +38,13 @@ fn presets_menu_lists_every_preset_on_every_tab_and_a_click_applies_it() {
         h.state_mut().switch_tab(tab);
         h.run_steps(2);
         open_menu(&mut h, tab);
+        for mode in AppMode::ALL {
+            assert!(
+                h.get_all_by_label(mode.label()).count() >= 2,
+                "{tab:?}: menu lists mode heading '{}'",
+                mode.label()
+            );
+        }
         for p in PRESETS {
             assert!(h.query_by_label(p.name).is_some(), "{tab:?}: menu lists '{}'", p.name);
         }

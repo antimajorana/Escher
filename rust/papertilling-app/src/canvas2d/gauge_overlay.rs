@@ -18,20 +18,16 @@ pub enum CrystalOverlayMode {
     VertexAngleShear,
     PlaquetteFlux,
     SeamConnections,
-    SpectralLdos,
-    SpectralCharge,
 }
 
 impl CrystalOverlayMode {
-    pub const ALL: [Self; 8] = [
+    pub const NON_SPECTRAL: [Self; 6] = [
         Self::Standard,
         Self::GsvEnergyShear,
         Self::BondStretchStrain,
         Self::VertexAngleShear,
         Self::PlaquetteFlux,
         Self::SeamConnections,
-        Self::SpectralLdos,
-        Self::SpectralCharge,
     ];
 
     pub fn label(self) -> &'static str {
@@ -42,8 +38,6 @@ impl CrystalOverlayMode {
             Self::VertexAngleShear => "Vertex angle-shear energy",
             Self::PlaquetteFlux => "Plaquette flux (R_f, α_f, Wyckoff)",
             Self::SeamConnections => "Volterra seam g_e",
-            Self::SpectralLdos => "LDOS |ψ|² (multiplet)",
-            Self::SpectralCharge => "Spectral charge δρ(μ)",
         }
     }
 }

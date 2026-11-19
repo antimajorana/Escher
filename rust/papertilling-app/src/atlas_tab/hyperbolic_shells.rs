@@ -102,10 +102,10 @@ impl HyperbolicPanelState {
         if let Some(stop) = &table.stopped {
             ui.small(format!("Table stops early: {stop}"));
         }
-        if self.style == HyperbolicStyle::RectifiedKagome && self.wedge_delta == 0 {
+        if self.style == HyperbolicStyle::RectifiedKagome && self.effective_wedge() == 0 {
             ui.small("Kagome: drawn patch uses the cluster rule on (p.q.p.q) including q-gons; this table shows BDF on {p,q}.");
         }
-        if self.wedge_delta != 0 {
+        if self.effective_wedge() != 0 {
             ui.small(
                 "Wedge core Δp ≠ 0: the drawn patch grows copies of the wedge core (vertex completion); \
                  this table (one regular p-gon) does not describe it.",

@@ -1,4 +1,4 @@
-//! Async tight-binding spectral worker (`<= 2,500` site guard) for `Defects`, `Combine`, and `Surfaces`.
+//! Async tight-binding spectral worker (`<= 2,500` site guard), strictly inside `analysis_mode`.
 
 use papertilling_core::defect::sheet3d::Sheet3DResult;
 use papertilling_core::spectrum::{
@@ -49,7 +49,7 @@ impl SpectrumColorOverlay {
     }
 }
 
-pub struct SpectrumPanelState {
+pub(crate) struct SpectrumPanelState {
     pub expanded: bool,
     pub opts: SpectrumOptions,
     pub color_overlay: SpectrumColorOverlay,
@@ -72,9 +72,9 @@ impl SpectrumPanelState {
             run_spectrum_job(&job)
         });
         Self {
-            expanded: false,
+            expanded: true,
             opts: SpectrumOptions::default(),
-            color_overlay: SpectrumColorOverlay::None,
+            color_overlay: SpectrumColorOverlay::LdosMultiplet,
             selected_level: None,
             result: None,
             last_error: None,
@@ -144,8 +144,10 @@ impl SpectrumPanelState {
         self.worker.submit(SpectrumJob { target, opts });
     }
 
-    pub fn poll(&mut self, ctx: &egui::Context) -> bool {
-        self.worker.set_repaint_ctx(ctx);
+    pub fn poll(&mut self, ctx: Option<&egui::Context>) -> bool {
+        if let Some(c) = ctx {
+            self.worker.set_repaint_ctx(c);
+        }
         if let Some(out) = self.worker.poll() {
             match out {
                 Ok(Ok(res)) => {
@@ -160,6 +162,23 @@ impl SpectrumPanelState {
             return true;
         }
         false
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wait_idle(&mut self) -> Option<&SpectrumResult> {
+        if let Some(out) = self.worker.wait(std::time::Duration::from_secs(30)) {
+            match out {
+                Ok(Ok(res)) => {
+                    self.result = Some(res);
+                    self.last_error = None;
+                }
+                Ok(Err(err)) | Err(err) => {
+                    self.last_error = Some(err);
+                }
+            }
+            self.stale = false;
+        }
+        self.result.as_ref()
     }
 
     /// Return `(per_site_values, is_diverging)` when an LDOS or excess-charge overlay is active.

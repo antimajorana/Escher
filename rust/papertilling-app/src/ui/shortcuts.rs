@@ -1,6 +1,6 @@
 //! Global keyboard shortcuts and priority-ordered Escape handling.
 
-use crate::app::{NavTab, PapertillingApp};
+use crate::app::{AppMode, NavTab, PapertillingApp};
 use crate::combine::ToolMode;
 use crate::mesh3d::DefectViewMode;
 
@@ -26,12 +26,13 @@ impl PapertillingApp {
                 return;
             }
         } else if !egui::Popup::is_any_open(ctx) {
+            let in_combine = self.active_mode == AppMode::Defects && self.active_tab == NavTab::Combine;
             if self.gallery.renaming
                 || ctx.egui_wants_keyboard_input()
-                || (self.active_tab == NavTab::Combine && self.combine.core_panel.has_open_modal())
+                || (in_combine && self.combine.core_panel.has_open_modal())
             {
                 // Yield without consuming Esc so inline rename, focused TextEdit/DragValue, or modal gets it.
-            } else if self.active_tab == NavTab::Combine && !self.combine.dragging && !self.combine.cut_dragging {
+            } else if in_combine && !self.combine.dragging && !self.combine.cut_dragging {
                 if self.combine.selected_pin.is_some()
                     && self.combine.popover_open
                     && self.combine.view_mode != DefectViewMode::Sheet3D
@@ -65,10 +66,11 @@ impl PapertillingApp {
             }
         }
 
+        let in_combine = self.active_mode == AppMode::Defects && self.active_tab == NavTab::Combine;
         if ctx.egui_wants_keyboard_input()
             || self.gallery.renaming
             || egui::Popup::is_any_open(ctx)
-            || (self.active_tab == NavTab::Combine && self.combine.core_panel.has_open_modal())
+            || (in_combine && self.combine.core_panel.has_open_modal())
         {
             return;
         }
@@ -91,7 +93,7 @@ impl PapertillingApp {
             self.right_inspector_open = !self.right_inspector_open;
         }
 
-        if self.active_tab == NavTab::Combine && !self.combine.dragging && !self.combine.cut_dragging {
+        if in_combine && !self.combine.dragging && !self.combine.cut_dragging {
             let redo_shift = egui::KeyboardShortcut::new(
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
                 egui::Key::Z,

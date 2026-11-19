@@ -50,14 +50,16 @@ fn export_3d_png_is_refused_on_the_gallery_and_while_dirty_or_busy() {
 fn export_3d_png_waits_for_a_pending_spectrum() {
     let ctx = egui::Context::default();
     let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
-    let now = shown(&mut app, &ctx, NavTab::Defects);
+    app.analysis.select_target(crate::analysis_mode::AnalysisTarget::SingleDefect);
+    let _ = shown(&mut app, &ctx, NavTab::Analysis);
     app.defects.wait_idle(&mut app.canvas2d);
-    app.defects.view3d_dirty = false;
-    app.defects.stale = false;
+    frame(&mut app, &ctx);
+    let now = ctx.cumulative_pass_nr();
+    assert!(!app.analysis.view3d_dirty);
     assert_eq!(app.export_3d_png_state_refusal(now), None, "precondition: allowed when idle");
     let crystal = app.defects.last_crystal.clone();
-    app.defects.inspectors.spectrum.submit_crystal(&crystal, None, None);
-    assert!(app.defects.inspectors.spectrum.is_busy());
+    app.analysis.spectrum.submit_crystal(&crystal, None, None);
+    assert!(app.analysis.spectrum.is_busy());
     let msg = app.export_3d_png_state_refusal(now).expect("spectrum pending");
     assert!(msg.contains("spectrum"), "{msg}");
 }

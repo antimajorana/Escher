@@ -1,5 +1,7 @@
 //! 5th Desktop App Tab: Complete Atlas (0D–3D & Hyperbolic H²).
 
+use papertilling_core::space3d::nets3d::LineDefect3d;
+
 use crate::canvas2d::{Canvas2D, CanvasInteraction};
 use crate::export_obj::write_gpu_mesh_obj;
 use crate::theme::ThemeTokens;
@@ -43,10 +45,23 @@ impl AtlasSubTab {
             Self::HyperbolicH2 => "Hyperbolic H²",
         }
     }
+
+    pub fn defect_label(self) -> &'static str {
+        match self {
+            Self::Subperiodic => "0D/1D Subperiodic Defects",
+            Self::Layers80 => "80 Layer Groups",
+            Self::SpaceGroups3D => "3D Line Defects",
+            Self::HyperbolicH2 => "H² Wedge Disclinations",
+        }
+    }
 }
 
 pub struct AtlasTabState {
+    pub pristine_only: bool,
     pub sub_tab: AtlasSubTab,
+    pub last_pristine_3d_subtab: AtlasSubTab,
+    pub last_defect_subtab: AtlasSubTab,
+    seeded_initial_defects: bool,
     pub subperiodic: subperiodic_ui::SubperiodicPanelState,
     pub layers: layers_ui::LayersPanelState,
     pub space3d: space3d_ui::Space3dPanelState,
@@ -55,14 +70,63 @@ pub struct AtlasTabState {
 }
 
 impl AtlasTabState {
+    pub const PRISTINE_3D_SUBTABS: [AtlasSubTab; 3] = [
+        AtlasSubTab::Subperiodic,
+        AtlasSubTab::Layers80,
+        AtlasSubTab::SpaceGroups3D,
+    ];
+    pub const DEFECT_SUBTABS: [AtlasSubTab; 3] = [
+        AtlasSubTab::SpaceGroups3D,
+        AtlasSubTab::HyperbolicH2,
+        AtlasSubTab::Subperiodic,
+    ];
+
     pub fn new() -> Self {
+        let mut subperiodic = subperiodic_ui::SubperiodicPanelState::default();
+        let mut space3d = space3d_ui::Space3dPanelState::default();
+        let mut hyperbolic = hyperbolic_ui::HyperbolicPanelState::default();
+        subperiodic.pristine_only = true;
+        space3d.pristine_only = true;
+        hyperbolic.pristine_only = true;
         Self {
+            pristine_only: true,
             sub_tab: AtlasSubTab::SpaceGroups3D,
-            subperiodic: subperiodic_ui::SubperiodicPanelState::default(),
+            last_pristine_3d_subtab: AtlasSubTab::SpaceGroups3D,
+            last_defect_subtab: AtlasSubTab::SpaceGroups3D,
+            seeded_initial_defects: false,
+            subperiodic,
             layers: layers_ui::LayersPanelState::default(),
-            space3d: space3d_ui::Space3dPanelState::default(),
-            hyperbolic: hyperbolic_ui::HyperbolicPanelState::default(),
+            space3d,
+            hyperbolic,
             dirty: true,
+        }
+    }
+
+    pub fn set_pristine_only(&mut self, pristine: bool) {
+        if self.pristine_only != pristine {
+            self.dirty = true;
+        }
+        self.pristine_only = pristine;
+        self.subperiodic.pristine_only = pristine;
+        self.space3d.pristine_only = pristine;
+        self.hyperbolic.pristine_only = pristine;
+    }
+
+    /// Enter `DefectsView::AtlasDefects`: preserve existing user defect choices, seeding initial defaults only once.
+    pub fn enter_defects_mode(&mut self, from_outside: bool) {
+        self.set_pristine_only(false);
+        if !self.seeded_initial_defects {
+            self.seeded_initial_defects = true;
+            if self.space3d.selected_defect == LineDefect3d::None {
+                self.space3d.selected_defect = LineDefect3d::ScrewDislocationZ;
+            }
+            if self.hyperbolic.wedge_delta == 0 {
+                self.hyperbolic.wedge_delta = -1;
+            }
+        }
+        if from_outside || self.sub_tab == AtlasSubTab::Layers80 {
+            self.sub_tab = self.last_defect_subtab;
+            self.dirty = true;
         }
     }
 
@@ -78,6 +142,9 @@ impl AtlasTabState {
     }
 
     fn sync_inner(&mut self, canvas: &mut Canvas2D, view3d: &mut View3dState, reset_view: bool) {
+        self.subperiodic.pristine_only = self.pristine_only;
+        self.space3d.pristine_only = self.pristine_only;
+        self.hyperbolic.pristine_only = self.pristine_only;
         let rot = view3d.rotation();
         let (sc2, mesh3, cap) = match self.sub_tab {
             AtlasSubTab::Subperiodic => self.subperiodic.build_scenes(),
@@ -106,18 +173,37 @@ impl AtlasTabState {
         ui: &mut egui::Ui,
         canvas: &mut Canvas2D,
         view3d: &mut View3dState,
+        offered_tabs: &[AtlasSubTab],
     ) {
-        ui.strong("Generalized Group & Lattice Atlas (0D–3D & H²)");
-        ui.horizontal_wrapped(|ui| {
-            for st in AtlasSubTab::ALL {
-                if ui.selectable_label(self.sub_tab == st, st.label()).clicked() && self.sub_tab != st {
-                    self.sub_tab = st;
-                    self.space3d.view.hovered = None;
-                    self.hyperbolic.hovered = None;
-                    self.dirty = true;
+        self.subperiodic.pristine_only = self.pristine_only;
+        self.space3d.pristine_only = self.pristine_only;
+        self.hyperbolic.pristine_only = self.pristine_only;
+        let title = if !self.pristine_only {
+            "3D, Hyperbolic H² & Subperiodic Defects"
+        } else if self.sub_tab == AtlasSubTab::HyperbolicH2 && offered_tabs.len() <= 1 {
+            "Non-Euclidean Hyperbolic H² Tilings"
+        } else {
+            "0D–3D Groups & Crystal Nets"
+        };
+        ui.strong(title);
+        if offered_tabs.len() > 1 {
+            ui.horizontal_wrapped(|ui| {
+                for &st in offered_tabs {
+                    let lbl = if self.pristine_only { st.label() } else { st.defect_label() };
+                    if ui.selectable_label(self.sub_tab == st, lbl).clicked() && self.sub_tab != st {
+                        self.sub_tab = st;
+                        if self.pristine_only && st != AtlasSubTab::HyperbolicH2 {
+                            self.last_pristine_3d_subtab = st;
+                        } else if !self.pristine_only && st != AtlasSubTab::Layers80 {
+                            self.last_defect_subtab = st;
+                        }
+                        self.space3d.view.hovered = None;
+                        self.hyperbolic.hovered = None;
+                        self.dirty = true;
+                    }
                 }
-            }
-        });
+            });
+        }
         ui.separator();
 
         let ctrl_changed = match self.sub_tab {
@@ -134,6 +220,9 @@ impl AtlasTabState {
     }
 
     pub fn show_inspector_panel(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        self.subperiodic.pristine_only = self.pristine_only;
+        self.space3d.pristine_only = self.pristine_only;
+        self.hyperbolic.pristine_only = self.pristine_only;
         match self.sub_tab {
             AtlasSubTab::Subperiodic => self.subperiodic.show_inspector(ui, tokens),
             AtlasSubTab::Layers80 => self.layers.show_inspector(ui, tokens),
@@ -161,7 +250,13 @@ impl AtlasTabState {
         };
         let right_heading = match self.sub_tab {
             AtlasSubTab::HyperbolicH2 => "3D Minkowski Hyperboloid Bowl (t = sqrt(1 + x^2 + y^2))",
-            AtlasSubTab::SpaceGroups3D => "3D Crystal Net & Defect Axis (drag orbit, scroll zoom)",
+            AtlasSubTab::SpaceGroups3D => {
+                if self.pristine_only {
+                    "3D Crystal Net (drag orbit, scroll zoom)"
+                } else {
+                    "3D Crystal Net & Defect Axis (drag orbit, scroll zoom)"
+                }
+            }
             AtlasSubTab::Layers80 => "3D Layer Group Slab",
             AtlasSubTab::Subperiodic => "3D Strip Quotient (Cylinder / Mobius) or Planar Net",
         };

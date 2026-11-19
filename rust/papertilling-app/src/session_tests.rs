@@ -114,6 +114,11 @@ pub(crate) fn sample_state() -> SessionState {
         }),
         camera: CameraSession { yaw: Some(-1.25), pitch: Some(0.75), distance: Some(5.5), offset: Some([0.25, -0.5]), z_up: Some(true) },
         atlas_sub_view: Some("HyperbolicH2".into()),
+        active_mode: Some("Defects".into()),
+        lattices_view: Some("Plane2D".into()),
+        defects_view: Some("Catalogue2D".into()),
+        analysis_target: Some("SingleDefect".into()),
+        analysis_view: Some("Split2D3D".into()),
     }
 }
 

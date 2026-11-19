@@ -97,12 +97,14 @@ impl CombineTabState {
     }
 
     /// Collect finished jobs (call every frame while the tab is shown); `ctx` lets workers wake the UI.
+    /// Returns `true` when an initializer or build result landed.
     pub fn poll(
         &mut self,
         ctx: Option<&egui::Context>,
         gallery_item: &CatalogueItemUi,
-        mut canvas: Option<&mut Canvas2D>,
-    ) {
+        canvas: Option<&mut Canvas2D>,
+    ) -> bool {
+        let mut landed = false;
         if let Some(ctx) = ctx {
             self.initializer.set_repaint_ctx(ctx);
             self.builder.set_repaint_ctx(ctx);
@@ -110,12 +112,13 @@ impl CombineTabState {
         }
         if let Some(result) = self.initializer.poll() {
             self.take_init(result, gallery_item);
+            landed = true;
         }
         if let Some(res) = self.builder.poll() {
             self.take_build(res);
             self.on_combine_build_landed(gallery_item);
+            landed = true;
         }
-        self.poll_spectrum_inspector(ctx, gallery_item, canvas.as_deref_mut());
         if self.compare_after_build && !self.builder.is_busy() && !self.last_build.preview {
             self.compare_after_build = false;
             self.submit_compare(gallery_item);
@@ -135,6 +138,7 @@ impl CombineTabState {
         if (self.dragging || self.cut_dragging) && self.preview_dirty && !self.builder.is_busy() {
             self.request_build(gallery_item, true, false, false);
         }
+        landed
     }
 
     /// Block until every queued job has landed (tests).
@@ -209,9 +213,8 @@ impl CombineTabState {
         } else {
             (&self.last_build.crystal, &self.last_sheet3d.sheet)
         };
-        let spectral = self.inspectors.spectral_3d_for(self.sheet_opts.color_mode);
-        let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, spectral);
-        let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, spectral);
+        let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, None);
+        let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, None);
         let mut cap = sheet3d_caption(&title, s, &self.sheet_opts);
         if self.is_building() {
             cap.push_str(" | previous result — stale");

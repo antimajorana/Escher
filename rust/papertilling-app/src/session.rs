@@ -24,7 +24,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::aliases::{LatticeAliasKey, config_dir, lock_sidecar, replace_atomically};
 
 pub const SESSION_FILENAME: &str = "session.json";
-pub const SESSION_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_SCHEMA_VERSION: u32 = 2;
 
 thread_local! {
     /// Fields dropped by [`lenient`] during the current [`parse_session`] call.
@@ -91,6 +91,21 @@ pub struct SessionState {
     /// `AtlasSubTab` variant name.
     #[serde(default, deserialize_with = "lenient")]
     pub atlas_sub_view: Option<String>,
+    /// `AppMode` variant name (`"Lattices"`, `"Defects"`, `"Analysis"`). Absent in schema v1.
+    #[serde(default, deserialize_with = "lenient")]
+    pub active_mode: Option<String>,
+    /// `LatticesView` variant name.
+    #[serde(default, deserialize_with = "lenient")]
+    pub lattices_view: Option<String>,
+    /// `DefectsView` variant name.
+    #[serde(default, deserialize_with = "lenient")]
+    pub defects_view: Option<String>,
+    /// `AnalysisTarget` variant name.
+    #[serde(default, deserialize_with = "lenient")]
+    pub analysis_target: Option<String>,
+    /// `DefectViewMode` variant name in Analysis mode.
+    #[serde(default, deserialize_with = "lenient")]
+    pub analysis_view: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -263,7 +278,7 @@ pub fn parse_session(raw: &str) -> Result<(SessionState, u32), SessionError> {
     };
     let version = obj.get("schema_version").and_then(serde_json::Value::as_u64);
     match version {
-        Some(v) if v == u64::from(SESSION_SCHEMA_VERSION) => {}
+        Some(1 | 2) => {}
         Some(v) => return Err(SessionError::Unsupported(u32::try_from(v).unwrap_or(u32::MAX))),
         None => return Err(SessionError::Corrupt(String::from("missing schema_version"))),
     }

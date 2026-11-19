@@ -169,7 +169,7 @@ impl SurfaceElasticState {
         ui.horizontal(|ui| {
             ui.label("3D Colour:");
             egui::ComboBox::from_id_salt("surf_3d_color").selected_text(self.color_mode.label()).show_ui(ui, |ui| {
-                for cm in SurfaceColor3d::ALL {
+                for cm in SurfaceColor3d::NON_SPECTRAL {
                     if ui.selectable_value(&mut self.color_mode, cm, cm.label()).changed() {
                         need_resync = true;
                     }

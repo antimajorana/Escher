@@ -16,7 +16,6 @@ use crate::atlas_tab::hyperbolic_view::DiskIsometry;
 use crate::backend::WallKindUi;
 use crate::canvas2d::Scene2D;
 use crate::defects_tab::DefectSubTab;
-use crate::mesh3d::Sheet3dColorMode;
 use crate::presets::PRESETS;
 use crate::theme::{StudioTheme, typography};
 
@@ -48,19 +47,20 @@ fn settled(app: &PapertillingApp) -> bool {
         NavTab::Surfaces => !app.surfaces.is_building() && !app.surfaces.elastic.is_busy(),
         NavTab::Defects => {
             let d = &app.defects;
-            let wants_spectral = matches!(
-                d.sheet_opts.color_mode,
-                Sheet3dColorMode::SpectralLdos | Sheet3dColorMode::SpectralCharge
-            );
-            let spectral_ok = (!d.inspectors.spectrum.expanded && !wants_spectral)
-                || d.error.is_some()
-                || (!d.inspectors.spectrum.is_busy()
-                    && (d.inspectors.spectrum.result.is_some() || d.inspectors.spectrum.last_error.is_some()));
-            app.preset_pending.is_none() && !d.is_busy() && !d.initializing && !d.view3d_dirty && spectral_ok
+            app.preset_pending.is_none() && !d.is_busy() && !d.initializing && !d.view3d_dirty
         }
         NavTab::Combine => {
             let c = &app.combine;
             app.preset_pending.is_none() && !c.is_initializing() && !c.is_building() && !c.view3d_dirty
+        }
+        NavTab::Analysis => {
+            let a = &app.analysis;
+            app.preset_pending.is_none()
+                && !app.defects.is_busy()
+                && !app.defects.initializing
+                && !a.is_busy()
+                && !a.view3d_dirty
+                && (a.spectrum.result.is_some() || a.spectrum.last_error.is_some())
         }
     }
 }
@@ -105,16 +105,25 @@ fn snapshot(app: &PapertillingApp) -> String {
         NavTab::Atlas => {
             let a = &app.atlas;
             format!(
-                "{:?} {} {:?} {:?} {:?} {} {} {:?} {} {} {:?} {:?} {} {:?} {:?}",
-                a.sub_tab, a.space3d.selected_sg, a.space3d.selected_net, a.space3d.selected_defect,
+                "{} {:?} {} {:?} {:?} {:?} {} {} {:?} {} {} {:?} {:?} {} {:?} {:?}",
+                a.pristine_only, a.sub_tab, a.space3d.selected_sg, a.space3d.selected_net, a.space3d.selected_defect,
                 (a.space3d.view.show_cell, a.space3d.view.show_axes, a.space3d.view.z_slice_range, a.space3d.view.depth_cue, a.space3d.view.picked),
                 a.hyperbolic.p, a.hyperbolic.q, a.hyperbolic.style, a.hyperbolic.layers,
                 a.hyperbolic.wedge_delta, a.hyperbolic.disk_proj, a.hyperbolic.pan, a.hyperbolic.disk_zoom,
                 a.hyperbolic.picked, a.hyperbolic.hovered
             )
         }
+        NavTab::Analysis => {
+            let a = &app.analysis;
+            format!(
+                "{:?} {:?} {:?} {} {}",
+                a.target, a.view_mode, a.spectrum.color_overlay,
+                a.spectrum.result.as_ref().map_or(0, |r| r.eigenvalues.len()),
+                app.defects.readout.title
+            )
+        }
     };
-    format!("{:?} {:?} {} rev={} | {tab}", app.active_tab, it.alias_key, it.group, app.gallery.revision())
+    format!("{:?} {:?} {:?} {:?} {:?} {} rev={} | {tab}", app.active_mode, app.lattices_view, app.defects_view, app.active_tab, it.alias_key, it.group, app.gallery.revision())
 }
 
 /// Hand-written expectations: tab, named key (`None`: not a named lattice / lattice kept) and ITA plane group.
@@ -129,7 +138,7 @@ const EXPECT: [(&str, NavTab, Option<&str>, &str); 15] = [
     ("Edge dislocation, triangular lattice", NavTab::Defects, Some("triangular"), "p6m"),
     ("Honeycomb +60 deg disclination", NavTab::Defects, Some("honeycomb"), "p6m"),
     ("Kagome twin wall Wb1", NavTab::Defects, Some("kagome"), "p6m"),
-    ("LDOS on a -60 deg honeycomb sheet", NavTab::Defects, Some("honeycomb"), "p6m"),
+    ("Analysis: -60 deg honeycomb eigenmodes", NavTab::Analysis, Some("honeycomb"), "p6m"),
     ("Combine: square dislocation dipole", NavTab::Combine, Some("square"), "p4m"),
     ("Combine: honeycomb 5-7 pair", NavTab::Combine, Some("honeycomb"), "p6m"),
     ("Atlas: rutile #136 screw dispiration", NavTab::Atlas, None, ""),
@@ -183,11 +192,15 @@ fn check_known_answers(name: &str, app: &PapertillingApp) {
             let w = &app.defects.catalogue.walls[0];
             assert!(w.kind == WallKindUi::TwinWb && w.id == "Wb1", "{name}\n{}", cat_dump());
         }
-        "LDOS on a -60 deg honeycomb sheet" => {
+        "Analysis: -60 deg honeycomb eigenmodes" => {
+            assert_eq!(app.active_mode, super::AppMode::Analysis);
+            assert_eq!(app.analysis.target, crate::analysis_mode::AnalysisTarget::SingleDefect);
             assert_eq!(disclin(2), (-60, Some(6)), "{name}\n{}", cat_dump());
-            let res = app.defects.inspectors.spectrum.result.as_ref().expect("spectrum computed");
+            let res = app.analysis.spectrum.result.as_ref().expect("spectrum computed");
             assert_eq!(res.ldos.len(), app.defects.last_crystal.pos.len(), "{name}: one LDOS value per site");
-            assert!(app.defects.inspectors.spectral_3d_for(app.defects.sheet_opts.color_mode).is_some(), "{name}: LDOS colours");
+            assert_eq!(app.analysis.spectrum.color_overlay, crate::analysis_mode::SpectrumColorOverlay::LdosMultiplet);
+            assert!(app.view3d.legend().is_some(), "{name}: 3D LDOS colorbar");
+            assert!(app.canvas2d.gauge_overlay().and_then(|o| o.legend.as_ref()).is_some(), "{name}: 2D LDOS colorbar");
         }
         "Combine: square dislocation dipole" => {
             let bs: Vec<[f64; 2]> = app.combine.specs.iter().map(|s| match s {
@@ -206,6 +219,8 @@ fn check_known_answers(name: &str, app: &PapertillingApp) {
             assert_eq!(angles, [60.0, -60.0], "{name}: +-360/6");
         }
         "Atlas: rutile #136 screw dispiration" => {
+            assert_eq!((app.active_mode, app.defects_view), (super::AppMode::Defects, super::DefectsView::AtlasDefects));
+            assert!(!app.atlas.pristine_only);
             let sp = &app.atlas.space3d;
             assert_eq!(
                 (app.atlas.sub_tab, sp.selected_sg, sp.selected_net, sp.selected_defect),
@@ -223,6 +238,8 @@ fn check_known_answers(name: &str, app: &PapertillingApp) {
             assert!(format!("{}", s.number) == "136" && !s.is_split, "{name}");
         }
         "Atlas: hyperbolic {7,3} tiling" => {
+            assert_eq!((app.active_mode, app.lattices_view), (super::AppMode::Lattices, super::LatticesView::NonEuclidean));
+            assert!(app.atlas.pristine_only);
             let hy = &app.atlas.hyperbolic;
             assert_eq!(
                 (app.atlas.sub_tab, hy.p, hy.q, hy.style, hy.layers, hy.wedge_delta, hy.disk_proj),
@@ -324,6 +341,11 @@ fn atlas_presets_build_their_scenes() {
 }
 
 #[test]
+fn analysis_presets_compute_spectral_ldos() {
+    check_tab(NavTab::Analysis);
+}
+
+#[test]
 fn preset_list_has_unique_names_descriptions_and_valid_lattices() {
     let app = PapertillingApp::new(false, String::from("test"), String::from("test"));
     assert!((12..=15).contains(&PRESETS.len()));
@@ -339,6 +361,9 @@ fn preset_list_has_unique_names_descriptions_and_valid_lattices() {
     }
     for tab in NavTab::ALL {
         assert!(PRESETS.iter().any(|p| p.tab() == tab), "{tab:?} has a preset");
+    }
+    for mode in super::AppMode::ALL {
+        assert!(PRESETS.iter().any(|p| p.mode() == mode), "{mode:?} has a preset");
     }
     assert_eq!(EXPECT.map(|e| e.0), PRESETS.iter().map(|p| p.name).collect::<Vec<_>>().as_slice(), "one expectation per preset");
 }

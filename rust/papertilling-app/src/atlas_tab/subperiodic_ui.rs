@@ -12,6 +12,7 @@ use crate::scene2d::{compute_bbox, CirclePrim, LinePrim, Scene2D, ScenePrimitive
 use crate::theme::ThemeTokens;
 
 pub struct SubperiodicPanelState {
+    pub pristine_only: bool,
     pub is_frieze: bool,
     pub dihedral: bool,
     pub rosette_n: usize,
@@ -30,6 +31,7 @@ impl Default for SubperiodicPanelState {
         let sym = FRIEZE_SYMBOLS[6]; // default p2mg (nonsymmorphic)
         let summary = analyze_frieze_group(sym).ok().map(|(s, _)| s);
         Self {
+            pristine_only: false,
             is_frieze: true,
             dihedral: true,
             rosette_n: 5,
@@ -46,6 +48,14 @@ impl Default for SubperiodicPanelState {
 }
 
 impl SubperiodicPanelState {
+    pub fn effective_rosette_defects(&self) -> (i32, bool) {
+        if self.pristine_only { (0, false) } else { (self.wedge_delta, self.mirror_wall) }
+    }
+
+    pub fn effective_frieze_defect(&self) -> FriezeDefect {
+        if self.pristine_only { FriezeDefect::None } else { self.defect }
+    }
+
     pub fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
         let mut dirty = false;
         ui.horizontal(|ui| {
@@ -63,14 +73,16 @@ impl SubperiodicPanelState {
                 ui.small("Order n:");
                 dirty |= ui.add(egui::Slider::new(&mut self.rosette_n, 2..=12)).changed();
             });
-            ui.horizontal(|ui| {
-                ui.small("Wedge Δn:");
-                for d in [-1, 0, 1] {
-                    dirty |= ui.selectable_value(&mut self.wedge_delta, d, format!("{d:+}")).changed();
+            if !self.pristine_only {
+                ui.horizontal(|ui| {
+                    ui.small("Wedge Δn:");
+                    for d in [-1, 0, 1] {
+                        dirty |= ui.selectable_value(&mut self.wedge_delta, d, format!("{d:+}")).changed();
+                    }
+                });
+                if self.dihedral {
+                    dirty |= ui.checkbox(&mut self.mirror_wall, "Mirror domain wall").changed();
                 }
-            });
-            if self.dihedral {
-                dirty |= ui.checkbox(&mut self.mirror_wall, "Mirror domain wall").changed();
             }
         } else {
             ui.horizontal_wrapped(|ui| {
@@ -92,12 +104,14 @@ impl SubperiodicPanelState {
                 dirty |= ui.selectable_value(&mut self.topology, FriezeTopology::Cylinder, "Cylinder").changed();
                 dirty |= ui.selectable_value(&mut self.topology, FriezeTopology::Mobius, "Möbius").changed();
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.small("Defect:");
-                dirty |= ui.selectable_value(&mut self.defect, FriezeDefect::None, "Pristine").changed();
-                dirty |= ui.selectable_value(&mut self.defect, FriezeDefect::HalfTurn180, "180° Twist").changed();
-                dirty |= ui.selectable_value(&mut self.defect, FriezeDefect::GlideDispiration, "Glide Disp.").changed();
-            });
+            if !self.pristine_only {
+                ui.horizontal_wrapped(|ui| {
+                    ui.small("Defect:");
+                    dirty |= ui.selectable_value(&mut self.defect, FriezeDefect::None, "Pristine").changed();
+                    dirty |= ui.selectable_value(&mut self.defect, FriezeDefect::HalfTurn180, "180° Twist").changed();
+                    dirty |= ui.selectable_value(&mut self.defect, FriezeDefect::GlideDispiration, "Glide Disp.").changed();
+                });
+            }
             ui.horizontal(|ui| {
                 ui.small("Cells:");
                 dirty |= ui.add(egui::Slider::new(&mut self.cells, 4..=20)).changed();
@@ -109,10 +123,13 @@ impl SubperiodicPanelState {
     pub fn show_inspector(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         if !self.is_frieze {
             ui.strong("0D Rosette Symmetry");
-            let r = build_rosette(self.dihedral, self.rosette_n, self.wedge_delta, self.mirror_wall);
+            let (wedge, wall) = self.effective_rosette_defects();
+            let r = build_rosette(self.dihedral, self.rosette_n, wedge, wall);
             ui.small(format!("Point group {} | |P| = {}", r.symbol, r.point_order));
             ui.small(format!("Abelianization Gᵃᵇ = {}", r.ab_label));
-            ui.small(format!("Wedge Δn = {:+} | Mirror wall = {}", self.wedge_delta, self.mirror_wall));
+            if !self.pristine_only {
+                ui.small(format!("Wedge Δn = {:+} | Mirror wall = {}", wedge, wall));
+            }
         } else {
             ui.strong("1D Frieze Cohomology & Quotient");
             if let Some(s) = &self.summary {
@@ -130,13 +147,23 @@ impl SubperiodicPanelState {
                     s.h2_label, s.ab_plus_label, s.ab_full_label
                 ));
             }
-            ui.small(format!("Topology: {:?} | Defect: {:?} | Cells: {}", self.topology, self.defect, self.cells));
+            if self.pristine_only {
+                ui.small(format!("Topology: {:?} | Cells: {}", self.topology, self.cells));
+            } else {
+                ui.small(format!(
+                    "Topology: {:?} | Defect: {:?} | Cells: {}",
+                    self.topology,
+                    self.effective_frieze_defect(),
+                    self.cells
+                ));
+            }
         }
     }
 
     pub fn build_scenes(&self) -> (Scene2D, GpuMeshData, String) {
         if !self.is_frieze {
-            let r = build_rosette(self.dihedral, self.rosette_n, self.wedge_delta, self.mirror_wall);
+            let (wedge, wall) = self.effective_rosette_defects();
+            let r = build_rosette(self.dihedral, self.rosette_n, wedge, wall);
             let lines: Vec<LinePrim> = r
                 .edges
                 .iter()
@@ -197,7 +224,7 @@ impl SubperiodicPanelState {
             (Scene2D::VectorScene { primitives: prim }, mesh, format!("0D Rosette {}", r.symbol))
         } else {
             let sym = FRIEZE_SYMBOLS[self.frieze_idx];
-            let patch = build_frieze_patch(sym, self.cells, self.topology, self.defect).unwrap();
+            let patch = build_frieze_patch(sym, self.cells, self.topology, self.effective_frieze_defect()).unwrap();
             let lines: Vec<LinePrim> = patch
                 .edges
                 .iter()

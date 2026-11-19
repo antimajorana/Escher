@@ -84,7 +84,7 @@ fn species_label(net: CanonicalNet3d, kind: u8) -> &'static str {
 
 impl Space3dPanelState {
     fn net_key(&self) -> (CanonicalNet3d, LineDefect3d) {
-        (self.selected_net, self.selected_defect)
+        (self.selected_net, self.effective_defect())
     }
 
     /// The net of the current (net, defect) choice, rebuilt (and the pick cleared) when the choice changed.
@@ -99,7 +99,7 @@ impl Space3dPanelState {
     }
 
     pub fn frame(&self) -> NetFrame {
-        net_frame(self.selected_net, self.selected_defect)
+        net_frame(self.selected_net, self.effective_defect())
     }
 
     pub fn visible_mask(&mut self) -> Vec<bool> {

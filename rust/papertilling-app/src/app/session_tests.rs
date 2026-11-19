@@ -187,6 +187,8 @@ fn files_corrupt_empty_foreign_or_missing_restore_nothing_and_exit_save_respects
     good.gallery.params.clear();
     good.recent.clear();
     good.combine = None;
+    good.active_mode = Some(String::from("Lattices"));
+    good.lattices_view = Some(String::from("NonEuclidean"));
     good.active_tab = Some(String::from("Atlas"));
     session::save_session_file(&path, &good).unwrap();
     let mut c = app();
@@ -240,6 +242,8 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
 
     // 2) Restoring onto Defects runs its background build and applies all defect settings.
     let mut st_defects = st_gallery;
+    st_defects.active_mode = Some(String::from("Defects"));
+    st_defects.defects_view = Some(String::from("Catalogue2D"));
     st_defects.active_tab = Some(String::from("Defects"));
     let mut d_app = app();
     let d_init_item = d_app.gallery.active_item().clone();
@@ -287,6 +291,8 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
     assert!(c_app.combine.last_build.refused.is_none() && c_app.view3d.has_geometry());
 
     // 4) Switching lattice while pending_combine was deferred drops the stale Combine setup on capture.
+    st_comb.active_mode = Some(String::from("Lattices"));
+    st_comb.lattices_view = Some(String::from("Plane2D"));
     st_comb.active_tab = Some(String::from("Gallery"));
     let mut p_app = app();
     assert!(p_app.apply_session(&st_comb, None).is_empty());
@@ -295,20 +301,18 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
     p_app.select_lattice_and_sync(oblique);
     assert!(p_app.capture_session().combine.is_none());
 
-    // 5) Spectral 3D colour modes reset to FaceRingSize with cleared overlays and a note.
+    // 5) Spectral 3D colour modes on Defects reset to FaceRingSize with cleared overlays and a note.
     for mode in ["SpectralLdos", "SpectralCharge"] {
         let mut s_app = app();
-        s_app.defects.inspectors.spectrum.color_overlay = crate::spectrum_worker::SpectrumColorOverlay::LdosMultiplet;
-        s_app.defects.inspectors.overlay_mode = crate::canvas2d::gauge_overlay::CrystalOverlayMode::SpectralLdos;
+        s_app.defects.inspectors.overlay_mode = crate::canvas2d::gauge_overlay::CrystalOverlayMode::BondStretchStrain;
         let mut st_spec = s_app.capture_session();
         st_spec.defects.color_mode = Some(String::from(mode));
         let notes = s_app.apply_session(&st_spec, None);
         assert!(
-            notes.iter().any(|n| n.contains("3D spectral colouring reset to ring size")),
+            notes.iter().any(|n| n.contains("3D spectral colouring reset to ring size (moved to Analysis mode)")),
             "{mode}: {notes:?}"
         );
         assert_eq!(s_app.defects.sheet_opts.color_mode, crate::mesh3d::Sheet3dColorMode::FaceRingSize);
-        assert_eq!(s_app.defects.inspectors.spectrum.color_overlay, crate::spectrum_worker::SpectrumColorOverlay::None);
         assert_eq!(s_app.defects.inspectors.overlay_mode, crate::canvas2d::gauge_overlay::CrystalOverlayMode::Standard);
     }
 
@@ -356,4 +360,73 @@ fn top_bar_offers_save_and_open_session() {
     // present, but never clicked here: they open native file dialogs
     assert_eq!(harness.get_all_by_label("Save Session As...").count(), 1);
     assert_eq!(harness.get_all_by_label("Open Session...").count(), 1);
+}
+
+#[test]
+fn v1_session_migrates_to_v2_on_load_saves_v2_on_exit_and_leaves_v99_untouched() {
+    use super::modes::{AppMode, DefectsView, LatticesView};
+    use crate::analysis_mode::AnalysisTarget;
+    use crate::atlas_tab::AtlasSubTab;
+
+    let dir = crate::session::tests::TempDir::new();
+    let path = dir.0.join(session::SESSION_FILENAME);
+
+    // 1) v1 Defects + SpectralLdos migrates to AppMode::Defects with FaceRingSize and explicit note, then writes v2 on exit.
+    let v1_def = r#"{
+        "schema_version": 1,
+        "active_tab": "Defects",
+        "defects": { "kind": "Dislocations", "color_mode": "SpectralLdos" }
+    }"#;
+    std::fs::write(&path, v1_def).unwrap();
+    let mut a = app();
+    a.session.path = Some(path.clone());
+    a.load_session_at_start(&egui::Context::default());
+    assert_eq!((a.active_mode, a.defects_view, a.active_tab), (AppMode::Defects, DefectsView::Catalogue2D, NavTab::Defects));
+    assert_eq!(a.defects.sheet_opts.color_mode, crate::mesh3d::Sheet3dColorMode::FaceRingSize);
+    assert!(a.export_status.contains("moved to Analysis mode"), "{}", a.export_status);
+    assert!(a.save_session_on_exit());
+    let (saved_v2, _) = session::load_session_file(&path).unwrap().unwrap();
+    assert_eq!(saved_v2.schema_version, 2);
+    assert_eq!(saved_v2.active_mode.as_deref(), Some("Defects"));
+    assert_eq!(saved_v2.defects_view.as_deref(), Some("Catalogue2D"));
+
+    // 2) v1 Atlas + HyperbolicH2 vs SpaceGroups3D maps into the right pristine Lattices sub-views.
+    let v1_hyp = r#"{"schema_version": 1, "active_tab": "Atlas", "atlas_sub_view": "HyperbolicH2"}"#;
+    let st_hyp = session::parse_session(v1_hyp).unwrap().0;
+    let mut h = app();
+    assert!(h.apply_session(&st_hyp, None).is_empty());
+    assert_eq!((h.active_mode, h.lattices_view), (AppMode::Lattices, LatticesView::NonEuclidean));
+    assert!(h.atlas.pristine_only);
+    assert_eq!(h.atlas.sub_tab, AtlasSubTab::HyperbolicH2);
+
+    let v1_3d = r#"{"schema_version": 1, "active_tab": "Atlas", "atlas_sub_view": "SpaceGroups3D"}"#;
+    let st_3d = session::parse_session(v1_3d).unwrap().0;
+    assert!(h.apply_session(&st_3d, None).is_empty());
+    assert_eq!((h.active_mode, h.lattices_view), (AppMode::Lattices, LatticesView::ThreeDAndSubperiodic));
+    assert!(h.atlas.pristine_only);
+    assert_eq!(h.atlas.sub_tab, AtlasSubTab::SpaceGroups3D);
+
+    // 3) v2 Analysis mode saves and restores target cleanly without stale spectral data.
+    let mut an_src = app();
+    an_src.analysis.select_target(AnalysisTarget::PlaneLattice);
+    an_src.analysis.view_mode = crate::mesh3d::DefectViewMode::Sheet3D;
+    an_src.switch_mode(AppMode::Analysis);
+    let st_an = an_src.capture_session();
+    assert_eq!(st_an.schema_version, 2);
+    let mut an_dst = app();
+    assert!(an_dst.apply_session(&st_an, None).is_empty());
+    assert_eq!((an_dst.active_mode, an_dst.active_tab), (AppMode::Analysis, NavTab::Analysis));
+    assert_eq!(an_dst.analysis.target, AnalysisTarget::PlaneLattice);
+    assert_eq!(an_dst.analysis.view_mode, crate::mesh3d::DefectViewMode::Sheet3D);
+    assert!(an_dst.analysis.spectrum.result.is_none() && !an_dst.analysis.spectrum.is_busy());
+
+    // 4) Future schema v99 is refused and never overwritten on exit.
+    let v99 = r#"{"schema_version": 99, "theme": "Studio"}"#;
+    std::fs::write(&path, v99).unwrap();
+    let mut f = app();
+    f.session.path = Some(path.clone());
+    f.load_session_at_start(&egui::Context::default());
+    assert!(!f.session.exit_save_allowed);
+    assert!(!f.save_session_on_exit());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), v99);
 }

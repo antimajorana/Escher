@@ -42,19 +42,9 @@ impl DefectsTabState {
             );
         }
 
-        let (circ_dirty, ov_dirty, spec_recomp, spec_col) =
-            self.inspectors.show_controls_ui(ui, "def_insp", 0, true, tokens);
-        if spec_col {
-            self.inspectors.sync_3d_from_spectrum(&mut self.sheet_opts);
-            self.view3d_dirty = true;
-        }
+        let (circ_dirty, ov_dirty) = self.inspectors.show_controls_ui(ui, "def_insp", 0, tokens);
         if circ_dirty || ov_dirty {
             self.refresh_and_sync_inspectors(active_item, canvas);
-        }
-        if spec_recomp && !self.last_crystal.pos.is_empty() {
-            self.inspectors
-                .spectrum
-                .submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
         }
         crate::bieberbach_ui::show_bieberbach_inspector_section(
             ui,

@@ -8,7 +8,10 @@
 use papertilling_core::hyperbolic::HyperbolicStyle;
 use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d};
 
+use crate::analysis_mode::{AnalysisTarget, SpectrumColorOverlay};
+#[cfg(test)]
 use crate::app::NavTab;
+use crate::app::AppMode;
 use crate::backend::{CatalogueRuleUi, SurfaceTargetUi};
 use crate::defects_tab::DefectSubTab;
 use crate::live_ops_ao::Defect2dMode;
@@ -61,6 +64,15 @@ pub enum PresetSettings {
         colour: Sheet3dColorMode,
     },
     Combine { pins: CombinePins, view: DefectViewMode },
+    Analysis {
+        target: AnalysisTarget,
+        defect_sub_tab: DefectSubTab,
+        defect_index: usize,
+        radius: f64,
+        draw: Defect2dMode,
+        view: DefectViewMode,
+        overlay: SpectrumColorOverlay,
+    },
     Atlas(AtlasScene),
 }
 
@@ -73,12 +85,24 @@ pub struct Preset {
 }
 
 impl Preset {
+    pub fn mode(&self) -> AppMode {
+        match self.settings {
+            PresetSettings::Gallery { .. } | PresetSettings::Surfaces { .. } => AppMode::Lattices,
+            PresetSettings::Defects { .. } | PresetSettings::Combine { .. } => AppMode::Defects,
+            PresetSettings::Analysis { .. } => AppMode::Analysis,
+            PresetSettings::Atlas(AtlasScene::SpaceGroup { .. }) => AppMode::Defects,
+            PresetSettings::Atlas(AtlasScene::Hyperbolic { .. }) => AppMode::Lattices,
+        }
+    }
+
+    #[cfg(test)]
     pub fn tab(&self) -> NavTab {
         match self.settings {
             PresetSettings::Gallery { .. } => NavTab::Gallery,
             PresetSettings::Surfaces { .. } => NavTab::Surfaces,
             PresetSettings::Defects { .. } => NavTab::Defects,
             PresetSettings::Combine { .. } => NavTab::Combine,
+            PresetSettings::Analysis { .. } => NavTab::Analysis,
             PresetSettings::Atlas(_) => NavTab::Atlas,
         }
     }
@@ -158,10 +182,18 @@ pub const PRESETS: &[Preset] = &[
         settings: defect(DefectSubTab::Walls, 0, DefectViewMode::Split2D3D, Sheet3dColorMode::FaceRingSize),
     },
     Preset {
-        name: "LDOS on a -60 deg honeycomb sheet",
-        description: "A -60 deg disclination at a hexagon centre: buckled 3D sheet coloured by the local density of states.",
+        name: "Analysis: -60 deg honeycomb eigenmodes",
+        description: "A -60 deg disclination at a hexagon centre in 3. Analysis mode with multiplet eigenmode coloring.",
         lattice: named("honeycomb"),
-        settings: defect(DefectSubTab::Disclinations, 2, DefectViewMode::Sheet3D, Sheet3dColorMode::SpectralLdos),
+        settings: PresetSettings::Analysis {
+            target: AnalysisTarget::SingleDefect,
+            defect_sub_tab: DefectSubTab::Disclinations,
+            defect_index: 2,
+            radius: 4.4,
+            draw: Defect2dMode::RelaxedDrawing,
+            view: DefectViewMode::Sheet3D,
+            overlay: SpectrumColorOverlay::LdosMultiplet,
+        },
     },
     Preset {
         name: "Combine: square dislocation dipole",

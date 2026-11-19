@@ -30,7 +30,7 @@ impl PapertillingApp {
             return refuse("A 3D PNG export is still being written.");
         }
         if self.active_tab == NavTab::Gallery {
-            return refuse("Open Surfaces, Defects, Combine, or Atlas to export a 3D PNG.");
+            return refuse("Open Surfaces, Defects, Combine, Atlas, or Analysis to export a 3D PNG.");
         }
         // before the stale-view guards: a 2D-only view never clears view3d_dirty, so "wait" would never resolve
         if self.view3d.shown_view_size(pass_nr).is_none() {
@@ -38,9 +38,8 @@ impl PapertillingApp {
         }
         // a pending spectrum / relaxation would leave the previous result's colours and colorbar in the picture
         let pending_colours = match self.active_tab {
-            NavTab::Defects => self.defects.inspectors.spectrum.is_busy(),
-            NavTab::Combine => self.combine.inspectors.spectrum.is_busy(),
-            NavTab::Surfaces => self.surfaces.spectrum.is_busy() || self.surfaces.elastic.is_busy(),
+            NavTab::Surfaces => self.surfaces.elastic.is_busy(),
+            NavTab::Analysis => self.analysis.is_busy() || self.analysis_source_busy(),
             _ => false,
         };
         if pending_colours {
@@ -58,6 +57,9 @@ impl PapertillingApp {
                 return refuse("Finish moving pins and wait for the crystal build before exporting the 3D PNG.");
             }
             NavTab::Atlas if self.atlas.dirty => return refuse("Wait for the Atlas 3D scene to update before exporting the 3D PNG."),
+            NavTab::Analysis if self.analysis.view3d_dirty => {
+                return refuse("Wait for the 3D spectral view to update before exporting the 3D PNG.");
+            }
             _ => {}
         }
         if !self.view3d.has_geometry() {
@@ -88,6 +90,7 @@ impl PapertillingApp {
             NavTab::Defects => "defect_sheet.png",
             NavTab::Combine => "combined_sheet.png",
             NavTab::Atlas => "atlas_mesh.png",
+            NavTab::Analysis => "analysis_ldos.png",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export 3D view (PNG)")

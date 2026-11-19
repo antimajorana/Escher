@@ -11,6 +11,7 @@ use crate::scene2d::Scene2D;
 use crate::theme::ThemeTokens;
 
 pub struct Space3dPanelState {
+    pub pristine_only: bool,
     pub filter: String,
     pub selected_sg: u16,
     pub selected_net: CanonicalNet3d,
@@ -24,6 +25,7 @@ pub struct Space3dPanelState {
 impl Default for Space3dPanelState {
     fn default() -> Self {
         Self {
+            pristine_only: false,
             filter: String::new(),
             selected_sg: 136,
             selected_net: CanonicalNet3d::Rutile136,
@@ -36,6 +38,14 @@ impl Default for Space3dPanelState {
 }
 
 impl Space3dPanelState {
+    pub fn effective_defect(&self) -> LineDefect3d {
+        if self.pristine_only {
+            LineDefect3d::None
+        } else {
+            self.selected_defect
+        }
+    }
+
     pub fn ensure_cached(&mut self) {
         if self.cached_sg != self.selected_sg || self.summary.is_none() {
             self.cached_sg = self.selected_sg;
@@ -47,16 +57,22 @@ impl Space3dPanelState {
         let mut dirty = false;
         self.ensure_cached();
         ui.horizontal_wrapped(|ui| {
-            if ui.small_button("#123 P4/mmm (Pure 90°)").clicked() {
+            let lbl123 = if self.pristine_only { "#123 P4/mmm" } else { "#123 P4/mmm (Pure 90°)" };
+            if ui.small_button(lbl123).clicked() {
                 self.selected_sg = 123;
                 self.selected_net = CanonicalNet3d::Tetragonal123;
-                self.selected_defect = LineDefect3d::PureDisclination90_123;
+                if !self.pristine_only {
+                    self.selected_defect = LineDefect3d::PureDisclination90_123;
+                }
                 dirty = true;
             }
-            if ui.small_button("#136 P4_2/mnm (4_2 Screw-Disp.)").clicked() {
+            let lbl136 = if self.pristine_only { "#136 P4_2/mnm (Rutile)" } else { "#136 P4_2/mnm (4_2 Screw-Disp.)" };
+            if ui.small_button(lbl136).clicked() {
                 self.selected_sg = 136;
                 self.selected_net = CanonicalNet3d::Rutile136;
-                self.selected_defect = LineDefect3d::ScrewDispiration42_136;
+                if !self.pristine_only {
+                    self.selected_defect = LineDefect3d::ScrewDispiration42_136;
+                }
                 dirty = true;
             }
         });
@@ -84,7 +100,7 @@ impl Space3dPanelState {
         });
 
         ui.separator();
-        ui.strong("3D Crystal Net & Line Defect");
+        ui.strong(if self.pristine_only { "3D Crystal Net" } else { "3D Crystal Net & Line Defect" });
         egui::ComboBox::from_id_salt("atlas_3d_net")
             .selected_text(self.selected_net.label())
             .show_ui(ui, |ui| {
@@ -94,15 +110,17 @@ impl Space3dPanelState {
                     }
                 }
             });
-        egui::ComboBox::from_id_salt("atlas_3d_def")
-            .selected_text(self.selected_defect.label())
-            .show_ui(ui, |ui| {
-                for d in LineDefect3d::ALL {
-                    if ui.selectable_value(&mut self.selected_defect, d, d.label()).changed() {
-                        dirty = true;
+        if !self.pristine_only {
+            egui::ComboBox::from_id_salt("atlas_3d_def")
+                .selected_text(self.selected_defect.label())
+                .show_ui(ui, |ui| {
+                    for d in LineDefect3d::ALL {
+                        if ui.selectable_value(&mut self.selected_defect, d, d.label()).changed() {
+                            dirty = true;
+                        }
                     }
-                }
-            });
+                });
+        }
         self.show_view_controls(ui);
         dirty
     }
@@ -130,9 +148,11 @@ impl Space3dPanelState {
             }
         }
         ui.separator();
-        ui.strong("Active 3D Net & Defect");
+        ui.strong(if self.pristine_only { "Active 3D Crystal Net" } else { "Active 3D Net & Defect" });
         ui.small(format!("Net: {}", self.selected_net.label()));
-        ui.small(format!("Line defect: {}", self.selected_defect.label()));
+        if !self.pristine_only {
+            ui.small(format!("Line defect: {}", self.effective_defect().label()));
+        }
         self.show_pick_readout(ui, tokens);
     }
 

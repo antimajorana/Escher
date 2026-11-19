@@ -167,6 +167,11 @@ impl Canvas2D {
         &self.scene
     }
 
+    #[cfg(test)]
+    pub(crate) fn gauge_overlay(&self) -> Option<&CrystalOverlayData> {
+        self.gauge_overlay.as_ref()
+    }
+
     /// Export the scene as shown (overlays, pins, legend) to `path` (`.svg` / `.png`); a PNG is drawn at the
     /// integer pixel scale `png_scale` (1, 2 or 4: 1024, 2048 or 4096 px a side), the SVG ignores it.
     pub fn export_to_path(&self, path: &Path, png_scale: u32) -> Result<String, String> {

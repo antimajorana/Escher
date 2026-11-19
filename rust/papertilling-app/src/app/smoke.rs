@@ -10,18 +10,23 @@ impl PapertillingApp {
     fn smoke_stage_waiting(&self) -> bool {
         match self.active_tab {
             NavTab::Surfaces => {
-                self.surfaces.is_building() || self.surfaces.elastic.is_busy() || self.surfaces.spectrum.is_busy()
+                self.surfaces.is_building() || self.surfaces.elastic.is_busy()
             }
             NavTab::Defects => {
                 self.defects.is_busy()
                     || self.defects.initializing
                     || self.defects.view3d_dirty
-                    || self.defects.inspectors.spectrum.is_busy()
             }
             NavTab::Combine => {
                 self.combine.is_building()
                     || self.combine.view3d_dirty
-                    || self.combine.inspectors.spectrum.is_busy()
+            }
+            NavTab::Analysis => {
+                self.analysis.is_busy()
+                    || self.analysis.view3d_dirty
+                    || self.defects.is_busy()
+                    || (self.analysis.spectrum.last_error.is_none()
+                        && (self.analysis.spectrum.result.is_none() || self.view3d.legend().is_none()))
             }
             _ => false,
         }
@@ -32,14 +37,13 @@ impl PapertillingApp {
             NavTab::Surfaces => {
                 self.surfaces.has_refusal() || self.surfaces.elastic.last_error.is_some()
             }
-            NavTab::Defects => {
-                self.defects.error.is_some()
-                    || self.defects.inspectors.spectrum.last_error.is_some()
-            }
+            NavTab::Defects => self.defects.error.is_some(),
             NavTab::Combine => {
                 self.combine.init_error.is_some()
                     || self.combine.last_build.refused.is_some()
-                    || self.combine.inspectors.spectrum.last_error.is_some()
+            }
+            NavTab::Analysis => {
+                self.defects.error.is_some() || self.analysis.spectrum.last_error.is_some()
             }
             NavTab::Gallery | NavTab::Atlas => false,
         }
@@ -119,12 +123,13 @@ impl PapertillingApp {
             self.smoke_gen_at_switch = mesh_gen;
             match self.last_smoke_stage {
                 10 => {
+                    self.select_lattices_view(super::LatticesView::ThreeDAndSubperiodic);
                     self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::SpaceGroups3D;
                     self.atlas.dirty = true;
-                    self.switch_tab(NavTab::Atlas);
+                    self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
                 }
                 11 => {
-                    self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::HyperbolicH2;
+                    self.select_lattices_view(super::LatticesView::NonEuclidean);
                     self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
                 }
                 5 => {
@@ -155,14 +160,18 @@ impl PapertillingApp {
                     self.switch_tab(NavTab::Defects);
                 }
                 9 => {
-                    self.defects.sheet_opts.color_mode = crate::mesh3d::Sheet3dColorMode::SpectralLdos;
-                    self.defects.inspectors.on_sheet_color_changed(crate::mesh3d::Sheet3dColorMode::SpectralLdos);
-                    self.defects.inspectors.spectrum.submit_crystal(
-                        &self.defects.last_crystal,
-                        Some(&self.defects.last_sheet),
+                    self.analysis.select_target(crate::analysis_mode::AnalysisTarget::SingleDefect);
+                    self.analysis.view_mode = DefectViewMode::Sheet3D;
+                    self.analysis.spectrum.color_overlay = crate::analysis_mode::SpectrumColorOverlay::LdosMultiplet;
+                    self.switch_mode(super::AppMode::Analysis);
+                    let item = self.gallery.active_item().clone();
+                    self.analysis.submit_active_source(
+                        &item,
+                        &self.surfaces,
+                        &self.defects,
+                        &self.combine,
                         Some(ctx),
                     );
-                    self.defects.view3d_dirty = true;
                 }
                 stage => {
                     let (target, cover) = match stage {
@@ -233,7 +242,7 @@ mod tests {
             assert!(!step_with_mock_paint(&mut app, &ctx, true));
         }
         app.defects.wait_idle(&mut app.canvas2d);
-        app.defects.take_result(Err(String::from("injected stage 5 error")), &mut app.canvas2d);
+        app.defects.take_result(Err(String::from("injected stage 5 error")), Some(&mut app.canvas2d));
         app.defects.sync_view3d(&mut app.view3d);
         assert!(step_with_mock_paint(&mut app, &ctx, true));
         assert_eq!(outcome.load(Ordering::Acquire), 2);

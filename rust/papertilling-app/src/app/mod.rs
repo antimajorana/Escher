@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicU8;
 use papertilling_core::types::{Cell2D, Frame2D, Recipe};
 
 use crate::aliases::LatticeAliasKey;
+use crate::analysis_mode::AnalysisModeState;
 use crate::backend::{AppBackend, CatalogueItemUi, SurfaceTargetUi};
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::combine::CombineTabState;
@@ -14,6 +15,7 @@ use crate::theme::StudioTheme;
 use crate::view3d::{OffscreenGpuContext, View3dState};
 
 mod export3d;
+mod modes;
 mod preset_apply;
 #[cfg(test)]
 mod preset_tests;
@@ -22,40 +24,14 @@ mod export3d_tests;
 #[cfg(test)]
 mod rename_tests;
 pub(crate) mod session_hooks;
+mod session_migrate;
 #[cfg(test)]
 mod session_tests;
 mod smoke;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NavTab {
-    Gallery,
-    Surfaces,
-    Defects,
-    Combine,
-    Atlas,
-}
-
-impl NavTab {
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Gallery,
-        Self::Surfaces,
-        Self::Defects,
-        Self::Combine,
-        Self::Atlas,
-    ];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Gallery => "Gallery (17 Groups & 21 Named)",
-            Self::Surfaces => "Surfaces (2D Net + 3D)",
-            Self::Defects => "Defects (T, D, Wa-Wd)",
-            Self::Combine => "Combine (Live Fusion & Cores)",
-            Self::Atlas => "Atlas (0D–3D & H²)",
-        }
-    }
-}
+pub use modes::{AppMode, DefectsView, LatticesView, NavTab};
 
 /// What the Defects and Combine tabs were built for: the lattice and its (slider-tuned) recipe.
 type ItemKey = (LatticeAliasKey, String, Recipe, Frame2D);
@@ -103,6 +79,9 @@ pub struct PapertillingApp {
     smoke_outcome: Arc<AtomicU8>,
     adapter_name: String,
     pub(crate) backend_name: String,
+    pub(crate) active_mode: AppMode,
+    pub(crate) lattices_view: LatticesView,
+    pub(crate) defects_view: DefectsView,
     pub(crate) active_tab: NavTab,
     pub(crate) export_status: String,
     /// Pixel scale of a 2D PNG export (1, 2 or 4: 1024, 2048 or 4096 px a side), chosen in the Export menu.
@@ -127,6 +106,7 @@ pub struct PapertillingApp {
     pub(crate) defects: DefectsTabState,
     pub(crate) combine: CombineTabState,
     pub(crate) atlas: crate::atlas_tab::AtlasTabState,
+    pub(crate) analysis: AnalysisModeState,
     pub(crate) switcher: crate::ui::lattice_switcher::LatticeSwitcher,
     /// Follow-up work of the last preset waiting on a tab's background worker (Combine pins or Defects spectrum).
     pub(crate) preset_pending: Option<preset_apply::PendingPreset>,
@@ -154,17 +134,28 @@ impl PapertillingApp {
         let defects = DefectsTabState::new(gallery.active_item(), &backend);
         let combine = CombineTabState::new(gallery.active_item(), &backend);
         let atlas = crate::atlas_tab::AtlasTabState::new();
+        let analysis = AnalysisModeState::new();
 
-        let active_tab = if smoke_test {
+        let (active_mode, lattices_view, defects_view, active_tab) = if smoke_test {
             surfaces.activate_and_sync(
                 gallery.active_item(),
                 &backend,
                 &mut canvas2d,
                 &mut view3d,
             );
-            NavTab::Surfaces
+            (
+                AppMode::Lattices,
+                LatticesView::Manifolds,
+                DefectsView::default(),
+                NavTab::Surfaces,
+            )
         } else {
-            NavTab::Gallery
+            (
+                AppMode::Lattices,
+                LatticesView::Plane2D,
+                DefectsView::default(),
+                NavTab::Gallery,
+            )
         };
 
         Self {
@@ -179,6 +170,9 @@ impl PapertillingApp {
             smoke_outcome: Arc::new(AtomicU8::new(0)),
             adapter_name,
             backend_name,
+            active_mode,
+            lattices_view,
+            defects_view,
             active_tab,
             export_status: String::from("Ready (SVG / high-DPI PNG)"),
             png_scale: 2,
@@ -200,6 +194,7 @@ impl PapertillingApp {
             defects,
             combine,
             atlas,
+            analysis,
             switcher: Default::default(),
             preset_pending: None,
             session: session_hooks::SessionHost::for_mode(smoke_test),
@@ -273,57 +268,11 @@ impl PapertillingApp {
             NavTab::Defects | NavTab::Combine => {}
             // the Gallery redraw above replaced the Atlas 2D scene: restore it
             NavTab::Atlas => self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d),
-        }
-    }
-
-    pub(crate) fn switch_tab(&mut self, tab: NavTab) {
-        if self.active_tab == tab {
-            return;
-        }
-        // a background parameter move still pending is applied now, so the new tab gets the final lattice once
-        self.gallery.finish_pending_retune(&mut self.canvas2d);
-        self.active_tab = tab;
-        match tab {
-            NavTab::Gallery => {
-                self.gallery
-                    .sync_canvas(&self.backend, &mut self.canvas2d, true);
-            }
-            NavTab::Surfaces => {
-                self.surfaces.activate_and_sync(
-                    self.gallery.active_item(),
-                    &self.backend,
-                    &mut self.canvas2d,
-                    &mut self.view3d,
-                );
-            }
-            NavTab::Defects => {
-                let item = self.gallery.active_item().clone();
-                if item_key(&item) == self.defects_seen {
-                    self.defects
-                        .rebuild_crystal(&item, &self.backend, &mut self.canvas2d, true);
-                } else {
-                    self.defects_seen = item_key(&item);
-                    self.defects
-                        .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
-                }
-                self.defects.sync_view3d(&mut self.view3d);
-            }
-            NavTab::Combine => {
-                let item = self.gallery.active_item().clone();
-                if !self.apply_pending_combine() {
-                    if item_key(&item) == self.combine_seen {
-                        self.combine.ensure_compared(&item, &self.backend);
-                        self.combine.sync_to_canvas(&item, &mut self.canvas2d, true);
-                    } else {
-                        self.combine_seen = item_key(&item);
-                        self.combine
-                            .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
-                    }
-                    self.combine.sync_view3d(&item, &mut self.view3d);
-                }
-            }
-            NavTab::Atlas => {
-                self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
+            NavTab::Analysis => {
+                self.analysis.reset_transient_for_session();
+                self.ensure_analysis_sources_synced();
+                self.analysis.sync_canvas(&self.surfaces, &self.defects, &self.combine, &mut self.canvas2d);
+                self.analysis.sync_view3d(&self.surfaces, &self.defects, &self.combine, &mut self.view3d);
             }
         }
     }
@@ -357,12 +306,17 @@ impl PapertillingApp {
                 String::from("Finish moving the pins and wait for the crystal build before exporting.");
             return;
         }
+        if self.active_tab == NavTab::Analysis && (self.analysis.is_busy() || self.analysis_source_busy()) {
+            self.export_status = String::from("Wait for the spectrum or source build before exporting.");
+            return;
+        }
         let default_name = match self.active_tab {
             NavTab::Gallery => "lattice_gallery.svg",
             NavTab::Surfaces => "surface_net.svg",
             NavTab::Defects => "defect_crystal.svg",
             NavTab::Combine => "combined_defects.svg",
             NavTab::Atlas => "atlas_scene.svg",
+            NavTab::Analysis => "analysis_spectrum.svg",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 2D scene (SVG or PNG)")
@@ -387,7 +341,11 @@ impl PapertillingApp {
         self.finish_gallery_moves();
         if self.active_tab == NavTab::Gallery {
             self.export_status =
-                String::from("Open Surfaces, Defects, or Combine to export a 3D .obj mesh.");
+                String::from("Open Surfaces, Defects, Combine, Atlas, or Analysis to export a 3D .obj mesh.");
+            return;
+        }
+        if self.active_tab == NavTab::Analysis && (self.analysis.is_busy() || self.analysis_source_busy()) {
+            self.export_status = String::from("Wait for the spectrum or source build before exporting .obj.");
             return;
         }
         if self.active_tab == NavTab::Defects && self.defects.is_busy() {
@@ -411,6 +369,7 @@ impl PapertillingApp {
             NavTab::Defects => "defect_sheet.obj",
             NavTab::Combine => "combined_sheet.obj",
             NavTab::Atlas => "atlas_mesh.obj",
+            NavTab::Analysis => "analysis_mesh.obj",
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 3D mesh (.obj)")
@@ -423,6 +382,13 @@ impl PapertillingApp {
                 NavTab::Defects => self.defects.export_active_obj(&path),
                 NavTab::Combine => self.combine.export_active_obj(self.gallery.active_item(), &path),
                 NavTab::Atlas => self.atlas.export_active_obj(&path, &self.view3d),
+                NavTab::Analysis => self.analysis.export_active_obj(
+                    self.gallery.active_item(),
+                    &self.surfaces,
+                    &self.defects,
+                    &self.combine,
+                    &path,
+                ),
             };
             self.export_status = match res {
                 Ok(msg) => msg,
@@ -457,6 +423,10 @@ impl PapertillingApp {
             }
             // the renamed Gallery cell was redrawn into the shared canvas: restore the Atlas scene
             NavTab::Atlas => self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d),
+            NavTab::Analysis => {
+                self.analysis.sync_canvas(&self.surfaces, &self.defects, &self.combine, &mut self.canvas2d);
+                self.analysis.sync_view3d(&self.surfaces, &self.defects, &self.combine, &mut self.view3d);
+            }
         }
     }
 }

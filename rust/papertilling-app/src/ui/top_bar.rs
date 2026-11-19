@@ -1,4 +1,4 @@
-use crate::app::{NavTab, PapertillingApp};
+use crate::app::{AppMode, NavTab, PapertillingApp};
 
 impl PapertillingApp {
     pub(crate) fn show_top_bar(&mut self, ui: &mut egui::Ui) {
@@ -6,12 +6,12 @@ impl PapertillingApp {
             ui.horizontal_wrapped(|ui| {
                 ui.strong(format!("papertilling {}", papertilling_core::VERSION));
                 ui.separator();
-                for tab in NavTab::ALL {
+                for mode in AppMode::ALL {
                     if ui
-                        .selectable_label(self.active_tab == tab, tab.label())
+                        .selectable_label(self.active_mode == mode, mode.label())
                         .clicked()
                     {
-                        self.switch_tab(tab);
+                        self.switch_mode(mode);
                     }
                 }
                 ui.separator();
@@ -106,6 +106,8 @@ impl PapertillingApp {
                     self.right_inspector_open = !self.right_inspector_open;
                 }
             });
+            ui.separator();
+            self.show_sub_nav_bar(ui);
         });
         #[cfg(test)]
         {
