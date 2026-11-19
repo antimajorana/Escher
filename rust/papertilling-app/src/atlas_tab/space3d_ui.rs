@@ -1,5 +1,8 @@
-//! All 230 3D Space Groups (`73 symmorphic + 157 nonsymmorphic`), canonical 3D crystal nets,
-//! and `#123 P4/mmm` vs `#136 P4_2/mnm` forced `4_2` screw-dispiration visualizer.
+//! All 230 3D Space Groups (`73 symmorphic + 157 nonsymmorphic`) and canonical 3D crystal nets.
+//!
+//! C1: the line-defect picker (screw, wedge, dispiration) is hidden and every net is drawn pristine, because the
+//! current construction is geometrically wrong (off-centre block, a wedge that removes nothing, zero-length bonds,
+//! a seam that is never re-glued). The selection and the core code stay until a real cut-and-reglue exists.
 
 use papertilling_core::bieberbach::BieberbachSummary;
 use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d};
@@ -38,12 +41,9 @@ impl Default for Space3dPanelState {
 }
 
 impl Space3dPanelState {
+    /// The line defect drawn: always none while the 3D line defects are hidden (C1; `selected_defect` is kept).
     pub fn effective_defect(&self) -> LineDefect3d {
-        if self.pristine_only {
-            LineDefect3d::None
-        } else {
-            self.selected_defect
-        }
+        LineDefect3d::None
     }
 
     pub fn ensure_cached(&mut self) {
@@ -57,8 +57,7 @@ impl Space3dPanelState {
         let mut dirty = false;
         self.ensure_cached();
         ui.horizontal_wrapped(|ui| {
-            let lbl123 = if self.pristine_only { "#123 P4/mmm" } else { "#123 P4/mmm (Pure 90°)" };
-            if ui.small_button(lbl123).clicked() {
+            if ui.small_button("#123 P4/mmm").clicked() {
                 self.selected_sg = 123;
                 self.selected_net = CanonicalNet3d::Tetragonal123;
                 if !self.pristine_only {
@@ -66,8 +65,7 @@ impl Space3dPanelState {
                 }
                 dirty = true;
             }
-            let lbl136 = if self.pristine_only { "#136 P4_2/mnm (Rutile)" } else { "#136 P4_2/mnm (4_2 Screw-Disp.)" };
-            if ui.small_button(lbl136).clicked() {
+            if ui.small_button("#136 P4_2/mnm (Rutile)").clicked() {
                 self.selected_sg = 136;
                 self.selected_net = CanonicalNet3d::Rutile136;
                 if !self.pristine_only {
@@ -100,7 +98,7 @@ impl Space3dPanelState {
         });
 
         ui.separator();
-        ui.strong(if self.pristine_only { "3D Crystal Net" } else { "3D Crystal Net & Line Defect" });
+        ui.strong("3D Crystal Net");
         egui::ComboBox::from_id_salt("atlas_3d_net")
             .selected_text(self.selected_net.label())
             .show_ui(ui, |ui| {
@@ -111,16 +109,9 @@ impl Space3dPanelState {
                 }
             });
         if !self.pristine_only {
-            egui::ComboBox::from_id_salt("atlas_3d_def")
-                .selected_text(self.selected_defect.label())
-                .show_ui(ui, |ui| {
-                    for d in LineDefect3d::ALL {
-                        if ui.selectable_value(&mut self.selected_defect, d, d.label()).changed() {
-                            dirty = true;
-                        }
-                    }
-                });
+            ui.small("3D line defects are hidden until a real cut-and-reglue exists; the net is drawn pristine.");
         }
+        dirty |= super::points3d_ui::show(ui, self);
         self.show_view_controls(ui);
         dirty
     }
@@ -148,10 +139,10 @@ impl Space3dPanelState {
             }
         }
         ui.separator();
-        ui.strong(if self.pristine_only { "Active 3D Crystal Net" } else { "Active 3D Net & Defect" });
+        ui.strong("Active 3D Crystal Net");
         ui.small(format!("Net: {}", self.selected_net.label()));
         if !self.pristine_only {
-            ui.small(format!("Line defect: {}", self.effective_defect().label()));
+            ui.small("Line defect: none (3D line defects are hidden)");
         }
         self.show_pick_readout(ui, tokens);
     }

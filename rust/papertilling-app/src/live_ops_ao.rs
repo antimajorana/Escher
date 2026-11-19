@@ -11,6 +11,10 @@ use crate::canvas2d::gauge_overlay::{CrystalOverlayData, CrystalOverlayMode, Pla
 use crate::canvas2d::overlay_scales::{bond_strain_overlay, perceptual_colorbar};
 use crate::mesh3d::sheet_colors::{rgba_u8, sequential_heat_rgba};
 
+#[cfg(test)]
+#[path = "live_ops_ao_tests.rs"]
+mod tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Defect2dMode {
     Raw,
@@ -20,7 +24,12 @@ pub enum Defect2dMode {
 }
 
 impl Defect2dMode {
-    pub const ALL: [Self; 3] = [Self::Raw, Self::RelaxedDrawing, Self::ElasticAoMetric];
+    /// The modes the UI offers. C1: the AO elastic view left the UI (it solves a Green-St Venant metric energy
+    /// with geometric weights, not Ariza-Ortiz elasticity, and a glued 2D wall has no isometric immersion in the
+    /// plane); its variant stays for session decoding, where it is migrated to `RelaxedDrawing` with a note.
+    pub const ALL: [Self; 2] = [Self::Raw, Self::RelaxedDrawing];
+    /// Every variant a saved session may name.
+    pub const DECODE: [Self; 3] = [Self::Raw, Self::RelaxedDrawing, Self::ElasticAoMetric];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -31,6 +40,7 @@ impl Defect2dMode {
     }
 }
 
+#[allow(dead_code)] // C1 hidden: the AO elastic view left the UI; the core solver is unchanged
 pub fn relax_crystal_ao_2d(crystal: &mut BuiltCrystal) -> Result<Elastic2DResult, String> {
     let res = relax_elastic_2d(crystal)?;
     if res.pos.len() == crystal.pos.len() {
@@ -40,6 +50,7 @@ pub fn relax_crystal_ao_2d(crystal: &mut BuiltCrystal) -> Result<Elastic2DResult
     Ok(res)
 }
 
+#[allow(dead_code)] // C1 hidden: the AO elastic view left the UI
 pub fn apply_combine_ao_mode(crystal: &mut BuiltCrystal, preview: bool, notes: &mut Vec<String>) {
     if preview {
         relax_preview(crystal, 8.0);

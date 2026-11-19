@@ -84,10 +84,13 @@ fn gcd(a: i32, b: i32) -> i32 {
 
 #[test]
 fn default_state_paints_the_torus_slab() {
+    // C1: the panel opens on a shown sub-row (Nanotubes); the hidden slab code is still reached internally
     let ctx = egui::Context::default();
-    let app = s4_app(None, &ctx);
+    let mut app = s4_app(None, &ctx);
+    assert_eq!(app.workbench.s4.sub, S4Sub::Nanotubes);
+    assert!(app.view3d.has_geometry(), "default S4 state paints a non-empty mesh");
+    enter_sub(&mut app, &ctx, S4Sub::Slabs);
     let p = &app.workbench.s4;
-    assert_eq!(p.sub, S4Sub::Slabs);
     assert!(p.error().is_none(), "{:?}", p.error());
     let s = p.slab.out.as_ref().expect("default slab built");
     assert_eq!((s.positions.len(), s.bonds.len(), s.boundary_sites.len()), (27, 72, 18));
@@ -243,7 +246,7 @@ fn invalid_inputs_are_refused_with_reasons() {
 
 #[test]
 fn s4_panel_state_survives_json_roundtrip() {
-    let mut p = Panel { sub: S4Sub::Platycosms, ..Default::default() };
+    let mut p = Panel { sub: S4Sub::Flakes, ..Default::default() };
     p.slab.kind = FlatSlabKind::MoebiusTube;
     p.slab.repeats = [4, 3, 3];
     p.platy.code = String::from("-a2");
@@ -262,7 +265,12 @@ fn s4_panel_state_survives_json_roundtrip() {
     let junk = serde_json::json!({"sub": "Nope", "slab": {"repeats": [99, 0, 2], "kind": "Bad"}, "tube": {"n": 500}, "platy": {"code": "zz"}});
     q.restore(&junk, &mut notes);
     assert_eq!(notes.len(), 3, "{notes:?}");
-    assert_eq!((q.sub, q.slab.repeats, q.tube.p.n, q.platy.code.as_str()), (S4Sub::Platycosms, [6, 1, 2], 12, "-a2"));
+    assert_eq!((q.sub, q.slab.repeats, q.tube.p.n, q.platy.code.as_str()), (S4Sub::Flakes, [6, 1, 2], 12, "-a2"));
+    // C1: a session saved on a hidden sub-row opens the default shown one, with a note
+    let mut notes = Vec::new();
+    q.restore(&serde_json::json!({"sub": "Platycosms"}), &mut notes);
+    assert_eq!(q.sub, S4Sub::Nanotubes);
+    assert!(notes.len() == 1 && notes[0].contains("hidden"), "{notes:?}");
 }
 
 #[test]
@@ -270,7 +278,10 @@ fn s4_subrows_quarantine_clean() {
     let mut h = harness();
     goto_lattices_view(&mut h, LatticesView::Flat3D);
     wait_until(&mut h, "S4", |a| !a.workbench_busy() && !a.workbench.dirty);
-    for s in S4Sub::ALL.into_iter().chain([S4Sub::Slabs]) {
+    for hidden in [S4Sub::Slabs, S4Sub::Platycosms] {
+        assert!(h.query_by_label(hidden.label()).is_none(), "C1: {hidden:?} is hidden");
+    }
+    for s in S4Sub::SHOWN.into_iter().chain([S4Sub::Nanotubes]) {
         h.get_by_label(s.label()).click();
         wait_until(&mut h, s.label(), |a| !a.workbench_busy() && !a.workbench.dirty);
         assert_eq!(h.state().workbench.s4.sub, s);
@@ -302,6 +313,7 @@ fn pilot_timing_heaviest_s4_jobs() {
 fn returning_to_the_built_inputs_drops_the_job_in_flight() {
     let ctx = egui::Context::default();
     let mut app = s4_app(None, &ctx);
+    enter_sub(&mut app, &ctx, S4Sub::Slabs); // C1: the panel opens on Nanotubes now
     let w = app.workbench.s4.built[S4Sub::Slabs.idx()].clone().expect("default slab built");
     app.workbench.s4.slab.repeats = [4, 3, 3];
     app.workbench_call(|wb, cx, _, _| wb.s4.submit(cx, None));

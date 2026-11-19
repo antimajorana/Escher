@@ -29,6 +29,7 @@ use snap::{centre_class_at, iso_rotation_about, same_mod_cell};
 pub enum CombineDrawMode {
     FastRelaxed,
     Raw,
+    #[allow(dead_code)] // C1 hidden: the AO elastic view left the UI
     ElasticAoMetric,
 }
 

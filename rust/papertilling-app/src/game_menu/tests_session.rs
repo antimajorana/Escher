@@ -57,9 +57,10 @@ fn s2_v2_without_deck_keeps_todays_navigation() {
         "analysis_target": "PlaneLattice", "analysis_view": "Sheet3D"}"#;
     let mut b = app();
     let notes = b.apply_session(&parse(analysis), None);
-    assert!(notes.is_empty(), "{notes:?}");
-    assert_eq!((b.active_mode, b.active_tab, b.analysis.target), (AppMode::Analysis, NavTab::Analysis, AnalysisTarget::PlaneLattice));
-    assert_eq!(b.deck.realm, Realm::AnalysisLab);
+    // C1: Analysis is postponed: the saved Analysis view opens Lattices (2D Plane) with one note
+    assert_eq!(notes, vec![String::from(super::ANALYSIS_POSTPONED_NOTE)]);
+    assert_eq!((b.active_mode, b.active_tab, b.analysis.target), (AppMode::Lattices, NavTab::Gallery, AnalysisTarget::PlaneLattice));
+    assert_eq!(b.deck.realm, Realm::Tilings);
     assert_eq!(b.deck.realm, b.current_realm());
 }
 

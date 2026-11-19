@@ -59,6 +59,7 @@ impl LayersPanelState {
                 }
             }
         });
+        dirty |= super::layers_growth::show(ui, self);
         self.ensure_cached();
         dirty
     }

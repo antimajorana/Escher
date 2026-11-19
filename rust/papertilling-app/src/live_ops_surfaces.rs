@@ -78,7 +78,15 @@ pub fn surface_table_name(target: SurfaceTargetUi) -> &'static str {
         SurfaceTargetUi::ProjectivePlane => "projective plane",
         SurfaceTargetUi::Genus2 => "genus 2",
         SurfaceTargetUi::Genus3 => "genus 3",
+        // not in Python's SURFACES (C1 pending targets; every build refuses before using the name)
+        SurfaceTargetUi::Open => "open patch",
+        SurfaceTargetUi::TorusHex => "torus (hexagonal domain)",
     }
+}
+
+/// The refusal of a C1 pending target (never approximated by another surface).
+fn pending_refusal(target: SurfaceTargetUi) -> String {
+    format!("NOT FOUND: {} is not yet available (C1 boundary conditions, not built yet)", target.label())
 }
 
 fn centre_filter(mode: CentreModeUi) -> Option<&'static str> {
@@ -121,6 +129,9 @@ pub fn build_surface_mesh(
     target: SurfaceTargetUi,
     params: &SurfaceBuildParamsUi,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
+    if target.is_pending() {
+        return Err(pending_refusal(target));
+    }
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
     let facts = symmetry_facts_of_cell(&item.group, &cell);
     if let Some(reason) = facts.impossible_reason(surface_table_name(target)) {
@@ -151,6 +162,7 @@ pub fn build_surface_mesh(
             let g = if target == SurfaceTargetUi::Genus2 { 2 } else { params.genus_g.max(3) as usize };
             genus_surface_with_options(&cell, g, [h.max(1), 0], [0, k.max(1)], None)
         }
+        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => return Err(pending_refusal(target)),
     }
     .map_err(verdict_message)?;
     let report = check_surface(&mesh);
@@ -165,6 +177,9 @@ pub fn build_surface_mesh_auto(
     centre_mode: CentreModeUi,
     genus_g: u32,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
+    if target.is_pending() {
+        return Err(pending_refusal(target));
+    }
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
     let facts = symmetry_facts_of_cell(&item.group, &cell);
     if let Some(reason) = facts.impossible_reason(surface_table_name(target)) {
@@ -196,6 +211,7 @@ pub fn build_surface_mesh_auto(
         }
         SurfaceTargetUi::Genus2 => default_genus_surface(&cell, 2),
         SurfaceTargetUi::Genus3 => default_genus_surface(&cell, genus_g.max(3) as usize),
+        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => return Err(pending_refusal(target)),
     }
     .map_err(verdict_message)?;
     let report = check_surface(&mesh);

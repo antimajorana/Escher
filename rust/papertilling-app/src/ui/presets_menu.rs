@@ -8,8 +8,9 @@ impl PapertillingApp {
         ui.menu_button("Presets", |ui| {
             let mut picked = None;
             let mut first_section = true;
-            for mode in AppMode::ALL {
-                let mut rows = PRESETS.iter().enumerate().filter(|(_, p)| p.mode() == mode).peekable();
+            for mode in AppMode::SHOWN {
+                let mut rows =
+                    PRESETS.iter().enumerate().filter(|(_, p)| p.shown() && p.mode() == mode).peekable();
                 if rows.peek().is_none() {
                     continue;
                 }

@@ -130,10 +130,7 @@ impl CombineTabState {
                 self.opts.draw_mode = CombineDrawMode::Raw;
                 dirty = true;
             }
-            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::ElasticAoMetric, "Elastic (AO metric)").clicked() {
-                self.opts.draw_mode = CombineDrawMode::ElasticAoMetric;
-                dirty = true;
-            }
+            // C1: the "Elastic (AO metric)" choice left the UI (see `live_ops_ao::Defect2dMode::ALL`)
         });
         if self.opts.draw_mode == CombineDrawMode::FastRelaxed
             && ui.checkbox(&mut self.opts.full_planar_repair, "Full Planar Repair").changed()

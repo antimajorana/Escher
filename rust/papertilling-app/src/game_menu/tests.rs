@@ -80,10 +80,17 @@ fn realm_table() {
     ];
     for (i, r) in Realm::ALL.into_iter().enumerate() {
         assert_eq!(r.number(), i + 1, "{r:?}");
-        assert_eq!(Realm::from_number(i + 1), Some(r));
         assert_eq!(r.app_mode(), modes[i], "{r:?}");
-        assert_eq!(r.next().prev(), r);
+        // C1: realm 6 (Analysis Lab) is hidden: key 6 maps to nothing, and Q / E walk the six shown realms
+        if r.is_shown() {
+            assert_eq!(Realm::from_number(i + 1), Some(r));
+            assert_eq!(r.next().prev(), r);
+        } else {
+            assert_eq!(Realm::from_number(i + 1), None);
+        }
     }
+    assert_eq!(Realm::SHOWN.len(), 6);
+    assert!(!Realm::SHOWN.contains(&Realm::AnalysisLab));
     assert_eq!(Realm::from_number(0), None);
     assert_eq!(Realm::from_number(8), None);
     assert_eq!(Realm::Geometries.prev(), Realm::PresetsIo);
@@ -104,6 +111,11 @@ fn every_workbench_sub_row_has_exactly_one_card_in_its_realm() {
         for (i, label) in labels.iter().enumerate() {
             let id = CardId::Wb(view, u8::try_from(i).unwrap());
             let hits: Vec<&Card> = all.iter().filter(|c| c.id == id).collect();
+            if view == WorkbenchView::S4Flat3d && i <= 1 {
+                // C1: 3D slabs and platycosms (3D-manifold embeddings) are hidden: no card
+                assert!(hits.is_empty(), "{view:?} row {i} ('{label}') is hidden");
+                continue;
+            }
             assert_eq!(hits.len(), 1, "{view:?} row {i} ('{label}'): exactly one card");
             let want = match view {
                 WorkbenchView::S2Defects | WorkbenchView::S3Detect => Realm::Forge,
@@ -131,7 +143,7 @@ fn lattices_card(v: LatticesView) -> CardId {
         LatticesView::ThreeDAndSubperiodic => CardId::AtlasPristine(AtlasSubTab::Layers80),
         LatticesView::NonEuclidean => CardId::HyperbolicAtlas,
         LatticesView::Manifolds => CardId::Surface(SurfaceTargetUi::Torus),
-        LatticesView::Flat3D => CardId::Wb(WorkbenchView::S4Flat3d, 0),
+        LatticesView::Flat3D => CardId::Wb(WorkbenchView::S4Flat3d, 2), // C1: rows 0-1 are hidden
         LatticesView::Curved2D => CardId::Wb(WorkbenchView::S5Curved2d, 0),
         LatticesView::Honeycombs3D => CardId::Wb(WorkbenchView::S6Honeycombs, 0),
     }
@@ -140,7 +152,7 @@ fn lattices_card(v: LatticesView) -> CardId {
 fn defects_card(v: DefectsView) -> CardId {
     match v {
         DefectsView::Catalogue2D => CardId::DefectCatalogue(DefectSubTab::Disclinations),
-        DefectsView::AtlasDefects => CardId::AtlasDefects(AtlasSubTab::SpaceGroups3D),
+        DefectsView::AtlasDefects => CardId::AtlasDefects(AtlasSubTab::HyperbolicH2), // C1: 3D line defects hidden
         DefectsView::CombineAndFuse => CardId::Combine,
         DefectsView::PointAndBoundary => CardId::Wb(WorkbenchView::S2Defects, 0),
         DefectsView::DetectFields => CardId::Wb(WorkbenchView::S3Detect, 0),
@@ -172,12 +184,16 @@ fn every_view_and_target_is_reachable() {
         frame(&mut a, &ctx);
         assert_eq!((a.active_mode, a.defects_view, a.active_tab), (AppMode::Defects, v, v.nav_tab()), "{id:?}");
     }
+    // C1: Analysis is postponed: no shown realm lists its cards, and equipping one (internal only) is refused
+    let before = (a.active_mode, a.active_tab);
     for t in AnalysisTarget::ALL {
         let id = CardId::Analysis(t);
-        assert_listed(&mut a, id);
+        for r in Realm::SHOWN {
+            assert!(a.deck_cards(r, 0, "").iter().all(|c| c.id != id), "{id:?} listed in {r:?}");
+        }
         a.deck_equip(id, &ctx);
         frame(&mut a, &ctx);
-        assert_eq!((a.active_mode, a.analysis.target), (AppMode::Analysis, t), "{id:?}");
+        assert_eq!((a.active_mode, a.active_tab), before, "{id:?} is refused");
     }
 }
 

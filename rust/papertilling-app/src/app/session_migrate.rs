@@ -1,4 +1,5 @@
-//! Session schema v1 -> v2 migration, Analysis mode restoration, and Defects restoration.
+//! Session schema v1 -> v2 migration, Analysis restoration (C1: a saved Analysis view restores to Lattices with a
+//! note, since Analysis is postponed), and Defects restoration.
 
 use crate::analysis_mode::AnalysisTarget;
 use crate::atlas_tab::AtlasSubTab;
@@ -54,7 +55,12 @@ impl PapertillingApp {
         if let Some(r) = s.radius.filter(|r| r.is_finite()) {
             d.radius = r.clamp(2.4, 8.0);
         }
-        match parse_named(&Defect2dMode::ALL, s.draw_mode.as_deref()) {
+        match parse_named(&Defect2dMode::DECODE, s.draw_mode.as_deref()) {
+            // C1: the AO elastic view left the UI; a saved one opens as the relaxed drawing
+            Some(Defect2dMode::ElasticAoMetric) => {
+                d.draw_mode = Defect2dMode::RelaxedDrawing;
+                notes.push(String::from("Elastic (AO metric) view removed; shown as Relaxed (drawing)"));
+            }
             Some(m) => d.draw_mode = m,
             None if s.draw_mode.is_some() => {
                 notes.push(String::from("unknown 2D drawing mode (kept current)"))
@@ -83,7 +89,7 @@ impl PapertillingApp {
                 if spectral {
                     d.inspectors.overlay_mode = crate::canvas2d::gauge_overlay::CrystalOverlayMode::Standard;
                     notes.push(String::from(
-                        "3D spectral colouring reset to ring size (moved to Analysis mode)",
+                        "3D spectral colouring reset to ring size (spectral views are postponed)",
                     ));
                 }
             }
@@ -150,7 +156,7 @@ impl PapertillingApp {
             match parse_named(&AppMode::ALL, st.active_mode.as_deref()) {
                 Some(AppMode::Lattices) => self.select_lattices_view(self.lattices_view),
                 Some(AppMode::Defects) => self.select_defects_view(self.defects_view),
-                Some(AppMode::Analysis) => self.switch_mode(AppMode::Analysis),
+                Some(AppMode::Analysis) => self.restore_postponed_analysis(notes),
                 None => {
                     notes.push(String::from("unknown mode (Gallery shown)"));
                     self.select_lattices_view(LatticesView::Plane2D);
@@ -168,7 +174,7 @@ impl PapertillingApp {
                 Some(NavTab::Surfaces) => self.select_lattices_view(LatticesView::Manifolds),
                 Some(NavTab::Defects) => self.select_defects_view(DefectsView::Catalogue2D),
                 Some(NavTab::Combine) => self.select_defects_view(DefectsView::CombineAndFuse),
-                Some(NavTab::Analysis) => self.switch_mode(AppMode::Analysis),
+                Some(NavTab::Analysis) => self.restore_postponed_analysis(notes),
                 // never written by a v1 app (the tab did not exist); listed because the match is exhaustive
                 Some(NavTab::Workbench) => self.select_lattices_view(LatticesView::Plane2D),
                 Some(NavTab::Atlas) => {
@@ -187,5 +193,12 @@ impl PapertillingApp {
             self.deck.resume_saved_realm = false;
         }
         self.deck.open = false;
+    }
+
+    /// C1: a session saved in Analysis opens the Lattices 2D Plane, with a note (the internal
+    /// `switch_mode(Analysis)` route still exists; no user input reaches it).
+    fn restore_postponed_analysis(&mut self, notes: &mut Vec<String>) {
+        notes.push(String::from(crate::game_menu::ANALYSIS_POSTPONED_NOTE));
+        self.select_lattices_view(LatticesView::Plane2D);
     }
 }

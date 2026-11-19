@@ -1,5 +1,6 @@
-//! Real native GPU smoke coverage: five surface states, the 3D sheet tabs, Analysis, the Atlas views and the
-//! three 3D workbench views (stages 0..=LAST_SMOKE_STAGE, one new painted non-empty mesh per stage).
+//! Real native GPU smoke coverage: five surface states, the 3D sheet tabs, the Mobius wall sheet, the C1
+//! "Analysis hidden" check, the Atlas views and the three 3D workbench views (stages 0..=LAST_SMOKE_STAGE, one new
+//! painted non-empty mesh per stage).
 use std::sync::atomic::Ordering;
 
 use super::{NavTab, PapertillingApp, SurfaceTargetUi};
@@ -9,10 +10,27 @@ use crate::workbench::WorkbenchView;
 
 const MAX_SMOKE_FRAMES: u32 = 1800;
 /// The final stage (Atlas H² + the offscreen 3D PNG export). Stages: 0..4 surfaces, 5 defects sheet, 6 combine
-/// sheet, 7 FvK, 8 AO Mobius, 9 Analysis, 10 Atlas 3D, 11 flat 3D, 12 curved 2D, 13 honeycombs, 14 Atlas H².
+/// sheet, 7 FvK, 8 sheet3d-mobius (the Mobius wall, relaxed drawing; fails on collapsed bonds), 9 analysis-hidden
+/// (no shown label names Analysis, key 6 is a no-op; then the cylinder surface), 10 Atlas 3D, 11 flat 3D,
+/// 12 curved 2D, 13 honeycombs, 14 Atlas H².
 /// Stages 11-13 enter through the Command Deck (open, switch realm, equip the view's card), so the OK line's
 /// `deck=` field counts three realm switches.
 pub(super) const LAST_SMOKE_STAGE: u32 = 14;
+/// Stage 8 fails when the Mobius wall's shortest drawn bond is below this fraction of the lattice spacing (the
+/// median rest bond length): a collapsed or non-converged picture. Set from the measured healthy run (see
+/// `PAPERTILLING_SMOKE_INFO`).
+const MOBIUS_MIN_BOND_RATIO: f64 = 0.2;
+
+/// Shortest drawn bond of `c` over its median rest bond length (`None` without bonds).
+fn min_bond_ratio(c: &papertilling_core::types::BuiltCrystal) -> Option<f64> {
+    let len = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    let min = c.edges.iter().map(|&(u, v)| len(c.pos[u], c.pos[v])).fold(f64::INFINITY, f64::min);
+    let mut rest: Vec<f64> =
+        c.adj.iter().flatten().map(|d| d.vec[0].hypot(d.vec[1])).filter(|l| *l > 1e-9).collect();
+    rest.sort_by(f64::total_cmp);
+    let spacing = *rest.get(rest.len() / 2)?;
+    min.is_finite().then_some(min / spacing)
+}
 
 impl PapertillingApp {
     fn smoke_stage_waiting(&self) -> bool {
@@ -47,7 +65,11 @@ impl PapertillingApp {
             NavTab::Surfaces => {
                 self.surfaces.has_refusal() || self.surfaces.elastic.last_error.is_some()
             }
-            NavTab::Defects => self.defects.error.is_some(),
+            NavTab::Defects => {
+                self.defects.error.is_some()
+                    || (self.last_smoke_stage == 8
+                        && min_bond_ratio(&self.defects.last_crystal).is_none_or(|r| r < MOBIUS_MIN_BOND_RATIO))
+            }
             NavTab::Combine => {
                 self.combine.init_error.is_some()
                     || self.combine.last_build.refused.is_some()
@@ -122,7 +144,7 @@ impl PapertillingApp {
                 if !self.smoke_reported {
                     self.smoke_reported = true;
                     println!(
-                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=15 (surfaces x5,defects-sheet,combine-sheet,fvk,ao-mobius,ldos,atlas-3d,flat3d,curved2d,honeycombs,atlas-h2) export3d={export3d} deck={}",
+                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=15 (surfaces x5,defects-sheet,combine-sheet,fvk,sheet3d-mobius,analysis-hidden,atlas-3d,flat3d,curved2d,honeycombs,atlas-h2) export3d={export3d} deck={}",
                         self.adapter_name, self.backend_name, self.view3d.counters.uploads(), self.deck.realm_switches
                     );
                 }
@@ -168,24 +190,30 @@ impl PapertillingApp {
                     self.defects.sub_tab = crate::defects_tab::DefectSubTab::Walls;
                     self.defects.selected_wall = mob_idx;
                     self.defects.wall_half = false;
-                    self.defects.draw_mode = crate::live_ops_ao::Defect2dMode::ElasticAoMetric;
+                    self.defects.draw_mode = crate::live_ops_ao::Defect2dMode::RelaxedDrawing;
                     self.defects.relaxed = true;
                     self.defects.view_mode = DefectViewMode::Sheet3D;
                     self.switch_tab(NavTab::Defects);
                 }
                 9 => {
-                    self.analysis.select_target(crate::analysis_mode::AnalysisTarget::SingleDefect);
-                    self.analysis.view_mode = DefectViewMode::Sheet3D;
-                    self.analysis.spectrum.color_overlay = crate::analysis_mode::SpectrumColorOverlay::LdosMultiplet;
-                    self.switch_mode(super::AppMode::Analysis);
-                    let item = self.gallery.active_item().clone();
-                    self.analysis.submit_active_source(
-                        &item,
-                        &self.surfaces,
-                        &self.defects,
-                        &self.combine,
-                        Some(ctx),
+                    let ratio = min_bond_ratio(&self.defects.last_crystal);
+                    eprintln!(
+                        "PAPERTILLING_SMOKE_INFO sheet3d-mobius sites={} bonds={} min_bond/spacing={ratio:?}",
+                        self.defects.last_crystal.pos.len(),
+                        self.defects.last_crystal.edges.len()
                     );
+                    let named = self.visible_analysis_labels();
+                    if !named.is_empty() || !self.deck_key6_is_noop(ctx) {
+                        self.smoke_outcome.store(2, Ordering::Release);
+                        self.smoke_reported = true;
+                        eprintln!("PAPERTILLING_SMOKE_FAIL stage=9 analysis-hidden labels={named:?} deck_realm={:?}", self.deck.realm);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        return true;
+                    }
+                    // the stage's new mesh: the cylinder, the one surface target stages 0-4 and 7 do not cover
+                    self.surfaces.target = SurfaceTargetUi::Cylinder;
+                    self.surfaces.show_cover = false;
+                    self.switch_tab(NavTab::Surfaces);
                 }
                 stage => {
                     let (target, cover) = match stage {

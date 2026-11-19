@@ -38,15 +38,17 @@ fn presets_menu_lists_every_preset_on_every_tab_and_a_click_applies_it() {
         h.state_mut().switch_tab(tab);
         h.run_steps(2);
         open_menu(&mut h, tab);
-        for mode in AppMode::ALL {
+        for mode in AppMode::SHOWN {
             assert!(
                 h.get_all_by_label(mode.label()).count() >= 1,
                 "{tab:?}: menu lists mode heading '{}'",
                 mode.label()
             );
         }
+        // C1: the Analysis heading and the hidden presets (Analysis, 3D line defect) are not listed
+        assert!(h.query_by_label(AppMode::Analysis.label()).is_none(), "{tab:?}: no Analysis heading");
         for p in PRESETS {
-            assert!(h.query_by_label(p.name).is_some(), "{tab:?}: menu lists '{}'", p.name);
+            assert_eq!(h.query_by_label(p.name).is_some(), p.shown(), "{tab:?}: menu lists '{}' iff shown", p.name);
         }
     }
 

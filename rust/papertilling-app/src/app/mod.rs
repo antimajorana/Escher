@@ -368,7 +368,7 @@ impl PapertillingApp {
         self.finish_gallery_moves();
         if self.active_tab == NavTab::Gallery {
             self.export_status =
-                String::from("Open Surfaces, Defects, Combine, Atlas, or Analysis to export a 3D .obj mesh.");
+                String::from("Open Surfaces, Defects, Combine or Atlas to export a 3D .obj mesh.");
             return;
         }
         if self.active_tab == NavTab::Analysis && (self.analysis.is_busy() || self.analysis_source_busy()) {

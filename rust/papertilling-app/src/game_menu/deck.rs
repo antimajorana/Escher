@@ -143,7 +143,7 @@ impl PapertillingApp {
         }
     }
 
-    /// Title, the seven realm tabs (wrapping when narrow) and the filter field on the right.
+    /// Title, the shown realm tabs (wrapping when narrow) and the filter field on the right.
     fn deck_header(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         const FILTER_W: f32 = 200.0;
         ui.horizontal(|ui| {
@@ -152,7 +152,7 @@ impl PapertillingApp {
             ui.allocate_ui_with_layout(vec2(tabs_w, 0.0), wrap, |ui| {
                 ui.label(RichText::new("❖ PAPERTILLING CODEX").strong().color(tokens.text_primary));
                 ui.add_space(8.0);
-                for r in Realm::ALL {
+                for r in Realm::SHOWN {
                     let on = self.deck.realm == r;
                     let colour = if on { tokens.text_primary } else { tokens.text_secondary };
                     if ui.selectable_label(on, RichText::new(r.tab_label()).color(colour)).clicked() {

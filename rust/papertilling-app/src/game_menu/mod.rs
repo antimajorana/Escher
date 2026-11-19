@@ -1,7 +1,8 @@
 //! The Codex: a one-row HUD (`hud_bar`) over the viewport and a full-canvas Command Deck overlay (`deck`) that
 //! replace the old mode and sub-view strips. Seven realms group every view, sub-tab and stage sub-row as cards
 //! (`realms`); equipping a card routes the app there (`equip`). Keyboard: Tab / M open and close the deck, 1-7 and
-//! Q / E switch realms, arrows / WASD move, Enter equips, Esc resumes (`keys`).
+//! Q / E switch realms, arrows / WASD move, Enter equips, Esc resumes (`keys`). C1: realm 6 (Analysis Lab) is
+//! hidden while Analysis is postponed: the deck shows [`Realm::SHOWN`], key 6 does nothing, Q / E skip it.
 //!
 //! The deck only overlays the panels: they keep drawing and polling underneath, so workers never stall.
 
@@ -30,12 +31,17 @@ mod tests_nav2;
 mod tests_session;
 #[cfg(test)]
 mod tests_review;
+#[cfg(test)]
+mod tests_c1;
 
 pub(crate) use hud_bar::HUD_MIN_WINDOW_WIDTH;
 pub(crate) use realms::{CardId, LatticeRef};
 
 /// `id_salt` of the deck's filter TextEdit (its real `Id` is recorded in [`DeckState::filter_id`]).
 pub(crate) const DECK_FILTER_ID: &str = "deck_filter";
+
+/// Status note when a session saved in the postponed Analysis mode, tab or realm is restored (C1).
+pub(crate) const ANALYSIS_POSTPONED_NOTE: &str = "Analysis is postponed; restored to Lattices";
 
 /// The seven realms of the Command Deck, in tab order (keys 1-7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -61,13 +67,24 @@ impl Realm {
         Self::PresetsIo,
     ];
 
+    /// The realms the deck shows (C1: Analysis Lab is postponed). `ALL` and the `[_; 7]` arrays keep their
+    /// indices, so saved sessions and the number keys 1-5 and 7 are unchanged; key 6 does nothing.
+    pub(crate) const SHOWN: [Self; 6] =
+        [Self::Geometries, Self::Groups, Self::Tilings, Self::Manifolds, Self::Forge, Self::PresetsIo];
+
+    /// The realm is one the deck shows.
+    pub(crate) fn is_shown(self) -> bool {
+        self != Self::AnalysisLab
+    }
+
     /// 1..=7 (the realm's number key).
     pub(crate) fn number(self) -> usize {
         self as usize + 1
     }
 
+    /// The shown realm of number key `n` (`None` for 6, the hidden Analysis Lab).
     pub(crate) fn from_number(n: usize) -> Option<Self> {
-        n.checked_sub(1).and_then(|i| Self::ALL.get(i).copied())
+        n.checked_sub(1).and_then(|i| Self::ALL.get(i).copied()).filter(|r| r.is_shown())
     }
 
     pub(crate) fn title(self) -> &'static str {
@@ -106,14 +123,27 @@ impl Realm {
         }
     }
 
-    /// Previous realm, wrapping (Q).
-    pub(crate) fn prev(self) -> Self {
-        Self::ALL[(self as usize + Self::ALL.len() - 1) % Self::ALL.len()]
+    /// Position in [`Self::SHOWN`] (a hidden realm counts as the shown realm just before it).
+    fn shown_pos(self) -> usize {
+        Self::SHOWN.iter().rposition(|r| r.idx() <= self.idx()).unwrap_or(0)
     }
 
-    /// Next realm, wrapping (E).
+    /// Previous shown realm, wrapping (Q).
+    pub(crate) fn prev(self) -> Self {
+        let n = Self::SHOWN.len();
+        let at = self.shown_pos();
+        let back = if self.is_shown() { 1 } else { 0 };
+        Self::SHOWN[(at + n - back) % n]
+    }
+
+    /// Next shown realm, wrapping (E).
     pub(crate) fn next(self) -> Self {
-        Self::ALL[(self as usize + 1) % Self::ALL.len()]
+        Self::SHOWN[(self.shown_pos() + 1) % Self::SHOWN.len()]
+    }
+
+    /// `self`, or Tilings when `self` is hidden (the deck never opens on a hidden realm).
+    pub(crate) fn shown_or_default(self) -> Self {
+        if self.is_shown() { self } else { Self::Tilings }
     }
 
     fn idx(self) -> usize {
@@ -197,6 +227,13 @@ impl DeckState {
         let Some(v) = v else { return false };
         let name = v.get("realm").and_then(serde_json::Value::as_str);
         match parse_named(&Realm::ALL, name) {
+            Some(r) if !r.is_shown() => {
+                if !notes.iter().any(|n| n == ANALYSIS_POSTPONED_NOTE) {
+                    notes.push(String::from(ANALYSIS_POSTPONED_NOTE));
+                }
+                self.realm = r.shown_or_default();
+                false
+            }
             Some(r) => {
                 self.realm = r;
                 self.resume_saved_realm = true;
@@ -230,6 +267,7 @@ impl PapertillingApp {
     pub(crate) fn deck_open(&mut self, realm: Realm, ctx: &egui::Context) {
         self.switcher.open = false;
         self.deck.open = true;
+        let realm = realm.shown_or_default();
         self.deck.realm = realm;
         self.deck.resume_saved_realm = false;
         self.deck.filter.clear();
@@ -260,6 +298,7 @@ impl PapertillingApp {
     }
 
     pub(crate) fn deck_select_realm(&mut self, realm: Realm) {
+        let realm = realm.shown_or_default();
         if realm != self.deck.realm {
             self.deck.realm_switches += 1;
         }
@@ -322,5 +361,24 @@ impl PapertillingApp {
             },
             AppMode::Analysis => CardId::Analysis(self.analysis.target),
         })
+    }
+
+    /// C1 check (smoke stage 9 and `analysis_hidden_everywhere`): every label source the user can see that names
+    /// Analysis — the shown modes, the shown realm tabs and titles, the "All" cards of every shown realm (titles
+    /// and subtitles), the shown presets and the HUD mode segment. Empty when Analysis is hidden.
+    pub(crate) fn visible_analysis_labels(&mut self) -> Vec<String> {
+        let mut seen: Vec<String> = AppMode::SHOWN.iter().map(|m| m.label().to_owned()).collect();
+        for r in Realm::SHOWN {
+            seen.push(r.title().to_owned());
+            seen.push(r.tab_label().to_owned());
+            for c in self.deck_cards(r, 0, "") {
+                seen.push(c.title);
+                seen.push(c.subtitle);
+            }
+        }
+        seen.extend(crate::presets::PRESETS.iter().filter(|p| p.shown()).map(|p| p.name.to_owned()));
+        seen.push(self.mode_segment_text());
+        seen.retain(|s| s.contains("Analysis"));
+        seen
     }
 }

@@ -7,7 +7,6 @@ use super::Realm;
 use super::realms::{CardId, IoAction, card_realm};
 use super::test_util::{H, equip_state, goto_defects_view, goto_lattices_view, open_deck, press};
 use super::tests_nav::{click_in_hud, hud_disabled, start};
-use crate::analysis_mode::AnalysisTarget;
 use crate::analysis_mode::tests::{equip_keys, realm_key, settled, wait_until};
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab};
 use crate::mesh3d::DefectViewMode;
@@ -20,6 +19,9 @@ fn every_workbench_card_equips_its_panel_and_sub_row() {
     for view in WorkbenchView::ALL {
         let labels = h.state().workbench.sub_labels(view);
         for (i, title) in labels.iter().enumerate() {
+            if view == WorkbenchView::S4Flat3d && i <= 1 {
+                continue; // C1: 3D slabs and platycosms are hidden (no card)
+            }
             let realm = card_realm(CardId::Wb(view, u8::try_from(i).unwrap()));
             equip_keys(&mut h, realm, title);
             let a = h.state();
@@ -36,7 +38,7 @@ fn every_workbench_card_equips_its_panel_and_sub_row() {
 #[test]
 fn old_strips_are_gone() {
     let mut h = start();
-    for mode in AppMode::ALL {
+    for mode in AppMode::SHOWN {
         h.state_mut().switch_mode(mode);
         h.run_steps(2);
         assert!(!h.state().deck.open);
@@ -94,7 +96,7 @@ fn hud_view_toggle_and_undo_scope() {
 #[test]
 fn hud_is_one_row() {
     let mut h = start();
-    for mode in AppMode::ALL {
+    for mode in AppMode::SHOWN {
         h.state_mut().switch_mode(mode);
         h.run_steps(2);
         let top = h.state().test_rects.top;
@@ -190,11 +192,10 @@ fn stat_card_buttons() {
     assert_eq!((a.active_mode, a.defects_view), (AppMode::Defects, DefectsView::Catalogue2D));
     assert_eq!(a.gallery.base_item().named_key.as_deref(), Some("kagome"));
 
+    // C1: Analysis is postponed, so the stat card has no "Open in Analysis Lab" button
     deck_on_kagome(&mut h);
-    h.get_by_label("ψ Open in Analysis Lab").click();
-    h.run_steps(2);
-    let a = h.state();
-    assert_eq!((a.active_mode, a.analysis.target), (AppMode::Analysis, AnalysisTarget::PlaneLattice));
+    assert!(h.query_by_label("ψ Open in Analysis Lab").is_none(), "the lab button is hidden");
+    assert!(h.query_all_by_label_contains("Analysis").next().is_none(), "no visible Analysis label");
 }
 
 #[test]

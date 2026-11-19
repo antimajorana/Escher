@@ -30,7 +30,7 @@ impl PapertillingApp {
             return refuse("A 3D PNG export is still being written.");
         }
         if self.active_tab == NavTab::Gallery {
-            return refuse("Open Surfaces, Defects, Combine, Atlas, or Analysis to export a 3D PNG.");
+            return refuse("Open Surfaces, Defects, Combine or Atlas to export a 3D PNG.");
         }
         // before the stale-view guards: a 2D-only view never clears view3d_dirty, so "wait" would never resolve
         if self.view3d.shown_view_size(pass_nr).is_none() {

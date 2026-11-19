@@ -85,6 +85,16 @@ pub struct Preset {
 }
 
 impl Preset {
+    /// Listed in the Presets menu and the deck. C1 hides the Analysis preset (Analysis is postponed) and the 3D
+    /// line-defect preset (hidden until a real cut-and-reglue exists); both stay in `PRESETS` at their indices.
+    pub fn shown(&self) -> bool {
+        match self.settings {
+            PresetSettings::Analysis { .. } => false,
+            PresetSettings::Atlas(AtlasScene::SpaceGroup { defect, .. }) => defect == LineDefect3d::None,
+            _ => true,
+        }
+    }
+
     pub fn mode(&self) -> AppMode {
         match self.settings {
             PresetSettings::Gallery { .. } | PresetSettings::Surfaces { .. } => AppMode::Lattices,

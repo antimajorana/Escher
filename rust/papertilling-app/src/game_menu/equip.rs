@@ -38,6 +38,10 @@ impl PapertillingApp {
                 }
             }
             CardId::Combine => self.select_defects_view(DefectsView::CombineAndFuse),
+            // C1 pending targets (open patch, hexagonal torus): refused, never approximated by another surface
+            CardId::Surface(t) if t.is_pending() => {
+                self.export_status = format!("{}: not yet available", t.label());
+            }
             CardId::Surface(t) => {
                 self.surfaces.target = t;
                 self.surfaces.clamp_params(self.gallery.active_item());
@@ -63,10 +67,8 @@ impl PapertillingApp {
                     }
                 });
             }
-            CardId::Analysis(t) => {
-                self.analysis.select_target(t);
-                self.switch_mode(AppMode::Analysis);
-            }
+            // C1: Analysis is postponed; no shown realm lists these cards, and equipping one is refused
+            CardId::Analysis(_) => self.export_status = String::from("Analysis is postponed"),
             CardId::Preset(i) => {
                 if let Err(e) = self.apply_preset(i) {
                     self.export_status = e;
@@ -112,6 +114,7 @@ impl PapertillingApp {
     }
 
     /// Stat-card "Open in Analysis Lab": select the lattice, make the 2D lattice the lab's source, close the deck.
+    /// C1: unreachable while Analysis is postponed (its stat-card button is gone).
     pub(crate) fn deck_open_in_lab(&mut self, r: LatticeRef) {
         self.select_lattice_then(r, |app| {
             app.analysis.select_target(AnalysisTarget::PlaneLattice);

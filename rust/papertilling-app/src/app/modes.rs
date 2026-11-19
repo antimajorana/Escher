@@ -42,6 +42,9 @@ pub enum AppMode {
 
 impl AppMode {
     pub const ALL: [Self; 3] = [Self::Lattices, Self::Defects, Self::Analysis];
+    /// The modes a user can reach (C1: Analysis is postponed; `ALL` keeps it for session decoding and the
+    /// internal `switch_mode(Analysis)` route, which no user input calls any more).
+    pub const SHOWN: [Self; 2] = [Self::Lattices, Self::Defects];
 
     pub fn label(self) -> &'static str {
         match self {

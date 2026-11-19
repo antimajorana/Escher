@@ -13,6 +13,13 @@ use crate::canvas2d::gauge_overlay::{
 use crate::canvas2d::overlay_legend::seam_legend_chips;
 use crate::theme::ThemeTokens;
 
+/// The 2D overlay is offered (C1). Hidden: the GSV energy (part of the AO elastic view, which left the UI) and the
+/// vertex angle-shear energy, whose known-answer test fails (`live_ops_ao_tests`: a uniform stretch of a square
+/// patch gives it a nonzero value, because it also penalises the opposite-bond pairs, so it is not an angle shear).
+pub(crate) fn overlay_shown(m: CrystalOverlayMode) -> bool {
+    !matches!(m, CrystalOverlayMode::GsvEnergyShear | CrystalOverlayMode::VertexAngleShear)
+}
+
 /// Interactive inspection state shared by `DefectsTabState` and `CombineTabState`.
 pub struct DefectInspectors {
     pub circuit: CircuitUiState,
@@ -153,10 +160,9 @@ impl DefectInspectors {
                 let chips = seam_legend_chips(&seams);
                 Some(CrystalOverlayData { seams, chips, ..Default::default() })
             }
-            CrystalOverlayMode::GsvEnergyShear
-            | CrystalOverlayMode::BondStretchStrain
-            | CrystalOverlayMode::VertexAngleShear
-            | CrystalOverlayMode::PlaquetteFlux => ao_override,
+            // C1 hidden (see `overlay_shown`): never drawn, even when restored or set internally
+            CrystalOverlayMode::GsvEnergyShear | CrystalOverlayMode::VertexAngleShear => None,
+            CrystalOverlayMode::BondStretchStrain | CrystalOverlayMode::PlaquetteFlux => ao_override,
         }
     }
 
@@ -270,7 +276,7 @@ impl DefectInspectors {
             egui::ComboBox::from_id_salt(format!("{id_prefix}_2d_ov"))
                 .selected_text(self.overlay_mode.label())
                 .show_ui(ui, |ui| {
-                    for m in CrystalOverlayMode::NON_SPECTRAL {
+                    for m in CrystalOverlayMode::NON_SPECTRAL.into_iter().filter(|&m| overlay_shown(m)) {
                         ui.selectable_value(&mut self.overlay_mode, m, m.label());
                     }
                 });

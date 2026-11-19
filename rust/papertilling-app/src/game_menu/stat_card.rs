@@ -19,6 +19,7 @@ const THUMB_PX: f32 = 120.0;
 pub(crate) enum StatAction {
     Equip,
     OpenInForge,
+    #[allow(dead_code)] // C1 hidden: the "Open in Analysis Lab" button is gone while Analysis is postponed
     OpenInLab,
 }
 
@@ -54,13 +55,8 @@ impl PapertillingApp {
             if ui.button("⏎ Equip").clicked() {
                 action = Some(StatAction::Equip);
             }
-            if matches!(card.id, CardId::Lattice(_)) {
-                if ui.button("⚒ Open in Defects Forge").clicked() {
-                    action = Some(StatAction::OpenInForge);
-                }
-                if ui.button("ψ Open in Analysis Lab").clicked() {
-                    action = Some(StatAction::OpenInLab);
-                }
+            if matches!(card.id, CardId::Lattice(_)) && ui.button("⚒ Open in Defects Forge").clicked() {
+                action = Some(StatAction::OpenInForge);
             }
         });
         action

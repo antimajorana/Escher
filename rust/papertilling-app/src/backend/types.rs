@@ -160,6 +160,10 @@ pub enum SurfaceTargetUi {
     ProjectivePlane,
     Genus2,
     Genus3,
+    /// C1 (WP-U3): an open patch of the lattice (no gluing). Listed as "not yet available" until wired.
+    Open,
+    /// C1 (WP-U3): a torus glued from a hexagonal domain (3 pairs of sides). Listed as "not yet available".
+    TorusHex,
 }
 
 impl SurfaceTargetUi {
@@ -174,6 +178,15 @@ impl SurfaceTargetUi {
         Self::Genus3,
     ];
 
+    /// Targets added by the C1 boundary-conditions track and not built yet: never in `ALL` (the verdict matrix and
+    /// session decoding), shown on deck cards as "not yet available", and every build of one refuses.
+    pub const PENDING: [Self; 2] = [Self::Open, Self::TorusHex];
+
+    /// The target is one of [`Self::PENDING`].
+    pub fn is_pending(self) -> bool {
+        Self::PENDING.contains(&self)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Torus => "torus",
@@ -184,6 +197,8 @@ impl SurfaceTargetUi {
             Self::ProjectivePlane => "projective plane",
             Self::Genus2 => "genus 2",
             Self::Genus3 => "genus 3",
+            Self::Open => "open patch",
+            Self::TorusHex => "torus (hexagonal domain)",
         }
     }
 
@@ -197,6 +212,8 @@ impl SurfaceTargetUi {
             Self::ProjectivePlane => "RP²",
             Self::Genus2 => "g=2",
             Self::Genus3 => "g=3",
+            Self::Open => "open",
+            Self::TorusHex => "torus6",
         }
     }
 }

@@ -103,6 +103,7 @@ impl DefectsTabState {
                 }
             }
         });
+        dirty |= super::growth::show(ui, self, active_item);
 
         if dirty {
             self.rebuild_crystal(active_item, backend, canvas, reset_view);

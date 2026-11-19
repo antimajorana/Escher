@@ -13,7 +13,7 @@ use crate::backend::{
     CatalogueItemUi, CentreClassUi, DefectCatalogueUi, DefectReadoutUi, DefectSelectionUi,
     DisclinationEntryUi, DislocationEntryUi, WallEntryUi, WallKindUi,
 };
-use crate::live_ops_ao::{Defect2dMode, relax_crystal_ao_2d};
+use crate::live_ops_ao::Defect2dMode;
 
 #[path = "live_ops_surfaces.rs"]
 mod live_ops_surfaces;
@@ -279,7 +279,8 @@ pub fn build_defect_patch_mode(
             let Some(w_ui) = walls.get(idx).or_else(|| walls.first()) else {
                 return fallback_patch(lat_info, radius, format!("{} — no walls", item.label), "No Wa-Wd walls", String::new());
             };
-            let relax_draw = draw_mode == Defect2dMode::RelaxedDrawing;
+            // C1: `ElasticAoMetric` left the UI (a saved one is migrated); it draws as the relaxed picture
+            let relax_draw = draw_mode != Defect2dMode::Raw;
             if wall_half && w_ui.can_end_orientable {
                 let mut hw_notes = Vec::new();
                 let res = build_half_wall(cell, Some(&w_ui.id), None, [0.0, 0.0], None, Some(radius), relax_draw).or_else(|_| {
@@ -287,13 +288,7 @@ pub fn build_defect_patch_mode(
                     build_half_wall(cell, Some(&w_ui.id), None, [0.0, 0.0], None, None, relax_draw)
                 });
                 return match res {
-                    Ok((resolved, mut crystal)) => {
-                        if draw_mode == Defect2dMode::ElasticAoMetric {
-                            match relax_crystal_ao_2d(&mut crystal) {
-                                Ok(r) => hw_notes.push(format!("AO GSV E={:.4} (shear={:.4})", r.total_energy, r.shear_energy)),
-                                Err(e) => hw_notes.push(format!("AO elastic fallback: {e}")),
-                            }
-                        }
+                    Ok((resolved, crystal)) => {
                         let (charge_summary, holonomy_detail) = match total_charge(&crystal) {
                             Ok(ch) => {
                                 let b = ch.burgers.unwrap_or([0.0, 0.0]);
@@ -323,17 +318,7 @@ pub fn build_defect_patch_mode(
                     (c, n)
                 })
             } else {
-                cat.build_wall_scaled(&w_ui.id, radius).map(|mut c| {
-                    let mut n = w_ui.default_note.clone();
-                    if draw_mode == Defect2dMode::ElasticAoMetric {
-                        let ao_note = match relax_crystal_ao_2d(&mut c) {
-                            Ok(r) => format!("AO GSV E={:.4} (shear={:.4})", r.total_energy, r.shear_energy),
-                            Err(e) => format!("AO elastic fallback: {e}"),
-                        };
-                        n = [n.as_str(), ao_note.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join("; ");
-                    }
-                    (c, n)
-                })
+                cat.build_wall_scaled(&w_ui.id, radius).map(|c| (c, w_ui.default_note.clone()))
             };
             let Some((crystal, note)) = built else {
                 return fallback_patch(lat_info, radius, format!("{} — {}", item.label, w_ui.id), "Wall unavailable", String::new());
@@ -373,17 +358,12 @@ fn build_and_finish_point_defect(
     };
     match draw_mode {
         Defect2dMode::Raw => {}
-        Defect2dMode::RelaxedDrawing => {
+        // C1: `ElasticAoMetric` left the UI (a saved one is migrated); it draws as the relaxed picture
+        Defect2dMode::RelaxedDrawing | Defect2dMode::ElasticAoMetric => {
             relax_picture(&mut crystal);
             let info = ensure_embedded(&mut crystal, false);
             if !info.note.is_empty() {
                 notes.push(info.note);
-            }
-        }
-        Defect2dMode::ElasticAoMetric => {
-            match relax_crystal_ao_2d(&mut crystal) {
-                Ok(r) => notes.push(format!("AO GSV E={:.4} (shear={:.4})", r.total_energy, r.shear_energy)),
-                Err(e) => notes.push(format!("AO elastic fallback: {e}")),
             }
         }
     }

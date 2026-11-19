@@ -309,7 +309,7 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
         st_spec.defects.color_mode = Some(String::from(mode));
         let notes = s_app.apply_session(&st_spec, None);
         assert!(
-            notes.iter().any(|n| n.contains("3D spectral colouring reset to ring size (moved to Analysis mode)")),
+            notes.iter().any(|n| n.contains("3D spectral colouring reset to ring size (spectral views are postponed)")),
             "{mode}: {notes:?}"
         );
         assert_eq!(s_app.defects.sheet_opts.color_mode, crate::mesh3d::Sheet3dColorMode::FaceRingSize);
@@ -383,7 +383,7 @@ fn v1_session_migrates_to_v2_on_load_saves_v2_on_exit_and_leaves_v99_untouched()
     a.load_session_at_start(&egui::Context::default());
     assert_eq!((a.active_mode, a.defects_view, a.active_tab), (AppMode::Defects, DefectsView::Catalogue2D, NavTab::Defects));
     assert_eq!(a.defects.sheet_opts.color_mode, crate::mesh3d::Sheet3dColorMode::FaceRingSize);
-    assert!(a.export_status.contains("moved to Analysis mode"), "{}", a.export_status);
+    assert!(a.export_status.contains("spectral views are postponed"), "{}", a.export_status);
     assert!(a.save_session_on_exit());
     let (saved_v2, _) = session::load_session_file(&path).unwrap().unwrap();
     assert_eq!(saved_v2.schema_version, 3);
@@ -406,7 +406,8 @@ fn v1_session_migrates_to_v2_on_load_saves_v2_on_exit_and_leaves_v99_untouched()
     assert!(h.atlas.pristine_only);
     assert_eq!(h.atlas.sub_tab, AtlasSubTab::SpaceGroups3D);
 
-    // 3) v2 Analysis mode saves and restores target cleanly without stale spectral data.
+    // 3) A session saved in Analysis (internal route only) keeps its target but opens Lattices with a note (C1:
+    //    Analysis is postponed), without stale spectral data.
     let mut an_src = app();
     an_src.analysis.select_target(AnalysisTarget::PlaneLattice);
     an_src.analysis.view_mode = crate::mesh3d::DefectViewMode::Sheet3D;
@@ -414,8 +415,8 @@ fn v1_session_migrates_to_v2_on_load_saves_v2_on_exit_and_leaves_v99_untouched()
     let st_an = an_src.capture_session();
     assert_eq!(st_an.schema_version, 3);
     let mut an_dst = app();
-    assert!(an_dst.apply_session(&st_an, None).is_empty());
-    assert_eq!((an_dst.active_mode, an_dst.active_tab), (AppMode::Analysis, NavTab::Analysis));
+    assert_eq!(an_dst.apply_session(&st_an, None), vec![String::from(crate::game_menu::ANALYSIS_POSTPONED_NOTE)]);
+    assert_eq!((an_dst.active_mode, an_dst.active_tab), (AppMode::Lattices, NavTab::Gallery));
     assert_eq!(an_dst.analysis.target, AnalysisTarget::PlaneLattice);
     assert_eq!(an_dst.analysis.view_mode, crate::mesh3d::DefectViewMode::Sheet3D);
     assert!(an_dst.analysis.spectrum.result.is_none() && !an_dst.analysis.spectrum.is_busy());

@@ -1,4 +1,4 @@
-//! S4 workbench panel (Lattices -> "Flat 3D: Slabs, Tubes, Flakes"): flat 3D slabs on the five non-compact
+//! S4 workbench panel (Lattices -> "Flat 3D: Tubes, Ribbons, Flakes"): flat 3D slabs on the five non-compact
 //! topologies, finite quotients on the ten closed platycosms, chiral nanotubes and nanoribbons and symmetry-centred
 //! flakes of the Gallery lattice, and the exact torsion-free classification of the 230 space groups.
 //!
@@ -38,9 +38,9 @@ type Scenes = (Scene2D, Option<GpuMeshData>, String);
 /// The panel's inner sub-row. Labels are unique on screen (kittest clicks them by exact label).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum S4Sub {
-    #[default]
     Slabs,
     Platycosms,
+    #[default]
     Nanotubes,
     Ribbons,
     Flakes,
@@ -49,6 +49,14 @@ pub(crate) enum S4Sub {
 
 impl S4Sub {
     pub(crate) const ALL: [Self; 6] = [Self::Slabs, Self::Platycosms, Self::Nanotubes, Self::Ribbons, Self::Flakes, Self::TorsionFree];
+    /// The sub-rows the user can reach. C1 (D19): 3D slabs and platycosms embed a 3D net on a 3D manifold (torus,
+    /// Klein, Mobius tube, cylinder x S¹, chimney, the ten closed platycosms), which leaves the UI in favour of
+    /// growth by inflation; their code and the indices in `ALL` stay. Torsion-free groups is Bieberbach group data.
+    pub(crate) const SHOWN: [Self; 4] = [Self::Nanotubes, Self::Ribbons, Self::Flakes, Self::TorsionFree];
+
+    pub(crate) fn is_shown(self) -> bool {
+        Self::SHOWN.contains(&self)
+    }
 
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -296,7 +304,7 @@ impl WbPanel for Panel {
     /// The body of the sub-row click branch in `show_controls`.
     fn select_sub(&mut self, i: usize) -> bool {
         match S4Sub::ALL.get(i) {
-            Some(&s) if self.sub != s => {
+            Some(&s) if self.sub != s && s.is_shown() => {
                 self.sub = s;
                 true
             }
@@ -306,7 +314,7 @@ impl WbPanel for Panel {
     fn show_controls(&mut self, ui: &mut egui::Ui, _cx: &WbCtx) -> bool {
         let mut rebuild = std::mem::take(&mut self.inspector_rebuild);
         ui.horizontal_wrapped(|ui| {
-            for s in S4Sub::ALL {
+            for s in S4Sub::SHOWN {
                 if ui.selectable_label(self.sub == s, s.label()).clicked() && self.sub != s {
                     self.sub = s;
                     rebuild = true;
@@ -435,6 +443,10 @@ impl WbPanel for Panel {
         };
         if let Some(s) = o.get("sub").and_then(Value::as_str) {
             match S4Sub::ALL.into_iter().find(|x| format!("{x:?}") == s) {
+                Some(x) if !x.is_shown() => {
+                    self.sub = S4Sub::default();
+                    notes.push(format!("S4 panel: {} is hidden (3D embeddings left the app); showing {}", x.label(), self.sub.label()));
+                }
                 Some(x) => self.sub = x,
                 None => notes.push(format!("S4 panel: unknown sub-view {s:?} (kept current)")),
             }
@@ -460,9 +472,7 @@ impl WbPanel for Panel {
     }
 
     fn smoke_defaults(&mut self) {
-        self.sub = S4Sub::Slabs;
-        self.slab.net = CanonicalNet3d::SimpleCubic;
-        self.slab.kind = papertilling_core::flat3d::FlatSlabKind::TorusSlab;
-        self.slab.repeats = [2, 2, 2];
+        // C1: the slab sub-rows are hidden, so the smoke stage builds the default nanotube of the Gallery lattice
+        self.sub = S4Sub::Nanotubes;
     }
 }

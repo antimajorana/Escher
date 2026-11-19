@@ -45,6 +45,8 @@ pub fn size_controls(target: SurfaceTargetUi, max_rot: u32) -> SizeControls {
             c("size h", "size k", 1..=8, if max_rot == 2 { 1..=8 } else { 0..=8 })
         }
         SurfaceTargetUi::Genus2 | SurfaceTargetUi::Genus3 => c("torus (h, 0)", "torus (0, k)", 1..=12, 1..=12),
+        // C1 pending targets (every build refuses); placeholder controls until WP-U3 wires them
+        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => c("size h", "size k", 1..=12, 1..=12),
     }
 }
 

@@ -1,9 +1,8 @@
-//! Card inventory of the seven realms (the single source of truth for what the Command Deck lists). Cards exist
+//! Card inventory of the realms (the single source of truth for what the Command Deck lists). Cards exist
 //! only for capabilities the app has now; every card names an existing view, sub-tab, sub-row, preset or export.
 
 use super::Realm;
 use super::badges::Badge;
-use crate::analysis_mode::AnalysisTarget;
 use crate::app::PapertillingApp;
 use crate::atlas_tab::{AtlasSubTab, AtlasTabState};
 use crate::backend::{CatalogueItemUi, CatalogueRuleUi, SurfaceTargetUi};
@@ -71,7 +70,7 @@ pub(crate) enum CardId {
     Surface(SurfaceTargetUi),
     Wb(WorkbenchView, u8),
     Lattice(LatticeRef),
-    Analysis(AnalysisTarget),
+    Analysis(crate::analysis_mode::AnalysisTarget),
     Preset(usize),
     Io(IoAction),
 }
@@ -198,6 +197,7 @@ impl PapertillingApp {
                     Some(n) => format!("{} entries", n[s as usize]),
                     None => "catalogue of the selected lattice".to_owned(),
                 },
+                CardId::Surface(t) if t.is_pending() => "not yet available".to_owned(),
                 CardId::Surface(t) => {
                     let k = SurfaceTargetUi::ALL.iter().position(|&x| x == t);
                     let cell = verdicts.as_ref().zip(k).and_then(|(v, k)| v.get(k));
@@ -277,13 +277,14 @@ impl PapertillingApp {
             Realm::Tilings => out = self.tiling_cards(pill),
             Realm::Manifolds => {
                 if pill != 2 {
-                    for t in SurfaceTargetUi::ALL {
+                    for t in SurfaceTargetUi::ALL.into_iter().chain(SurfaceTargetUi::PENDING) {
                         out.push(Card::new(CardId::Surface(t), capitalised(t.label())));
                     }
                     out.extend(self.wb_cards(WorkbenchView::S5Curved2d, 3..=4));
                 }
                 if pill != 1 {
-                    out.extend(self.wb_cards(WorkbenchView::S4Flat3d, 0..=5));
+                    // C1: rows 0-1 (3D slabs, platycosms: embeddings on 3D manifolds) are hidden, rows 2-5 shown
+                    out.extend(self.wb_cards(WorkbenchView::S4Flat3d, 2..=5));
                 }
             }
             Realm::Forge => {
@@ -291,7 +292,8 @@ impl PapertillingApp {
                     for s in DefectSubTab::ALL {
                         out.push(Card::new(CardId::DefectCatalogue(s), s.label()));
                     }
-                    for s in AtlasTabState::DEFECT_SUBTABS {
+                    // C1: the 3D line defects are hidden until a real cut-and-reglue exists
+                    for s in AtlasTabState::DEFECT_SUBTABS.into_iter().filter(|&s| s != AtlasSubTab::SpaceGroups3D) {
                         out.push(Card::new(CardId::AtlasDefects(s), s.defect_label()));
                     }
                 }
@@ -305,14 +307,11 @@ impl PapertillingApp {
                     out.extend(self.wb_cards(WorkbenchView::S3Detect, 0..=3));
                 }
             }
-            Realm::AnalysisLab => {
-                for t in AnalysisTarget::ALL {
-                    out.push(Card::new(CardId::Analysis(t), t.label()));
-                }
-            }
+            // C1: Analysis is postponed; the realm is hidden and lists no cards
+            Realm::AnalysisLab => {}
             Realm::PresetsIo => {
                 if pill != 2 {
-                    for (i, p) in PRESETS.iter().enumerate() {
+                    for (i, p) in PRESETS.iter().enumerate().filter(|(_, p)| p.shown()) {
                         out.push(Card::new(CardId::Preset(i), p.name));
                     }
                 }

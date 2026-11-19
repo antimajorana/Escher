@@ -165,6 +165,27 @@ impl PapertillingApp {
         cancel_focus_move(ctx);
     }
 
+    /// C1 check (smoke stage 9): with the deck open at Tilings, a real Num6 key press through `handle_deck_keys`
+    /// leaves the realm and the realm-switch count unchanged (key 6 is the hidden Analysis Lab). The deck is closed
+    /// again afterwards; opening it is never counted as a realm switch.
+    pub(crate) fn deck_key6_is_noop(&mut self, ctx: &egui::Context) -> bool {
+        self.deck_open(Realm::Tilings, ctx);
+        let before = (self.deck.realm, self.deck.realm_switches);
+        ctx.input_mut(|i| {
+            i.events.push(Event::Key {
+                key: Key::Num6,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            });
+        });
+        let _ = self.handle_deck_keys(ctx);
+        let after = (self.deck.realm, self.deck.realm_switches);
+        self.deck_close();
+        before == after && self.deck.realm == Realm::Tilings
+    }
+
     /// Move the cursor by `delta` cards, clamped to the cards drawn last frame.
     fn move_deck_cursor(&mut self, delta: isize) {
         let n = self.deck.n_cards;

@@ -127,24 +127,30 @@ fn number_keys_and_q_e_switch_realms() {
     open_deck(&mut h);
     assert_eq!(h.state().deck.realm, Realm::Tilings);
     assert_eq!(h.state().deck.realm_switches, s0, "opening never counts");
-    for r in Realm::ALL {
+    for r in Realm::SHOWN {
         press(&mut h, realm_key(r));
         assert_eq!(h.state().deck.realm.number(), r.number(), "number key {}", r.number());
     }
-    // 3 -> 1 -> 2 -> ... -> 7: every press changed the realm
-    assert_eq!(h.state().deck.realm_switches, s0 + 7);
-    press(&mut h, Key::Num1);
-    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::Geometries, s0 + 8));
+    // 3 -> 1 -> 2 -> 3 -> 4 -> 5 -> 7 (C1: realm 6 is hidden): every press changed the realm
+    assert_eq!(h.state().deck.realm_switches, s0 + 6);
+    press(&mut h, Key::Num6);
+    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::PresetsIo, s0 + 6), "key 6 does nothing");
     press(&mut h, Key::Q);
-    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::PresetsIo, s0 + 9), "Q wraps");
+    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::Forge, s0 + 7), "Q skips realm 6");
     press(&mut h, Key::E);
-    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::Geometries, s0 + 10), "E wraps");
+    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::PresetsIo, s0 + 8), "E skips realm 6");
     press(&mut h, Key::Num1);
-    assert_eq!(h.state().deck.realm_switches, s0 + 10, "selecting the same realm is not a switch");
+    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::Geometries, s0 + 9));
+    press(&mut h, Key::Q);
+    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::PresetsIo, s0 + 10), "Q wraps");
+    press(&mut h, Key::E);
+    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::Geometries, s0 + 11), "E wraps");
+    press(&mut h, Key::Num1);
+    assert_eq!(h.state().deck.realm_switches, s0 + 11, "selecting the same realm is not a switch");
     press(&mut h, Key::Escape);
     assert!(!h.state().deck.open);
     press(&mut h, Key::Num3);
-    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::Geometries, s0 + 10), "closed deck");
+    assert_eq!((h.state().deck.realm, h.state().deck.realm_switches), (Realm::Geometries, s0 + 11), "closed deck");
 }
 
 #[test]

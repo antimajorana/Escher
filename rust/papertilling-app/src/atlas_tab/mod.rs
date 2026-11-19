@@ -13,7 +13,9 @@ pub mod hyperbolic_scene;
 pub mod hyperbolic_shells;
 pub mod hyperbolic_ui;
 pub mod hyperbolic_view;
+pub mod layers_growth;
 pub mod layers_ui;
+pub mod points3d_ui;
 pub mod space3d_geom;
 pub mod space3d_ui;
 pub mod space3d_view;
@@ -92,7 +94,8 @@ impl AtlasTabState {
             pristine_only: true,
             sub_tab: AtlasSubTab::SpaceGroups3D,
             last_pristine_3d_subtab: AtlasSubTab::SpaceGroups3D,
-            last_defect_subtab: AtlasSubTab::SpaceGroups3D,
+            // C1: the 3D line defects are hidden, so the Defects atlas opens on the H² wedge disclinations
+            last_defect_subtab: AtlasSubTab::HyperbolicH2,
             seeded_initial_defects: false,
             subperiodic,
             layers: layers_ui::LayersPanelState::default(),

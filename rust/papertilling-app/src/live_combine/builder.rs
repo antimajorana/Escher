@@ -137,9 +137,9 @@ pub fn build_combined_crystal(
                 notes.push(format!("fast relax has {bad} crossing/fold(s) — toggle Full Planar Repair"));
             }
         }
-    } else if opts.draw_mode == CombineDrawMode::ElasticAoMetric {
-        crate::live_ops_ao::apply_combine_ao_mode(&mut crystal, preview, &mut notes);
     }
+    // C1: the AO elastic branch (`CombineDrawMode::ElasticAoMetric`, `live_ops_ao::apply_combine_ao_mode`) left
+    // the UI; nothing selects that mode any more, so it draws as Raw.
 
     let (charge_label, charge_detail) = match classify_crystal_charge(&item.group, &info.cell, item.frame, &crystal) {
         Ok(ch) => {

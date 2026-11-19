@@ -390,8 +390,10 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     assert_no_forbidden_tokens(&h, "2. Defects -> Combine (after the deck scan)");
 
     // 3. Analysis mode: verify Tight-Binding panel appears, compute spectrum, verify LDOS + Peierls + 2D/3D legends.
-    let target = h.state().analysis.target;
-    equip_keys(&mut h, Realm::AnalysisLab, target.label());
+    // C1: Analysis is postponed and no user input reaches it, so the hidden mode is entered by the internal route
+    h.state_mut().switch_mode(AppMode::Analysis);
+    h.run_steps(2);
+    wait_until(&mut h, "Analysis entered", settled);
     wait_until(&mut h, "Analysis source idle", |a| !a.defects.is_busy() && !a.defects.initializing);
     assert_eq!((h.state().active_mode, h.state().active_tab), (AppMode::Analysis, NavTab::Analysis));
     assert!(h.query_all_by_label_contains("Tight-Binding").next().is_some(), "Tight-Binding panel visible in Analysis");
@@ -450,7 +452,8 @@ fn atlas_preserves_defect_selection_across_pristine_lattices_round_trip() {
 
     app.select_defects_view(DefectsView::AtlasDefects);
     assert!(!app.atlas.pristine_only);
-    assert_eq!(app.atlas.sub_tab, AtlasSubTab::SpaceGroups3D);
+    // C1: with the 3D line defects hidden the Defects atlas opens on the H² wedge disclinations
+    assert_eq!(app.atlas.sub_tab, AtlasSubTab::HyperbolicH2);
     assert_eq!(app.atlas.space3d.selected_defect, LineDefect3d::PureDisclination90_123);
     assert_eq!(app.atlas.hyperbolic.wedge_delta, -2);
 
