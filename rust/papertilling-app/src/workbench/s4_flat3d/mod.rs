@@ -286,6 +286,23 @@ impl Panel {
 }
 
 impl WbPanel for Panel {
+    fn sub_labels(&self) -> &'static [&'static str] {
+        const LABELS: [&str; 6] = ["3D slabs", "Platycosms", "Nanotubes", "Nanoribbons", "Flakes", "Torsion-free groups"];
+        &LABELS
+    }
+    fn sub_index(&self) -> usize {
+        self.sub as usize
+    }
+    /// The body of the sub-row click branch in `show_controls`.
+    fn select_sub(&mut self, i: usize) -> bool {
+        match S4Sub::ALL.get(i) {
+            Some(&s) if self.sub != s => {
+                self.sub = s;
+                true
+            }
+            _ => false,
+        }
+    }
     fn show_controls(&mut self, ui: &mut egui::Ui, _cx: &WbCtx) -> bool {
         let mut rebuild = std::mem::take(&mut self.inspector_rebuild);
         ui.horizontal_wrapped(|ui| {

@@ -1,5 +1,5 @@
-//! Global Quick Lattice Switcher: a Top Bar chip (preview, name, group, rule) on every tab, and a searchable
-//! command palette (click the chip or press Ctrl+K) listing Recent (LRU, 10), the 21 named lattices and the full
+//! Global Quick Lattice Switcher: a searchable command palette (the HUD "Search (Ctrl+K)" button or Ctrl+K while
+//! the Command Deck is closed) listing Recent (LRU, 10), the 21 named lattices and the full
 //! stored catalogue of all three rules. Picking a lattice selects it in the Gallery and reloads the active tab
 //! at once (`PapertillingApp::select_lattice_and_sync`).
 
@@ -72,37 +72,18 @@ impl PapertillingApp {
         }
     }
 
-    /// Top Bar chip: preview of the active lattice, its name, group and rule.
-    pub(crate) fn show_switcher_chip(&mut self, ui: &mut egui::Ui) {
+    /// A `px` x `px` thumbnail of the selected lattice (the HUD lattice segment draws it before the name).
+    #[allow(dead_code)] // M1 prewire: drawn by the HUD breadcrumb (WP-A).
+    pub(crate) fn paint_lattice_thumb(&mut self, ui: &mut egui::Ui, px: f32) {
         let t = tokens_of(ui);
         let base = self.gallery.base_item().clone();
-        let active = self.gallery.active_item();
-        let text = format!("{}  ·  {}  ·  {}", active.label, active.group, rule_tag(&base.alias_key));
-        let font = egui::FontId::proportional(13.0);
-        let galley = ui.painter().layout_no_wrap(text, font, t.text_primary);
-        let size = egui::vec2(24.0 + 8.0 + galley.size().x + 50.0, 24.0);
-        let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-        if ui.is_rect_visible(rect) {
-            let p = ui.painter_at(rect);
-            let fill = if resp.hovered() { t.bg_card_hover } else { t.bg_card };
-            p.rect_filled(rect, 5.0, fill);
-            p.rect_stroke(rect, 5.0, egui::Stroke::new(1.0, t.border_strong), egui::StrokeKind::Inside);
-            let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(2.0, 2.0), egui::vec2(20.0, 20.0));
+        let (thumb, _) = ui.allocate_exact_size(egui::vec2(px, px), egui::Sense::hover());
+        if ui.is_rect_visible(thumb) {
+            let p = ui.painter_at(thumb);
             p.rect_filled(thumb, 3.0, t.bg_canvas_2d);
             if let Some(g) = self.gallery.thumbs.get_or_build(&base) {
                 g.paint(&p.with_clip_rect(thumb), thumb, &t);
             }
-            p.galley(egui::pos2(thumb.right() + 8.0, rect.center().y - galley.size().y / 2.0), galley, t.text_primary);
-            p.text(
-                rect.right_center() - egui::vec2(6.0, 0.0),
-                egui::Align2::RIGHT_CENTER,
-                "Ctrl+K",
-                egui::FontId::monospace(10.0),
-                t.text_muted,
-            );
-        }
-        if resp.on_hover_text("Quick Lattice Switcher (Ctrl+K): search all stored lattices").clicked() {
-            self.toggle_switcher();
         }
     }
 

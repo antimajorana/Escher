@@ -1,4 +1,5 @@
-//! Three-mode shell state (`1. Lattices`, `2. Defects`, `3. Analysis`), sub-views, and tab transitions.
+//! Three-mode shell state (Lattices, Defects, Analysis), sub-views, and tab transitions (routed by the Command
+//! Deck, `crate::game_menu`).
 
 use crate::analysis_mode::AnalysisTarget;
 use crate::atlas_tab::{AtlasSubTab, AtlasTabState};
@@ -14,7 +15,8 @@ pub enum NavTab {
     Combine,
     Atlas,
     Analysis,
-    /// Stage S2..S6 panels (`crate::workbench`), one tab for all of them.
+    /// Internal route for the S2..S6 panels (`crate::workbench`), never shown: the user reaches them through
+    /// their Command Deck cards.
     Workbench,
 }
 
@@ -135,35 +137,6 @@ impl DefectsView {
 }
 
 impl PapertillingApp {
-    pub(crate) fn show_sub_nav_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| match self.active_mode {
-            AppMode::Lattices => {
-                ui.small("Lattices:");
-                for view in LatticesView::ALL {
-                    if ui.selectable_label(self.lattices_view == view, view.label()).clicked() {
-                        self.select_lattices_view(view);
-                    }
-                }
-            }
-            AppMode::Defects => {
-                ui.small("Defects:");
-                for view in DefectsView::ALL {
-                    if ui.selectable_label(self.defects_view == view, view.label()).clicked() {
-                        self.select_defects_view(view);
-                    }
-                }
-            }
-            AppMode::Analysis => {
-                ui.small("Target:");
-                for target in AnalysisTarget::ALL {
-                    if ui.selectable_label(self.analysis.target == target, target.label()).clicked() {
-                        self.analysis.select_target(target);
-                    }
-                }
-            }
-        });
-    }
-
     pub(crate) fn atlas_offered_tabs(&self) -> &'static [AtlasSubTab] {
         match (self.active_mode, self.lattices_view) {
             (AppMode::Lattices, LatticesView::NonEuclidean) => &[AtlasSubTab::HyperbolicH2],

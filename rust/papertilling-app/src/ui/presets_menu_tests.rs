@@ -40,7 +40,7 @@ fn presets_menu_lists_every_preset_on_every_tab_and_a_click_applies_it() {
         open_menu(&mut h, tab);
         for mode in AppMode::ALL {
             assert!(
-                h.get_all_by_label(mode.label()).count() >= 2,
+                h.get_all_by_label(mode.label()).count() >= 1,
                 "{tab:?}: menu lists mode heading '{}'",
                 mode.label()
             );

@@ -207,10 +207,7 @@ impl PapertillingApp {
     fn smoke_enter_workbench(&mut self, view: WorkbenchView) {
         self.workbench.view = view;
         self.workbench.smoke_defaults();
-        match view.mode_view() {
-            crate::workbench::ModeView::Lattices(v) => self.select_lattices_view(v),
-            crate::workbench::ModeView::Defects(v) => self.select_defects_view(v),
-        }
+        self.enter_workbench(view, None);
     }
 }
 

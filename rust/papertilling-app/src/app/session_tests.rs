@@ -386,7 +386,7 @@ fn v1_session_migrates_to_v2_on_load_saves_v2_on_exit_and_leaves_v99_untouched()
     assert!(a.export_status.contains("moved to Analysis mode"), "{}", a.export_status);
     assert!(a.save_session_on_exit());
     let (saved_v2, _) = session::load_session_file(&path).unwrap().unwrap();
-    assert_eq!(saved_v2.schema_version, 2);
+    assert_eq!(saved_v2.schema_version, 3);
     assert_eq!(saved_v2.active_mode.as_deref(), Some("Defects"));
     assert_eq!(saved_v2.defects_view.as_deref(), Some("Catalogue2D"));
 
@@ -412,7 +412,7 @@ fn v1_session_migrates_to_v2_on_load_saves_v2_on_exit_and_leaves_v99_untouched()
     an_src.analysis.view_mode = crate::mesh3d::DefectViewMode::Sheet3D;
     an_src.switch_mode(AppMode::Analysis);
     let st_an = an_src.capture_session();
-    assert_eq!(st_an.schema_version, 2);
+    assert_eq!(st_an.schema_version, 3);
     let mut an_dst = app();
     assert!(an_dst.apply_session(&st_an, None).is_empty());
     assert_eq!((an_dst.active_mode, an_dst.active_tab), (AppMode::Analysis, NavTab::Analysis));

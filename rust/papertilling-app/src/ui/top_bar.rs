@@ -1,117 +1,93 @@
-use crate::app::{AppMode, NavTab, PapertillingApp};
+//! The HUD "Export" menu (`crate::game_menu::hud_bar`) and its actions, which the Command Deck's Presets & I/O
+//! realm also calls. Every action skips its file dialog in `--smoke-test` mode.
+
+use crate::app::{NavTab, PapertillingApp};
 
 impl PapertillingApp {
-    pub(crate) fn show_top_bar(&mut self, ui: &mut egui::Ui) {
-        let _resp = egui::Panel::top("top_bar").show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.strong(format!("papertilling {}", papertilling_core::VERSION));
-                ui.separator();
-                for mode in AppMode::ALL {
-                    if ui
-                        .selectable_label(self.active_mode == mode, mode.label())
-                        .clicked()
-                    {
-                        self.switch_mode(mode);
-                    }
-                }
-                ui.separator();
-                self.show_switcher_chip(ui);
-                let rev0 = self.gallery.revision();
-                self.gallery
-                    .show_rename_bar(ui, &mut self.backend, &mut self.canvas2d, "top_rename");
-                if self.gallery.revision() != rev0 {
-                    self.sync_active_tab_after_rename();
-                }
-                ui.separator();
-                if ui
-                    .button(format!("Theme: {}", self.theme.label()))
-                    .on_hover_text("Toggle between Light (Paper) and Dark (Studio) theme")
-                    .clicked()
-                {
-                    self.theme = self.theme.toggle();
-                    self.theme.apply(ui.ctx());
-                }
-                if ui.button("Reset views").clicked() {
-                    self.canvas2d.reset();
-                    self.view3d.reset();
-                }
-                self.show_presets_menu(ui);
-                ui.menu_button("Export", |ui| {
-                    if ui.button("Export SVG / PNG...").clicked() && !self.smoke_test {
-                        ui.close();
-                        self.export_dialog();
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label("PNG scale:");
-                        for (s, tip) in [(1_u8, "1024 x 1024 px"), (2, "2048 x 2048 px"), (4, "4096 x 4096 px")] {
-                            ui.selectable_value(&mut self.png_scale, s, format!("{s}x"))
-                                .on_hover_text(format!("PNG export at {s}x pixel density (2D: {tip}; 3D: the viewport's on-screen pixels x {s}), same composition"));
-                        }
-                    });
-                    if ui
-                        .button("Export 3D PNG...")
-                        .on_hover_text("The 3D view as on screen (caption, legend), at the PNG scale")
-                        .clicked()
-                        && !self.smoke_test
-                    {
-                        ui.close();
-                        self.export_3d_png_dialog(&ui.ctx().clone());
-                    }
-                    if ui.button("Export .obj (3D)...").clicked() && !self.smoke_test {
-
-                        ui.close();
-                        self.export_obj_dialog();
-                    }
-                    ui.separator();
-                    if ui
-                        .button("Export .json (Notebook 3)...")
-                        .on_hover_text("Export current Combine defect configuration (.json)")
-                        .clicked()
-                        && !self.smoke_test
-                    {
-                        ui.close();
-                        self.finish_gallery_moves();
-                        let item = self.gallery.active_item().clone();
-                        self.combine.export_json_dialog(&item);
-                        self.export_status = self.combine.json_status.clone();
-                    }
-                    if ui
-                        .button("Import .json...")
-                        .on_hover_text("Import a Notebook 3 defect configuration (.json)")
-                        .clicked()
-                        && !self.smoke_test
-                    {
-                        ui.close();
-                        self.switch_tab(NavTab::Combine);
-                        self.combine
-                            .import_json_dialog(&self.backend, &mut self.canvas2d);
-                        if !self.combine.json_status.is_empty() {
-                            self.export_status = self.combine.json_status.clone();
-                        }
-                    }
-                });
-                self.session_menu(ui);
-                if ui
-                    .selectable_label(self.left_rail_open, "Sidebar")
-                    .on_hover_text("Toggle Left Sidebar panel (Ctrl+B)")
-                    .clicked()
-                {
-                    self.left_rail_open = !self.left_rail_open;
-                }
-                if ui
-                    .selectable_label(self.right_inspector_open, "Inspector")
-                    .on_hover_text("Toggle Right Inspector panel (Ctrl+I)")
-                    .clicked()
-                {
-                    self.right_inspector_open = !self.right_inspector_open;
+    pub(crate) fn show_export_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Export", |ui| {
+            if ui.button("Export SVG / PNG...").clicked() && !self.smoke_test {
+                ui.close();
+                self.export_svg_png_action();
+            }
+            ui.horizontal(|ui| {
+                ui.label("PNG scale:");
+                for (s, tip) in [(1_u8, "1024 x 1024 px"), (2, "2048 x 2048 px"), (4, "4096 x 4096 px")] {
+                    ui.selectable_value(&mut self.png_scale, s, format!("{s}x"))
+                        .on_hover_text(format!("PNG export at {s}x pixel density (2D: {tip}; 3D: the viewport's on-screen pixels x {s}), same composition"));
                 }
             });
+            if ui
+                .button("Export 3D PNG...")
+                .on_hover_text("The 3D view as on screen (caption, legend), at the PNG scale")
+                .clicked()
+                && !self.smoke_test
+            {
+                ui.close();
+                self.export_3d_png_action(&ui.ctx().clone());
+            }
+            if ui.button("Export .obj (3D)...").clicked() && !self.smoke_test {
+                ui.close();
+                self.export_obj_action();
+            }
             ui.separator();
-            self.show_sub_nav_bar(ui);
+            if ui
+                .button("Export .json (Notebook 3)...")
+                .on_hover_text("Export current Combine defect configuration (.json)")
+                .clicked()
+                && !self.smoke_test
+            {
+                ui.close();
+                self.export_json_action();
+            }
+            if ui
+                .button("Import .json...")
+                .on_hover_text("Import a Notebook 3 defect configuration (.json)")
+                .clicked()
+                && !self.smoke_test
+            {
+                ui.close();
+                self.import_json_action();
+            }
         });
-        #[cfg(test)]
-        {
-            self.test_rects.top = _resp.response.rect;
+    }
+
+    pub(crate) fn export_svg_png_action(&mut self) {
+        if !self.smoke_test {
+            self.export_dialog();
+        }
+    }
+
+    pub(crate) fn export_3d_png_action(&mut self, ctx: &egui::Context) {
+        if !self.smoke_test {
+            self.export_3d_png_dialog(ctx);
+        }
+    }
+
+    pub(crate) fn export_obj_action(&mut self) {
+        if !self.smoke_test {
+            self.export_obj_dialog();
+        }
+    }
+
+    pub(crate) fn export_json_action(&mut self) {
+        if self.smoke_test {
+            return;
+        }
+        self.finish_gallery_moves();
+        let item = self.gallery.active_item().clone();
+        self.combine.export_json_dialog(&item);
+        self.export_status = self.combine.json_status.clone();
+    }
+
+    pub(crate) fn import_json_action(&mut self) {
+        if self.smoke_test {
+            return;
+        }
+        self.switch_tab(NavTab::Combine);
+        self.combine.import_json_dialog(&self.backend, &mut self.canvas2d);
+        if !self.combine.json_status.is_empty() {
+            self.export_status = self.combine.json_status.clone();
         }
     }
 }

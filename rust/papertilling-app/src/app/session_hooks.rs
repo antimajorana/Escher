@@ -185,6 +185,7 @@ impl PapertillingApp {
             analysis_target: Some(name_of(self.analysis.target)),
             analysis_view: Some(name_of(self.analysis.view_mode)),
             workbench: Some(self.workbench.capture()),
+            deck: Some(self.deck.save()),
         }
     }
 
@@ -426,33 +427,49 @@ impl PapertillingApp {
         self.save_session_to(&path, true).is_ok()
     }
 
-    /// The Top Bar "Session" menu: save / open a session file anywhere (dialogs are skipped in smoke-test mode).
+    /// The HUD "Session" menu: save / open a session file anywhere (dialogs are skipped in smoke-test mode).
     pub(crate) fn session_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Session", |ui| {
             if ui.button("Save Session As...").on_hover_text("Save tab, lattice, parameters, views and camera (.json)").clicked() && !self.smoke_test {
                 ui.close();
-                self.finish_gallery_moves();
-                let dlg = rfd::FileDialog::new().set_title("Save session").set_file_name(session::SESSION_FILENAME).add_filter("Session", &["json"]);
-                if let Some(path) = dlg.save_file() {
-                    let lock = self.session.path.as_deref() == Some(path.as_path());
-                    self.export_status = match self.save_session_to(&path, lock) {
-                        Ok(()) => format!("Session saved to {}", path.display()),
-                        Err(e) => format!("Session save error: {e}"),
-                    };
-                }
+                self.session_save_dialog();
             }
             if ui.button("Open Session...").on_hover_text("Restore a saved session (.json)").clicked() && !self.smoke_test {
                 ui.close();
-                let dlg = rfd::FileDialog::new().set_title("Open session").add_filter("Session", &["json"]);
-                if let Some(path) = dlg.pick_file() {
-                    let ctx = ui.ctx().clone();
-                    match self.open_session_from(&path, Some(&ctx)) {
-                        Ok(Some(_)) => {}
-                        Ok(None) => self.export_status = String::from("Session file not found"),
-                        Err(e) => self.export_status = format!("Session not opened: {e}"),
-                    }
-                }
+                let ctx = ui.ctx().clone();
+                self.session_open_dialog(Some(&ctx));
             }
         });
+    }
+
+    /// "Save Session As...": pick a file and save the session there (also the Command Deck's Session card).
+    pub(crate) fn session_save_dialog(&mut self) {
+        if self.smoke_test {
+            return;
+        }
+        self.finish_gallery_moves();
+        let dlg = rfd::FileDialog::new().set_title("Save session").set_file_name(session::SESSION_FILENAME).add_filter("Session", &["json"]);
+        if let Some(path) = dlg.save_file() {
+            let lock = self.session.path.as_deref() == Some(path.as_path());
+            self.export_status = match self.save_session_to(&path, lock) {
+                Ok(()) => format!("Session saved to {}", path.display()),
+                Err(e) => format!("Session save error: {e}"),
+            };
+        }
+    }
+
+    /// "Open Session...": pick a file and restore it (also the Command Deck's Session card).
+    pub(crate) fn session_open_dialog(&mut self, ctx: Option<&egui::Context>) {
+        if self.smoke_test {
+            return;
+        }
+        let dlg = rfd::FileDialog::new().set_title("Open session").add_filter("Session", &["json"]);
+        if let Some(path) = dlg.pick_file() {
+            match self.open_session_from(&path, ctx) {
+                Ok(Some(_)) => {}
+                Ok(None) => self.export_status = String::from("Session file not found"),
+                Err(e) => self.export_status = format!("Session not opened: {e}"),
+            }
+        }
     }
 }

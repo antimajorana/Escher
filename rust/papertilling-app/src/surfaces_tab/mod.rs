@@ -260,7 +260,7 @@ impl SurfacesTabState {
     }
 
     /// The 8 verdicts of `surface_table` on the active lattice itself (cached per lattice).
-    pub(super) fn lattice_verdicts(&mut self, item: &CatalogueItemUi) -> Option<&[SurfaceCellVerdictUi; 8]> {
+    pub(crate) fn lattice_verdicts(&mut self, item: &CatalogueItemUi) -> Option<&[SurfaceCellVerdictUi; 8]> {
         let key = (item.group.clone(), item.recipe.clone(), item.frame);
         if self.lattice_verdicts.as_ref().is_none_or(|(k, _)| *k != key) {
             let cells = live_ops::build_verdict_cells(item).ok()?;

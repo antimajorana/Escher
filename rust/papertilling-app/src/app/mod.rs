@@ -115,6 +115,8 @@ pub struct PapertillingApp {
     /// Follow-up work of the last preset waiting on a tab's background worker (Combine pins or Defects spectrum).
     pub(crate) preset_pending: Option<preset_apply::PendingPreset>,
     pub(crate) session: session_hooks::SessionHost,
+    /// The Command Deck overlay and its HUD hooks (`crate::game_menu`).
+    pub(crate) deck: crate::game_menu::DeckState,
 }
 
 impl PapertillingApp {
@@ -203,6 +205,7 @@ impl PapertillingApp {
             switcher: Default::default(),
             preset_pending: None,
             session: session_hooks::SessionHost::for_mode(smoke_test),
+            deck: Default::default(),
         }
     }
 
@@ -226,12 +229,15 @@ impl PapertillingApp {
             // a background parameter move finished after leaving the Gallery: the active tab follows it
             self.resync_active_tab_for_lattice();
         }
-        self.show_top_bar(ui);
+        self.show_hud_bar(ui);
         self.show_status_bar(ui);
         self.show_left_rail(ui);
         self.show_right_inspector(ui);
         self.show_viewport_pane(ui);
         self.show_switcher_modal(&ctx);
+        if self.deck.open {
+            self.show_command_deck(&ctx);
+        }
         self.switcher.push_recent(self.gallery.base_item());
         false
     }
@@ -250,7 +256,7 @@ impl PapertillingApp {
     }
 
     /// Reload the active tab for the Gallery's current `active_item()` (another lattice or parameter values).
-    fn resync_active_tab_for_lattice(&mut self) {
+    pub(crate) fn resync_active_tab_for_lattice(&mut self) {
         let item = self.gallery.active_item().clone();
         match self.active_tab {
             NavTab::Gallery => {}

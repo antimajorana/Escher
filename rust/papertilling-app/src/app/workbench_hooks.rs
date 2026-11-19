@@ -5,7 +5,7 @@
 use super::{PapertillingApp, item_key};
 use crate::canvas2d::Canvas2D;
 use crate::view3d::View3dState;
-use crate::workbench::{WbCtx, WorkbenchState, WorkbenchView};
+use crate::workbench::{ModeView, WbCtx, WorkbenchState, WorkbenchView};
 
 impl PapertillingApp {
     /// Run `f` on the workbench with a fresh [`WbCtx`] and the shared canvas / 3D view.
@@ -34,6 +34,21 @@ impl PapertillingApp {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Show stage panel `view` (at sub-row `sub`, if given) through its mode sub-view. `dirty` makes
+    /// `activate_nav_tab` enter the panel again even when the view did not change.
+    pub(crate) fn enter_workbench(&mut self, view: WorkbenchView, sub: Option<usize>) {
+        if let Some(s) = sub {
+            self.workbench.select(view, s);
+        } else {
+            self.workbench.view = view;
+            self.workbench.dirty = true;
+        }
+        match view.mode_view() {
+            ModeView::Lattices(v) => self.select_lattices_view(v),
+            ModeView::Defects(v) => self.select_defects_view(v),
         }
     }
 

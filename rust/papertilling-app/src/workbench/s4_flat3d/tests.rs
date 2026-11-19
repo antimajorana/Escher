@@ -22,6 +22,7 @@ use super::jobs::S4Out;
 use super::tubes::{RibbonParams, TubeParams};
 use super::{Panel, S4Sub, flakes, platycosms, slabs, torsion_free, tubes};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
+use crate::game_menu::test_util::goto_lattices_view;
 use crate::app::{LatticesView, NavTab, PapertillingApp};
 use crate::workbench::{WbPanel, WorkbenchView};
 use egui_kittest::kittest::Queryable;
@@ -267,7 +268,7 @@ fn s4_panel_state_survives_json_roundtrip() {
 #[test]
 fn s4_subrows_quarantine_clean() {
     let mut h = harness();
-    h.get_by_label("Flat 3D: Slabs, Tubes, Flakes").click();
+    goto_lattices_view(&mut h, LatticesView::Flat3D);
     wait_until(&mut h, "S4", |a| !a.workbench_busy() && !a.workbench.dirty);
     for s in S4Sub::ALL.into_iter().chain([S4Sub::Slabs]) {
         h.get_by_label(s.label()).click();

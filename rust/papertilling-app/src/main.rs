@@ -18,6 +18,7 @@ mod defects_ui;
 mod export;
 mod export_obj;
 mod gallery_tab;
+mod game_menu;
 mod live_combine;
 mod live_ops;
 mod live_ops_ao;

@@ -9,6 +9,7 @@ use papertilling_core::space3d::nets3d::LineDefect3d;
 use super::{AnalysisTarget, SpectrumColorOverlay};
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab, PapertillingApp};
 use crate::atlas_tab::AtlasSubTab;
+use crate::game_menu::test_util::{goto_defects_view, goto_lattices_view};
 use crate::mesh3d::DefectViewMode;
 use crate::theme::{StudioTheme, typography};
 
@@ -103,12 +104,12 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     h.run_steps(3);
 
     // 1. Lattices: visit all 4 sub-views including 0D/1D, 80-layer, 230-SG, H², and Manifolds + "3D Colour:" ComboBox.
-    h.get_by_label("1. Lattices").click();
+    h.state_mut().switch_mode(AppMode::Lattices);
     h.run_steps(2);
     assert_eq!((h.state().active_mode, h.state().lattices_view), (AppMode::Lattices, LatticesView::Plane2D));
     assert_no_forbidden_tokens(&h, "1. Lattices -> 2D Plane");
 
-    h.get_by_label("3D & Subperiodic").click();
+    goto_lattices_view(&mut h, LatticesView::ThreeDAndSubperiodic);
     h.run_steps(2);
     assert!(h.state().atlas.pristine_only);
     for st_lbl in ["0D/1D Subperiodic", "80 Layer Groups", "230 3D Space Groups"] {
@@ -122,7 +123,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
         );
     }
 
-    h.get_by_label("Non-Euclidean").click();
+    goto_lattices_view(&mut h, LatticesView::NonEuclidean);
     h.run_steps(2);
     assert!(h.state().atlas.pristine_only);
     assert_no_forbidden_tokens(&h, "1. Lattices -> Non-Euclidean");
@@ -131,7 +132,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
         "Non-Euclidean pristine view must hide Central Wedge disclination controls"
     );
 
-    h.get_by_label("Manifolds & Surfaces").click();
+    goto_lattices_view(&mut h, LatticesView::Manifolds);
     wait_until(&mut h, "Manifolds surface build", |a| !a.surfaces.is_building());
     assert_no_forbidden_tokens(&h, "1. Lattices -> Manifolds");
     // Open "3D Colour:" ComboBox in inspector and verify ONLY non-spectral modes appear.
@@ -146,8 +147,12 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     h.run_steps(2);
 
     // Workbench Lattices views (stage S4..S6 panels).
-    for lbl in ["Flat 3D: Slabs, Tubes, Flakes", "{p,q} on S² / E² / H²", "Honeycombs & TPMS"] {
-        h.get_by_label(lbl).click();
+    for (lbl, v) in [
+        ("Flat 3D: Slabs, Tubes, Flakes", LatticesView::Flat3D),
+        ("{p,q} on S² / E² / H²", LatticesView::Curved2D),
+        ("Honeycombs & TPMS", LatticesView::Honeycombs3D),
+    ] {
+        goto_lattices_view(&mut h, v);
         wait_until(&mut h, lbl, |a| !a.workbench_busy() && !a.workbench.dirty);
         assert_eq!(h.state().active_tab, NavTab::Workbench, "{lbl}");
         assert_no_forbidden_tokens(&h, lbl);
@@ -160,7 +165,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     }
 
     // 2. Defects: visit all 3 sub-views + open "2D Overlay:" and "Color:" ComboBoxes.
-    h.get_by_label("2. Defects").click();
+    h.state_mut().switch_mode(AppMode::Defects);
     wait_until(&mut h, "Defects Catalogue build", |a| !a.defects.is_busy() && !a.defects.initializing);
     assert_eq!((h.state().active_mode, h.state().defects_view), (AppMode::Defects, DefectsView::Catalogue2D));
     assert_no_forbidden_tokens(&h, "2. Defects -> Catalogue (2D)");
@@ -181,7 +186,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
 
-    h.get_by_label("3D / H² / 0D–1D Defects").click();
+    goto_defects_view(&mut h, DefectsView::AtlasDefects);
     h.run_steps(2);
     assert!(!h.state().atlas.pristine_only);
     for st_lbl in ["3D Line Defects", "H² Wedge Disclinations", "0D/1D Subperiodic Defects"] {
@@ -191,14 +196,14 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     }
 
     // Workbench Defects views (stage S2, S3 panels).
-    for lbl in ["Point, Stone-Wales & GB", "Detect & Fields"] {
-        h.get_by_label(lbl).click();
+    for (lbl, v) in [("Point, Stone-Wales & GB", DefectsView::PointAndBoundary), ("Detect & Fields", DefectsView::DetectFields)] {
+        goto_defects_view(&mut h, v);
         wait_until(&mut h, lbl, |a| !a.workbench_busy() && !a.workbench.dirty);
         assert_eq!(h.state().active_tab, NavTab::Workbench, "{lbl}");
         assert_no_forbidden_tokens(&h, lbl);
     }
 
-    h.get_by_label("Combine, Fuse & Move").click();
+    goto_defects_view(&mut h, DefectsView::CombineAndFuse);
     wait_until(&mut h, "Combine build", |a| !a.combine.is_building());
     assert_no_forbidden_tokens(&h, "2. Defects -> Combine");
 
@@ -217,7 +222,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     h.run_steps(2);
 
     // 3. Analysis mode: verify Tight-Binding panel appears, compute spectrum, verify LDOS + Peierls + 2D/3D legends.
-    h.get_by_label("3. Analysis").click();
+    h.state_mut().switch_mode(AppMode::Analysis);
     wait_until(&mut h, "Analysis source idle", |a| !a.defects.is_busy() && !a.defects.initializing);
     assert_eq!((h.state().active_mode, h.state().active_tab), (AppMode::Analysis, NavTab::Analysis));
     assert!(h.query_all_by_label_contains("Tight-Binding").next().is_some(), "Tight-Binding panel visible in Analysis");
@@ -240,13 +245,13 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     assert!(leg2.title.contains("LDOS"), "2D legend: {}", leg2.title);
 
     // 4. Switching back to Lattices and Defects clears spectral legends and overlays immediately.
-    h.get_by_label("1. Lattices").click();
+    h.state_mut().switch_mode(AppMode::Lattices);
     h.run_steps(2);
     assert!(h.state().view3d.legend().is_none(), "3D spectral legend cleared on returning to Lattices");
     assert!(h.state().canvas2d.gauge_overlay().is_none(), "2D spectral overlay cleared on returning to Lattices");
     assert_no_forbidden_tokens(&h, "Return to 1. Lattices");
 
-    h.get_by_label("2. Defects").click();
+    h.state_mut().switch_mode(AppMode::Defects);
     wait_until(&mut h, "Return to 2. Defects", |a| !a.defects.is_busy());
     assert!(h.state().view3d.legend().is_none(), "3D spectral legend cleared on returning to Defects");
     assert!(h.state().canvas2d.gauge_overlay().is_none(), "2D spectral overlay cleared on returning to Defects");

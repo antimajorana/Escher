@@ -194,6 +194,23 @@ impl Panel {
 }
 
 impl WbPanel for Panel {
+    fn sub_labels(&self) -> &'static [&'static str] {
+        const LABELS: [&str; 4] = ["Detect defects", "Strain / Nye", "Elastic & Stroh", "Motion GIF"];
+        &LABELS
+    }
+    fn sub_index(&self) -> usize {
+        self.sub as usize
+    }
+    /// The body of the sub-row click branch in `show_controls`.
+    fn select_sub(&mut self, i: usize) -> bool {
+        match S3Sub::ALL.get(i) {
+            Some(&s) if self.sub != s => {
+                self.sub = s;
+                true
+            }
+            _ => false,
+        }
+    }
     fn show_controls(&mut self, ui: &mut egui::Ui, _cx: &WbCtx) -> bool {
         let mut rebuild = false;
         ui.horizontal_wrapped(|ui| {

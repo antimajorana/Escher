@@ -20,6 +20,7 @@ use super::present::CoreOut;
 use super::tpms::{TpmsMode, build_net, net_drawing, unwrap_faces};
 use super::{Panel, S6Job, S6Sub, run_job};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
+use crate::game_menu::test_util::goto_lattices_view;
 use crate::app::{LatticesView, NavTab, PapertillingApp};
 use crate::canvas2d::Scene2D;
 use crate::workbench::{WbCtx, WbPanel, WorkbenchView};
@@ -242,9 +243,7 @@ fn s6_panel_state_survives_json_roundtrip() {
 fn s6_subrows_quarantine_clean() {
     let mut h = harness();
     h.run_steps(3);
-    h.get_by_label("1. Lattices").click();
-    h.run_steps(2);
-    h.get_by_label("Honeycombs & TPMS").click();
+    goto_lattices_view(&mut h, LatticesView::Honeycombs3D);
     wait_until(&mut h, "S6", |a| !a.workbench_busy() && !a.workbench.dirty);
     for s in S6Sub::ALL.into_iter().chain([S6Sub::Schlafli]) {
         h.get_by_label(s.label()).click();

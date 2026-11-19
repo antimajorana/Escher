@@ -180,5 +180,10 @@ impl PapertillingApp {
                 }
             }
         }
+        // Command Deck (schema 3): its last realm, else the realm of the restored view; always loads closed.
+        if !self.deck.restore(st.deck.as_ref(), notes) {
+            self.deck.realm = self.current_realm();
+        }
+        self.deck.open = false;
     }
 }

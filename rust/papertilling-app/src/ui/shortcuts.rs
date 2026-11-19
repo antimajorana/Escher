@@ -4,7 +4,7 @@ use crate::app::{AppMode, NavTab, PapertillingApp};
 use crate::combine::ToolMode;
 use crate::mesh3d::DefectViewMode;
 
-fn consume_unmodified_key(i: &mut egui::InputState, key: egui::Key) -> bool {
+pub(crate) fn consume_unmodified_key(i: &mut egui::InputState, key: egui::Key) -> bool {
     if !i.modifiers.is_none() {
         return false;
     }
@@ -19,7 +19,25 @@ fn consume_unmodified_key(i: &mut egui::InputState, key: egui::Key) -> bool {
 }
 
 impl PapertillingApp {
+    /// Combine: undo the last pin edit (Ctrl+Z and the HUD "Undo").
+    pub(crate) fn combine_undo(&mut self) {
+        let it = self.gallery.active_item().clone();
+        self.combine.undo_last(&it);
+        self.combine.sync_selection_to_canvas(&mut self.canvas2d);
+    }
+
+    /// Combine: redo the last undone pin edit (Ctrl+Shift+Z / Ctrl+Y and the HUD "Redo").
+    pub(crate) fn combine_redo(&mut self) {
+        let it = self.gallery.active_item().clone();
+        self.combine.redo_last(&it);
+        self.combine.sync_selection_to_canvas(&mut self.canvas2d);
+    }
+
     pub(crate) fn handle_global_shortcuts(&mut self, ctx: &egui::Context) {
+        // the Command Deck owns Tab / M and, while open, every other key
+        if self.handle_deck_keys(ctx) {
+            return;
+        }
         if self.switcher.open {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 self.switcher.open = false;
@@ -101,13 +119,9 @@ impl PapertillingApp {
             let redo_y = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
             let undo_z = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
             if ctx.input_mut(|i| i.consume_shortcut(&redo_shift) || i.consume_shortcut(&redo_y)) {
-                let it = self.gallery.active_item().clone();
-                self.combine.redo_last(&it);
-                self.combine.sync_selection_to_canvas(&mut self.canvas2d);
+                self.combine_redo();
             } else if ctx.input_mut(|i| i.consume_shortcut(&undo_z)) {
-                let it = self.gallery.active_item().clone();
-                self.combine.undo_last(&it);
-                self.combine.sync_selection_to_canvas(&mut self.canvas2d);
+                self.combine_undo();
             } else if let Some(idx) = self.combine.selected_pin
                 && ctx.input_mut(|i| {
                     consume_unmodified_key(i, egui::Key::Delete)

@@ -1,7 +1,8 @@
-//! Versioned session file (`session.json`, schema 1): the user-visible state needed to resume where the user left
-//! off. Stored next to the alias file in the OS config folder and written with the same sidecar lock and atomic
-//! temp-file replace (`crate::aliases`). Never read or written in `--smoke-test` mode or in tests (the app then
-//! has no session path), mirroring the in-memory `AliasStore`.
+//! Versioned session file (`session.json`, schema 3; schemas 1 and 2 are still read and migrated): the
+//! user-visible state needed to resume where the user left off. Stored next to the alias file in the OS config
+//! folder and written with the same sidecar lock and atomic temp-file replace (`crate::aliases`). Never read or
+//! written in `--smoke-test` mode or in tests (the app then has no session path), mirroring the in-memory
+//! `AliasStore`. Older app builds refuse schema-3 files (accepted when the schema was raised for the deck).
 //!
 //! Loading is lenient: every field is read on its own (`lenient`), so a field of the wrong type falls back to its
 //! default without losing the others; numbers are `Option`s because serde_json writes NaN / inf as `null`. Values
@@ -24,7 +25,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::aliases::{LatticeAliasKey, config_dir, lock_sidecar, replace_atomically};
 
 pub const SESSION_FILENAME: &str = "session.json";
-pub const SESSION_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_SCHEMA_VERSION: u32 = 3;
+/// Newest schema this build reads (1..=it are migrated; anything newer is refused, never overwritten).
+const SCHEMA_MAX: u64 = SESSION_SCHEMA_VERSION as u64;
 
 thread_local! {
     /// Fields dropped by [`lenient`] during the current [`parse_session`] call.
@@ -107,9 +110,12 @@ pub struct SessionState {
     #[serde(default, deserialize_with = "lenient")]
     pub analysis_view: Option<String>,
     /// Workbench (stage S2..S6 panels): `{"view": "<WorkbenchView>", "s2": .., ...}`, each panel's own JSON.
-    /// Optional and additive, so schema 2 is kept: older files load without it and older apps ignore it.
+    /// Optional: files written before it load without it.
     #[serde(default, deserialize_with = "lenient")]
     pub workbench: Option<serde_json::Value>,
+    /// Command Deck: `{"realm": "<Realm>"}` (added in schema 3; optional, the deck always loads closed).
+    #[serde(default, deserialize_with = "lenient")]
+    pub deck: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -246,7 +252,7 @@ impl std::fmt::Display for SessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Corrupt(e) => write!(f, "invalid session file ({e})"),
-            Self::Unsupported(v) => write!(f, "unsupported session schema_version {v} (expected {SESSION_SCHEMA_VERSION})"),
+            Self::Unsupported(v) => write!(f, "unsupported session schema_version {v} (this build reads 1 to {SESSION_SCHEMA_VERSION})"),
             Self::Io(e) => write!(f, "cannot read session file ({e})"),
         }
     }
@@ -282,7 +288,7 @@ pub fn parse_session(raw: &str) -> Result<(SessionState, u32), SessionError> {
     };
     let version = obj.get("schema_version").and_then(serde_json::Value::as_u64);
     match version {
-        Some(1 | 2) => {}
+        Some(1..=SCHEMA_MAX) => {}
         Some(v) => return Err(SessionError::Unsupported(u32::try_from(v).unwrap_or(u32::MAX))),
         None => return Err(SessionError::Corrupt(String::from("missing schema_version"))),
     }

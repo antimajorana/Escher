@@ -13,6 +13,7 @@ use super::solver::{ExportKind, export_text, export_to};
 use super::table::{DefectRow, RowKind, SortCol, sort_order};
 use super::{S2Sub, cell_scale, make_host, point, solver, stone_wales};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
+use crate::game_menu::test_util::goto_defects_view;
 use crate::app::{DefectsView, NavTab, PapertillingApp};
 use crate::canvas2d::Scene2D;
 use crate::workbench::{WbPanel, WorkbenchView};
@@ -336,9 +337,7 @@ fn s2_subrows_quarantine_clean() {
     let hc = h.state().backend.find_named("honeycomb").cloned().unwrap();
     h.state_mut().select_lattice_and_sync(hc);
     h.run_steps(3);
-    h.get_by_label("2. Defects").click();
-    h.run_steps(2);
-    h.get_by_label("Point, Stone-Wales & GB").click();
+    goto_defects_view(&mut h, DefectsView::PointAndBoundary);
     wait_until(&mut h, "S2", |a| !a.workbench_busy() && !a.workbench.dirty);
     for s in S2Sub::ALL.into_iter().chain([S2Sub::Point]) {
         h.get_by_label(s.label()).click();

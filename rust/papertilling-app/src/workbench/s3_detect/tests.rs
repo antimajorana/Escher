@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use super::{FieldKind, S3Job, S3Out, S3Sub, Settings, Source, run_job};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
+use crate::game_menu::test_util::goto_defects_view;
 use crate::app::{DefectsView, NavTab, PapertillingApp};
 use crate::workbench::{WbCtx, WbPanel, WorkbenchView};
 use egui_kittest::kittest::Queryable;
@@ -278,9 +279,7 @@ fn s3_subrows_quarantine_clean() {
     let hc = h.state().backend.find_named("honeycomb").cloned().unwrap();
     h.state_mut().select_lattice_and_sync(hc);
     h.run_steps(3);
-    h.get_by_label("2. Defects").click();
-    h.run_steps(2);
-    h.get_by_label("Detect & Fields").click();
+    goto_defects_view(&mut h, DefectsView::DetectFields);
     wait_until(&mut h, "S3", |a| !a.workbench_busy() && !a.workbench.dirty);
     for s in S3Sub::ALL.into_iter().chain([S3Sub::Detect]) {
         h.get_by_label(s.label()).click();

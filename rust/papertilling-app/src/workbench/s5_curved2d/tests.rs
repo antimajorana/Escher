@@ -18,6 +18,7 @@ use papertilling_core::noneuclidean2d::build_unified_pq;
 use super::draw::{CLIP_R, s2_picture};
 use super::{S5Out, S5Sub, check_symbol, excess_fraction, large_h2, orbifolds, pq, surfaces, wythoff};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
+use crate::game_menu::test_util::goto_lattices_view;
 use crate::app::{LatticesView, NavTab, PapertillingApp};
 use crate::canvas2d::Scene2D;
 use crate::workbench::{WbPanel, WorkbenchView};
@@ -306,9 +307,7 @@ fn s5_panel_state_survives_json_roundtrip() {
 #[test]
 fn s5_subrows_quarantine_clean() {
     let mut h = harness();
-    h.get_by_label("1. Lattices").click();
-    h.run_steps(2);
-    h.get_by_label("{p,q} on S² / E² / H²").click();
+    goto_lattices_view(&mut h, LatticesView::Curved2D);
     wait_until(&mut h, "S5", |a| !a.workbench_busy() && !a.workbench.dirty);
     for s in S5Sub::ALL.into_iter().chain([S5Sub::Regular]) {
         h.get_by_label(s.label()).click();

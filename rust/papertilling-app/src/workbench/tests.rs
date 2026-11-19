@@ -79,6 +79,18 @@ fn routing_tables_are_consistent_and_labels_unique() {
     labels.sort_unstable();
     labels.dedup();
     assert_eq!(labels.len(), n, "sub-nav and mode labels must be unique (kittest get_by_label)");
+
+    // the internal route never shows: headings are realm-native and never equal a Command Deck card title
+    let mut app = new_app();
+    let titles: Vec<String> = crate::game_menu::Realm::ALL
+        .into_iter()
+        .flat_map(|r| app.deck_cards(r, 0, "").into_iter().map(|c| c.title))
+        .collect();
+    for wv in WorkbenchView::ALL {
+        let h = wv.heading();
+        assert!(!h.contains("Workbench"), "{wv:?}: heading '{h}' names the internal route");
+        assert!(!titles.iter().any(|t| t == h), "{wv:?}: heading '{h}' equals a card title");
+    }
 }
 
 #[test]

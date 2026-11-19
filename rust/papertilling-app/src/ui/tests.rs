@@ -28,6 +28,17 @@ fn app_harness(theme: StudioTheme) -> Harness<'static, PapertillingApp> {
         )
 }
 
+/// The Inspector toggle lives in the HUD "View" menu: open it, click the checkbox, close the menu with Esc.
+fn toggle_inspector_via_view_menu(harness: &mut Harness<'static, PapertillingApp>) {
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label("Inspector (Ctrl+I)").click();
+    harness.run_steps(2);
+    if egui::Popup::is_any_open(&harness.ctx) {
+        harness.key_press(egui::Key::Escape);
+    }
+}
+
 #[test]
 fn studio_shell_three_column_layout_bounds_are_valid_and_non_overlapping() {
     let mut harness = app_harness(StudioTheme::Paper);
@@ -58,11 +69,7 @@ fn right_inspector_collapses_widens_center_and_still_polls_background_tabs() {
     let right_w = harness.state().test_rects.right.width();
     assert!(harness.state().right_inspector_open);
 
-    harness
-        .get_all_by_label("Inspector")
-        .next()
-        .expect("Inspector toggle button")
-        .click();
+    toggle_inspector_via_view_menu(&mut harness);
     harness.run();
     assert!(!harness.state().right_inspector_open);
     assert_eq!(harness.state().test_rects.right, egui::Rect::NOTHING);
@@ -86,11 +93,7 @@ fn right_inspector_collapses_widens_center_and_still_polls_background_tabs() {
         "3D mesh must still sync on Combine when Right Inspector is collapsed"
     );
 
-    harness
-        .get_all_by_label("Inspector")
-        .next()
-        .expect("Inspector toggle button")
-        .click();
+    toggle_inspector_via_view_menu(&mut harness);
     harness.run_steps(2);
     assert!(harness.state().right_inspector_open);
     assert!(harness.state().test_rects.right.width() >= 260.0);

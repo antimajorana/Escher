@@ -120,6 +120,7 @@ pub(crate) fn sample_state() -> SessionState {
         analysis_target: Some("SingleDefect".into()),
         analysis_view: Some("Split2D3D".into()),
         workbench: Some(serde_json::json!({"view": "S5Curved2d"})),
+        deck: Some(serde_json::json!({"realm": "Forge"})),
     }
 }
 
@@ -169,7 +170,7 @@ fn corrupt_empty_and_foreign_schema_documents_are_refused_without_panic() {
         assert!(matches!(err, SessionError::Corrupt(_)), "{raw:?}: {err:?}");
         assert!(err.may_overwrite());
     }
-    for v in [0_u32, 99] {
+    for v in [0_u32, 4, 99] {
         let err = parse_session(&format!(r#"{{"schema_version": {v}, "theme": "Studio"}}"#)).unwrap_err();
         assert_eq!(err, SessionError::Unsupported(v));
         assert!(!err.may_overwrite(), "foreign schema_version {v} must never be overwritten");

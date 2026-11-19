@@ -30,7 +30,7 @@ mod browser_tests;
 mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BrowseMode {
+pub(crate) enum BrowseMode {
     ByGroup,
     Named21,
     CustomBuilder,

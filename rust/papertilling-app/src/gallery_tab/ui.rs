@@ -67,21 +67,37 @@ impl GalleryTabState {
         lattice_changed
     }
 
+    /// Switch the browse mode as its left-rail tab does (also used by the Command Deck); true = the lattice changed.
+    pub(crate) fn set_browse_mode(&mut self, m: BrowseMode, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
+        match m {
+            BrowseMode::ByGroup => {
+                self.select_group(self.selected_group_idx, backend, canvas);
+                true
+            }
+            BrowseMode::Named21 => {
+                self.select_named(self.selected_named_idx, backend, canvas);
+                true
+            }
+            BrowseMode::CustomBuilder => {
+                self.mode = BrowseMode::CustomBuilder;
+                false
+            }
+        }
+    }
+
     /// Left rail: browse mode tabs, group/catalogue/named tables, live search, and custom builder.
     pub fn show_left_panel(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
         let mut lattice_changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong("Browse:");
-            if ui.selectable_label(self.mode == BrowseMode::ByGroup, "17 Groups").clicked() {
-                self.select_group(self.selected_group_idx, backend, canvas);
-                lattice_changed = true;
-            }
-            if ui.selectable_label(self.mode == BrowseMode::Named21, "Named (21)").clicked() {
-                self.select_named(self.selected_named_idx, backend, canvas);
-                lattice_changed = true;
-            }
-            if ui.selectable_label(self.mode == BrowseMode::CustomBuilder, "+ Custom").clicked() {
-                self.mode = BrowseMode::CustomBuilder;
+            for (m, label) in [
+                (BrowseMode::ByGroup, "17 Groups"),
+                (BrowseMode::Named21, "Named (21)"),
+                (BrowseMode::CustomBuilder, "+ Custom"),
+            ] {
+                if ui.selectable_label(self.mode == m, label).clicked() {
+                    lattice_changed |= self.set_browse_mode(m, backend, canvas);
+                }
             }
         });
         ui.add_space(4.0);

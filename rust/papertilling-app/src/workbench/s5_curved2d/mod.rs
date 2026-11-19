@@ -245,6 +245,36 @@ impl Panel {
 }
 
 impl WbPanel for Panel {
+    fn sub_labels(&self) -> &'static [&'static str] {
+        const LABELS: [&str; 5] = ["Regular {p,q}", "Wythoff family", "Large H² patch", "Surfaces & nets", "Orbifolds & TG cells"];
+        &LABELS
+    }
+    fn sub_index(&self) -> usize {
+        self.sub as usize
+    }
+    /// The body of the sub-row click branch in `show_controls`.
+    fn select_sub(&mut self, i: usize) -> bool {
+        match S5Sub::ALL.get(i) {
+            Some(&s) if self.sub != s => {
+                self.sub = s;
+                true
+            }
+            _ => false,
+        }
+    }
+    fn breadcrumb_geometry(&self) -> Option<&'static str> {
+        let (p, q) = match self.sub {
+            S5Sub::Regular => (self.pq.p, self.pq.q),
+            S5Sub::Wythoff => (self.wy.p, self.wy.q),
+            S5Sub::LargeH2 => (self.large.p, self.large.q),
+            S5Sub::Surfaces | S5Sub::Orbifolds => return None,
+        };
+        Some(match check_symbol(p, q).ok()? {
+            GeometryKind::Spherical => "S² Sphere",
+            GeometryKind::Euclidean => "E² Plane",
+            GeometryKind::Hyperbolic => "H² Hyperbolic",
+        })
+    }
     fn show_controls(&mut self, ui: &mut egui::Ui, _cx: &WbCtx) -> bool {
         let mut rebuild = false;
         ui.horizontal_wrapped(|ui| {

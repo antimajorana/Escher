@@ -1,4 +1,5 @@
-//! Workbench host (`NavTab::Workbench`): one tab, five stage panels (S2..S6) behind the [`WbPanel`] trait.
+//! Host of the five stage panels (S2..S6) behind the [`WbPanel`] trait. `NavTab::Workbench` is only the internal
+//! route: the user reaches every sub-row through its Command Deck card (`crate::game_menu`) and never sees the name.
 //!
 //! The shared app files route here once (P0 prewire). After that, each stage only replaces the files inside its own
 //! `sN_*` folder: the panel type there is always `Panel` (with `Default`) implementing [`WbPanel`].
@@ -84,14 +85,15 @@ impl WorkbenchView {
         }
     }
 
-    /// Heading of the panel (never equal to a sub-nav label: kittest `get_by_label` needs those unique).
-    fn heading(self) -> &'static str {
+    /// Realm-native heading of the panel (never equal to a sub-row or card label: kittest `get_by_label` needs those
+    /// unique; never names the internal "Workbench" route).
+    pub(crate) fn heading(self) -> &'static str {
         match self {
-            Self::S2Defects => "Workbench S2: point defects, Stone-Wales, grain boundaries",
-            Self::S3Detect => "Workbench S3: defect detection and fields",
-            Self::S4Flat3d => "Workbench S4: flat 3D slabs, tubes and flakes",
-            Self::S5Curved2d => "Workbench S5: {p,q} tilings of constant curvature",
-            Self::S6Honeycombs => "Workbench S6: 3D honeycombs and periodic surfaces",
+            Self::S2Defects => "Defects Forge › point defects, Stone-Wales, grain boundaries",
+            Self::S3Detect => "Defects Forge › detection and elastic fields",
+            Self::S4Flat3d => "Manifolds › flat 3D slabs, tubes, flakes, platycosms",
+            Self::S5Curved2d => "Geometries › {p,q} tilings on S², E² and H²",
+            Self::S6Honeycombs => "Geometries › 3D honeycombs, TPMS and Dirichlet cells",
         }
     }
 }
@@ -156,6 +158,21 @@ pub(crate) trait WbPanel {
     fn restore(&mut self, _v: &Value, _notes: &mut Vec<String>) {}
     /// Small, fast settings for the `--smoke-test` stage of this view.
     fn smoke_defaults(&mut self) {}
+    /// Labels of the panel's sub-rows, in order (one Command Deck card each).
+    fn sub_labels(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn sub_index(&self) -> usize {
+        0
+    }
+    /// Select sub-row `i` exactly as clicking its selectable label does; true if it changed.
+    fn select_sub(&mut self, _i: usize) -> bool {
+        false
+    }
+    /// Breadcrumb geometry text (S5 only).
+    fn breadcrumb_geometry(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 pub(crate) struct WorkbenchState {
@@ -208,6 +225,27 @@ impl WorkbenchState {
             WorkbenchView::S5Curved2d => &mut self.s5,
             WorkbenchView::S6Honeycombs => &mut self.s6,
         }
+    }
+
+    /// Point the workbench at `view`, sub-row `sub` (as its left-rail click would), and mark it for a rebuild.
+    pub(crate) fn select(&mut self, view: WorkbenchView, sub: usize) {
+        self.view = view;
+        self.panel_mut(view).select_sub(sub);
+        self.dirty = true;
+    }
+
+    pub(crate) fn sub_labels(&self, view: WorkbenchView) -> &'static [&'static str] {
+        self.panel(view).sub_labels()
+    }
+
+    pub(crate) fn sub_index(&self, view: WorkbenchView) -> usize {
+        self.panel(view).sub_index()
+    }
+
+    /// Breadcrumb geometry text of `view` (S5: from its current symbol), if the panel knows one.
+    #[allow(dead_code)] // M1 prewire: read by the HUD breadcrumb (WP-A).
+    pub(crate) fn breadcrumb_geometry(&self, view: WorkbenchView) -> Option<&'static str> {
+        self.panel(view).breadcrumb_geometry()
     }
 
     pub(crate) fn active(&self) -> &dyn WbPanel {
