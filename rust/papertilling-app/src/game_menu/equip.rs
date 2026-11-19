@@ -41,21 +41,27 @@ impl PapertillingApp {
             CardId::Surface(t) => {
                 self.surfaces.target = t;
                 self.surfaces.clamp_params(self.gallery.active_item());
+                let builds = self.surfaces.syncs;
                 self.select_lattices_view(LatticesView::Manifolds);
-                self.surfaces.activate_and_sync(
-                    self.gallery.active_item(),
-                    &self.backend,
-                    &mut self.canvas2d,
-                    &mut self.view3d,
-                );
+                if self.surfaces.syncs == builds {
+                    // already on Manifolds (the view switch returned early): build the new target here, once
+                    self.surfaces.activate_and_sync(
+                        self.gallery.active_item(),
+                        &self.backend,
+                        &mut self.canvas2d,
+                        &mut self.view3d,
+                    );
+                }
             }
             CardId::Wb(v, i) => self.enter_workbench(v, Some(usize::from(i))),
             CardId::Lattice(r) => {
-                self.select_lattice_ref(r);
                 // a lattice cannot be shown in a view that does not draw the Gallery lattice
-                if !self.view_is_lattice_driven() {
-                    self.select_lattices_view(LatticesView::Plane2D);
-                }
+                let driven = self.view_is_lattice_driven();
+                self.select_lattice_then(r, |app| {
+                    if !driven {
+                        app.select_lattices_view(LatticesView::Plane2D);
+                    }
+                });
             }
             CardId::Analysis(t) => {
                 self.analysis.select_target(t);
@@ -80,25 +86,37 @@ impl PapertillingApp {
     }
 
     /// Make the stored lattice `r` the Gallery selection (a no-op when it is already selected, which keeps its
-    /// tuned parameters; a stale ref that no longer resolves is ignored).
-    fn select_lattice_ref(&mut self, r: LatticeRef) {
-        if let Some(item) = self.lattice_ref_item(r).cloned() {
-            self.select_lattice_and_sync(item);
+    /// tuned parameters; a stale ref that no longer resolves is ignored), then `route` to the view that shows it.
+    /// The tab being left is never reloaded for the new lattice: when `route` changes the view, the new view's
+    /// activation loads the lattice once; only when it leaves the view as it was is the active tab resynced.
+    fn select_lattice_then(&mut self, r: LatticeRef, route: impl FnOnce(&mut Self)) {
+        let before = self.route_state();
+        let changed = match self.lattice_ref_item(r).cloned() {
+            Some(item) => self.select_lattice_quiet(item),
+            None => false,
+        };
+        route(self);
+        if changed && self.route_state() == before {
+            self.resync_active_tab_for_lattice();
         }
+    }
+
+    fn route_state(&self) -> (AppMode, NavTab, LatticesView, DefectsView) {
+        (self.active_mode, self.active_tab, self.lattices_view, self.defects_view)
     }
 
     /// Stat-card "Open in Defects Forge": select the lattice, open the Defects catalogue on it, close the deck.
     pub(crate) fn deck_open_in_forge(&mut self, r: LatticeRef) {
-        self.select_lattice_ref(r);
-        self.select_defects_view(DefectsView::Catalogue2D);
+        self.select_lattice_then(r, |app| app.select_defects_view(DefectsView::Catalogue2D));
         self.deck_close();
     }
 
     /// Stat-card "Open in Analysis Lab": select the lattice, make the 2D lattice the lab's source, close the deck.
     pub(crate) fn deck_open_in_lab(&mut self, r: LatticeRef) {
-        self.select_lattice_ref(r);
-        self.analysis.select_target(AnalysisTarget::PlaneLattice);
-        self.switch_mode(AppMode::Analysis);
+        self.select_lattice_then(r, |app| {
+            app.analysis.select_target(AnalysisTarget::PlaneLattice);
+            app.switch_mode(AppMode::Analysis);
+        });
         self.deck_close();
     }
 

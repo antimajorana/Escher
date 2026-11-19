@@ -82,7 +82,8 @@ impl PapertillingApp {
         }
         if take(ctx, &[Key::Tab, Key::M]) {
             cancel_focus_move(ctx);
-            self.deck_open(self.current_realm(), ctx);
+            let realm = self.deck_entry_realm();
+            self.deck_open(realm, ctx);
             return true;
         }
         false
@@ -90,13 +91,19 @@ impl PapertillingApp {
 
     fn deck_keys_open(&mut self, ctx: &egui::Context) {
         if egui::Popup::is_any_open(ctx) {
-            // a HUD menu or combo above the deck handles its own keys (Esc closes it, not the deck)
+            // A HUD menu or combo above the deck handles its own keys (Esc closes it, not the deck) and its arrows
+            // (the menu reads the pending focus direction). Tab / Shift+Tab would walk focus out of the menu into
+            // the panels hidden under the deck, so that move is cancelled (the key itself is left alone).
+            if ctx.input(|i| i.events.iter().any(|e| matches!(e, Event::Key { key: Key::Tab, pressed: true, .. }))) {
+                cancel_focus_move(ctx);
+            }
             return;
         }
         let focused = ctx.memory(|m| m.focused());
         let filter_focused = focused.is_some() && focused == self.deck.filter_id;
-        if self.gallery.renaming || (ctx.text_edit_focused() && !filter_focused) {
-            // the HUD rename field (or another text field) keeps its Enter / Esc
+        if self.gallery.rename_holds_keys() || (ctx.text_edit_focused() && !filter_focused) {
+            // the HUD rename field (or another text field) keeps its Enter / Esc; a rename whose field lost focus
+            // (e.g. the deck was opened with the mouse) stays pending but no longer blocks the deck keys
             return;
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {

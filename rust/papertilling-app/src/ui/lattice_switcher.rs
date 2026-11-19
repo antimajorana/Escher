@@ -4,11 +4,13 @@
 //! at once (`PapertillingApp::select_lattice_and_sync`).
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::app::PapertillingApp;
 use crate::backend::{CatalogueItemUi, CatalogueRuleUi};
 use crate::gallery_tab::browser::{rule_tag, tokens_of};
 use crate::gallery_tab::filter::query_matches;
+use crate::gallery_tab::thumb_cache::ThumbGeom;
 
 pub const RECENT_MAX: usize = 10;
 const ROW_H: f32 = 22.0;
@@ -72,18 +74,34 @@ impl PapertillingApp {
         }
     }
 
-    /// A `px` x `px` thumbnail of the selected lattice (the HUD lattice segment draws it before the name).
+    /// A `px` x `px` thumbnail of the lattice the HUD lattice segment names: `active_item()`, i.e. at the current
+    /// slider values. At the stored values it is the shared Gallery preview (keyed by alias); a tuned lattice gets
+    /// its own one-slot preview, rebuilt when its recipe changes (never added to the alias-keyed cache).
     pub(crate) fn paint_lattice_thumb(&mut self, ui: &mut egui::Ui, px: f32) {
         let t = tokens_of(ui);
-        let base = self.gallery.base_item().clone();
         let (thumb, _) = ui.allocate_exact_size(egui::vec2(px, px), egui::Sense::hover());
         if ui.is_rect_visible(thumb) {
             let p = ui.painter_at(thumb);
             p.rect_filled(thumb, 3.0, t.bg_canvas_2d);
-            if let Some(g) = self.gallery.thumbs.get_or_build(&base) {
+            if let Some(g) = self.hud_thumb_geom() {
                 g.paint(&p.with_clip_rect(thumb), thumb, &t);
             }
         }
+    }
+
+    /// Preview geometry of `gallery.active_item()` (see [`Self::paint_lattice_thumb`]).
+    pub(crate) fn hud_thumb_geom(&mut self) -> Option<Arc<ThumbGeom>> {
+        let (base, active) = (self.gallery.base_item(), self.gallery.active_item());
+        if active.recipe == base.recipe && active.frame == base.frame {
+            let base = base.clone();
+            return self.gallery.thumbs.get_or_build(&base);
+        }
+        let key = (active.alias_key.clone(), active.recipe.clone(), active.frame);
+        if self.deck.hud_thumb.as_ref().is_none_or(|(k, _)| *k != key) {
+            let g = Arc::new(ThumbGeom::build(active));
+            self.deck.hud_thumb = Some((key, g));
+        }
+        self.deck.hud_thumb.as_ref().map(|(_, g)| Arc::clone(g))
     }
 
     /// The palette itself (a modal; Esc or a click outside closes it).

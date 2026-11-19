@@ -180,9 +180,11 @@ impl PapertillingApp {
                 }
             }
         }
-        // Command Deck (schema 3): its last realm, else the realm of the restored view; always loads closed.
+        // Command Deck (schema 3): its last realm, else the realm of the restored view; always loads closed. A saved
+        // realm is where the next Tab / Codex opens the deck (`deck_entry_realm`, once).
         if !self.deck.restore(st.deck.as_ref(), notes) {
             self.deck.realm = self.current_realm();
+            self.deck.resume_saved_realm = false;
         }
         self.deck.open = false;
     }

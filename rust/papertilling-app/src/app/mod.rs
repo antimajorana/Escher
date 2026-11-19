@@ -245,14 +245,22 @@ impl PapertillingApp {
     /// Select `item` (a stored lattice at its default values) from anywhere, e.g. the Quick Lattice Switcher:
     /// the Gallery selection follows it and the active tab reloads for it at once, without a tab round-trip.
     pub(crate) fn select_lattice_and_sync(&mut self, item: CatalogueItemUi) {
+        if self.select_lattice_quiet(item) {
+            self.resync_active_tab_for_lattice();
+        }
+    }
+
+    /// Select `item` in the Gallery (and Recent) without reloading the active tab; true = the lattice changed.
+    /// For callers that switch the view right after (its activation loads the new lattice once).
+    pub(crate) fn select_lattice_quiet(&mut self, item: CatalogueItemUi) -> bool {
         if item.alias_key == self.gallery.base_item().alias_key {
             // already selected: keep its tuned parameters and every tab's work (e.g. Ctrl+K, Enter on Recent #1)
-            return;
+            return false;
         }
         self.gallery.cancel_rename();
         self.gallery.select_external(item, &self.backend, &mut self.canvas2d);
         self.switcher.push_recent(self.gallery.base_item());
-        self.resync_active_tab_for_lattice();
+        true
     }
 
     /// Reload the active tab for the Gallery's current `active_item()` (another lattice or parameter values).
@@ -324,9 +332,10 @@ impl PapertillingApp {
             return;
         }
         if self.active_tab == NavTab::Workbench && self.workbench_busy() {
-            self.export_status = String::from("Wait for the workbench build before exporting.");
+            self.export_status = String::from("Wait for the scene build before exporting.");
             return;
         }
+        let wb_name = format!("{}_scene.svg", self.workbench.view.file_stem());
         let default_name = match self.active_tab {
             NavTab::Gallery => "lattice_gallery.svg",
             NavTab::Surfaces => "surface_net.svg",
@@ -334,7 +343,7 @@ impl PapertillingApp {
             NavTab::Combine => "combined_defects.svg",
             NavTab::Atlas => "atlas_scene.svg",
             NavTab::Analysis => "analysis_spectrum.svg",
-            NavTab::Workbench => "workbench_scene.svg",
+            NavTab::Workbench => wb_name.as_str(),
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 2D scene (SVG or PNG)")
@@ -367,7 +376,7 @@ impl PapertillingApp {
             return;
         }
         if self.active_tab == NavTab::Workbench && self.workbench_busy() {
-            self.export_status = String::from("Wait for the workbench build before exporting .obj.");
+            self.export_status = String::from("Wait for the scene build before exporting .obj.");
             return;
         }
         if self.active_tab == NavTab::Defects && self.defects.is_busy() {
@@ -385,6 +394,7 @@ impl PapertillingApp {
                 String::from("Finish moving pins and wait for the crystal build before exporting .obj.");
             return;
         }
+        let wb_name = format!("{}_mesh.obj", self.workbench.view.file_stem());
         let default_name = match self.active_tab {
             NavTab::Gallery => "mesh.obj",
             NavTab::Surfaces => "surface_mesh.obj",
@@ -392,7 +402,7 @@ impl PapertillingApp {
             NavTab::Combine => "combined_sheet.obj",
             NavTab::Atlas => "atlas_mesh.obj",
             NavTab::Analysis => "analysis_mesh.obj",
-            NavTab::Workbench => "workbench_mesh.obj",
+            NavTab::Workbench => wb_name.as_str(),
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export active 3D mesh (.obj)")

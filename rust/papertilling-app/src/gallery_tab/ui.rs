@@ -8,20 +8,25 @@ use crate::canvas2d::Canvas2D;
 
 impl GalleryTabState {
     /// Inline rename controls (Enter to save, Esc to cancel, Reset name when a custom alias is active), added
-    /// straight into the caller's (wrapping) row so each control wraps on its own at narrow widths. The name itself
-    /// is shown by the Quick Lattice Switcher chip next to them.
+    /// straight into the caller's row (the HUD, after the lattice segment that shows the name and its `±`). Their
+    /// width is bounded: the catalogue id is a hover on the field and long notes truncate, so the HUD can keep the
+    /// whole bar on its row.
     pub fn show_rename_bar(&mut self, ui: &mut egui::Ui, backend: &mut AppBackend, canvas: &mut Canvas2D, id_salt: &str) {
+        self.rename_has_focus = false;
         if self.renaming {
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.rename_buf)
-                    .id_salt(id_salt)
-                    .desired_width(165.0)
-                    .hint_text(&self.active_item.default_label),
-            );
+            let resp = ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.rename_buf)
+                        .id_salt(id_salt)
+                        .desired_width(165.0)
+                        .hint_text(&self.active_item.default_label),
+                )
+                .on_hover_text(format!("Catalogue id: {}", self.active_item.default_label));
             if self.rename_focus_pending {
                 resp.request_focus();
                 self.rename_focus_pending = false;
             }
+            self.rename_has_focus = resp.has_focus();
             let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
             if esc {
@@ -31,7 +36,6 @@ impl GalleryTabState {
             } else if ui.small_button("Cancel").clicked() {
                 self.cancel_rename();
             }
-            ui.small(format!("(id: {})", self.active_item.default_label));
         } else {
             if self.readout.chiral {
                 let tip = if self.readout.topologically_chiral {
@@ -42,7 +46,7 @@ impl GalleryTabState {
                 ui.small("±").on_hover_text(tip);
             }
             if self.active_item.has_custom_name() {
-                ui.small(format!("[{}]", self.active_item.default_label));
+                small_truncated(ui, format!("[{}]", self.active_item.default_label), 120.0);
             }
             if ui.small_button("✎ Rename").on_hover_text("Give this lattice a persistent custom name").clicked() {
                 self.begin_rename();
@@ -54,7 +58,7 @@ impl GalleryTabState {
             }
         }
         if let Some(note) = &self.alias_note {
-            ui.small(note);
+            small_truncated(ui, note.clone(), 160.0);
         }
     }
 
@@ -204,4 +208,12 @@ impl GalleryTabState {
         }
         changed
     }
+}
+
+/// A small label cut to `max_w` with an ellipsis (egui shows the whole text on hover when it is cut).
+fn small_truncated(ui: &mut egui::Ui, text: String, max_w: f32) {
+    ui.scope(|ui| {
+        ui.set_max_width(max_w);
+        ui.add(egui::Label::new(egui::RichText::new(text).small()).truncate());
+    });
 }

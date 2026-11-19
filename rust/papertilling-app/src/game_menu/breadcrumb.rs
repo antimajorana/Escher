@@ -82,13 +82,21 @@ impl PapertillingApp {
     }
 
     /// Group segment: `p6m (*632)`, hover with the ITA number and Conway orbifold.
+    /// On a special locus of the sliders the tuned lattice has a larger group than its stored one: the segment
+    /// then reads `p4g (4*2) → p4m` and the hover says why.
     fn group_segment(&self) -> Segment {
         let g = self.gallery.active_item().group.as_str();
         let orb = wallpaper_to_orbifold(g).ok();
-        let text = match orb {
+        let mut text = match orb {
             Some(o) => format!("{g} ({o})"),
             None => g.to_string(),
         };
+        let ro = &self.gallery.readout;
+        let raised = (!ro.status_ok && !ro.active_group.is_empty() && ro.active_group != g)
+            .then_some(ro.active_group.as_str());
+        if let Some(big) = raised {
+            let _ = write!(text, " → {big}");
+        }
         let mut hover = format!("Wallpaper group {g}");
         if let Some(n) = ita_number(g) {
             let _ = write!(hover, " · ITA {n}");
@@ -96,23 +104,25 @@ impl PapertillingApp {
         if let Some(o) = orb {
             let _ = write!(hover, " · Conway orbifold {o}");
         }
+        if let Some(big) = raised {
+            let _ = write!(hover, "\nAt these slider values the lattice has the larger group {big} (special locus)");
+        }
         let _ = write!(hover, "\n{}", click_hint(Realm::Groups));
         Segment { text, hover, realm: Realm::Groups }
     }
 
-    /// Lattice segment: the Gallery label (`±` when chiral), hover with rule, vertex degrees and sites per cell.
+    /// Lattice segment: the Gallery label, hover with rule, vertex degrees and sites per cell. The `±` of a chiral
+    /// lattice is drawn once, by the rename controls right after this segment (with its own hover).
     fn lattice_segment(&self) -> Segment {
         let it = self.gallery.active_item();
-        let mut text = it.label.clone();
-        if it.chiral {
-            text.push_str(" ±");
-        }
+        let text = it.label.clone();
         let hover = format!(
-            "{} · rule {} · vertex degrees {} · {} sites/cell\n{}",
+            "{} · rule {} · vertex degrees {} · {} sites/cell{}\n{}",
             it.display_with_orig(),
             rule_tag(&it.alias_key),
             it.coordination,
             it.sites_per_cell,
+            if it.chiral { " · chiral (±)" } else { "" },
             click_hint(Realm::Tilings),
         );
         Segment { text, hover, realm: Realm::Tilings }

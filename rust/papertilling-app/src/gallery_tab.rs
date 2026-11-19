@@ -67,6 +67,8 @@ pub struct GalleryTabState {
     pub renaming: bool,
     pub rename_buf: String,
     rename_focus_pending: bool,
+    /// The rename field had keyboard focus when it was last drawn.
+    rename_has_focus: bool,
     pub alias_note: Option<String>,
     pub custom_builder: builder_ui::CustomBuilderState,
     /// Lattice browser: card / table view, search and facets, previews, and per-rule lists of all 17 groups.
@@ -127,6 +129,7 @@ impl GalleryTabState {
             renaming: false,
             rename_buf: String::new(),
             rename_focus_pending: false,
+            rename_has_focus: false,
             alias_note: None,
             custom_builder: builder_ui::CustomBuilderState::new(),
             view: browser::BrowserView::default(),
@@ -250,6 +253,12 @@ impl GalleryTabState {
     pub fn cancel_rename(&mut self) {
         self.renaming = false;
         self.rename_focus_pending = false;
+    }
+
+    /// A rename is in progress and its field has (or is about to get) the keyboard. A pending rename whose field
+    /// lost focus does not hold Enter / Esc / arrows.
+    pub(crate) fn rename_holds_keys(&self) -> bool {
+        self.renaming && (self.rename_has_focus || self.rename_focus_pending)
     }
 
     pub fn commit_rename(&mut self, backend: &mut AppBackend, canvas: &mut Canvas2D) {

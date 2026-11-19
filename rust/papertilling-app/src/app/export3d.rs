@@ -58,7 +58,7 @@ impl PapertillingApp {
             }
             NavTab::Atlas if self.atlas.dirty => return refuse("Wait for the Atlas 3D scene to update before exporting the 3D PNG."),
             NavTab::Workbench if self.workbench_busy() || self.workbench.dirty => {
-                return refuse("Wait for the workbench 3D scene to update before exporting the 3D PNG.");
+                return refuse("Wait for the 3D scene to update before exporting the 3D PNG.");
             }
             NavTab::Analysis if self.analysis.view3d_dirty => {
                 return refuse("Wait for the 3D spectral view to update before exporting the 3D PNG.");
@@ -87,6 +87,7 @@ impl PapertillingApp {
             self.export_status = msg;
             return;
         }
+        let wb_name = format!("{}_mesh.png", self.workbench.view.file_stem());
         let default_name = match self.active_tab {
             NavTab::Gallery => "mesh.png",
             NavTab::Surfaces => "surface_mesh.png",
@@ -94,7 +95,7 @@ impl PapertillingApp {
             NavTab::Combine => "combined_sheet.png",
             NavTab::Atlas => "atlas_mesh.png",
             NavTab::Analysis => "analysis_ldos.png",
-            NavTab::Workbench => "workbench_mesh.png",
+            NavTab::Workbench => wb_name.as_str(),
         };
         let dialog = rfd::FileDialog::new()
             .set_title("Export 3D view (PNG)")

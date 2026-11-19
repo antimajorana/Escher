@@ -91,7 +91,10 @@ pub struct SurfacesTabState {
     pub(crate) current_mesh: Option<SurfaceMesh>,
     pub(super) current_report: Option<SurfaceCheckReport>,
     pub(crate) refusal_msg: Option<String>,
-    lattice_verdicts: Option<(VerdictKey, [SurfaceCellVerdictUi; 8])>,
+    /// Verdicts per lattice; `None` inside records a lattice whose verdicts cannot be built (not retried).
+    lattice_verdicts: Option<(VerdictKey, Option<[SurfaceCellVerdictUi; 8]>)>,
+    /// Synchronous builds run by `activate_and_sync` (lets callers and tests see whether a build already ran).
+    pub(crate) syncs: u64,
     builder: Option<build_async::SurfaceWorker>,
     queued_build: Option<(std::time::Instant, build_async::SurfaceJob)>,
 }
@@ -112,6 +115,7 @@ impl SurfacesTabState {
             current_report: None,
             refusal_msg: None,
             lattice_verdicts: None,
+            syncs: 0,
             builder: None,
             queued_build: None,
         }
@@ -170,6 +174,7 @@ impl SurfacesTabState {
         canvas: &mut Canvas2D,
         view3d: &mut View3dState,
     ) {
+        self.syncs += 1;
         self.cancel_build();
         let job = self.prepare_build(item);
         let built = build_async::run_job(&job);
@@ -259,13 +264,21 @@ impl SurfacesTabState {
         export_surface_obj(mesh, self.show_cover && mesh.cover.is_some(), path)
     }
 
-    /// The 8 verdicts of `surface_table` on the active lattice itself (cached per lattice).
+    /// The 8 verdicts of `surface_table` on the active lattice itself (cached per lattice, failures included, so
+    /// a lattice whose verdicts cannot be built is not rebuilt every frame).
     pub(crate) fn lattice_verdicts(&mut self, item: &CatalogueItemUi) -> Option<&[SurfaceCellVerdictUi; 8]> {
         let key = (item.group.clone(), item.recipe.clone(), item.frame);
         if self.lattice_verdicts.as_ref().is_none_or(|(k, _)| *k != key) {
-            let cells = live_ops::build_verdict_cells(item).ok()?;
+            let cells = live_ops::build_verdict_cells(item).ok();
             self.lattice_verdicts = Some((key, cells));
         }
-        self.lattice_verdicts.as_ref().map(|(_, c)| c)
+        self.lattice_verdicts.as_ref().and_then(|(_, c)| c.as_ref())
+    }
+
+    /// Whether the verdicts of `item` (built or failed) are cached.
+    #[cfg(test)]
+    pub(crate) fn verdicts_cached_for(&self, item: &CatalogueItemUi) -> bool {
+        let key = (item.group.clone(), item.recipe.clone(), item.frame);
+        self.lattice_verdicts.as_ref().is_some_and(|(k, _)| *k == key)
     }
 }

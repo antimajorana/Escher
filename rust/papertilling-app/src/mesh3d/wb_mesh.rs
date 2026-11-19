@@ -18,7 +18,7 @@ const EDGE_RGBA: [f32; 4] = [0.18, 0.24, 0.34, 0.92];
 pub fn mesh_from_points_edges(points: &[[f64; 3]], edges: &[(usize, usize, u8)], site_kinds: &[u8]) -> GpuMeshData {
     let n = points.len();
     let net = Net3dPatch {
-        name: String::from("workbench"),
+        name: String::from("scene"),
         space_group_num: 0,
         defect_label: String::new(),
         positions: points.to_vec(),

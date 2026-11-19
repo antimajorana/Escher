@@ -80,6 +80,8 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("papertilling — Desktop Explorer")
             .with_inner_size([1360.0, 840.0])
+            // the narrow HUD keeps the Codex button and the rename controls whole down to this width
+            .with_min_inner_size([game_menu::HUD_MIN_WINDOW_WIDTH, 480.0])
             .with_icon(load_app_icon()),
         depth_buffer: view3d::DEPTH_BITS,
         ..Default::default()

@@ -74,6 +74,17 @@ impl WorkbenchView {
         matches!(self, Self::S4Flat3d | Self::S5Curved2d | Self::S6Honeycombs)
     }
 
+    /// Stem of the default export file names (realm-native; never the internal "workbench" route name).
+    pub(crate) fn file_stem(self) -> &'static str {
+        match self {
+            Self::S2Defects => "defect_scene",
+            Self::S3Detect => "defect_detect",
+            Self::S4Flat3d => "flat3d",
+            Self::S5Curved2d => "curved2d",
+            Self::S6Honeycombs => "honeycombs",
+        }
+    }
+
     /// Key of this panel's entry in the session JSON.
     fn key(self) -> &'static str {
         match self {
@@ -395,13 +406,13 @@ impl WorkbenchState {
     pub(crate) fn restore(&mut self, v: Option<&Value>, notes: &mut Vec<String>) {
         let Some(v) = v else { return };
         let Some(obj) = v.as_object() else {
-            notes.push(String::from("workbench state is not an object (ignored)"));
+            notes.push(String::from("stage view state is not an object (ignored)"));
             return;
         };
         let name = obj.get("view").and_then(Value::as_str);
         match parse_named(&WorkbenchView::ALL, name) {
             Some(w) => self.view = w,
-            None if obj.contains_key("view") => notes.push(String::from("unknown workbench view (kept current)")),
+            None if obj.contains_key("view") => notes.push(String::from("unknown stage view (kept current)")),
             None => {}
         }
         for w in WorkbenchView::ALL {
@@ -414,7 +425,7 @@ impl WorkbenchState {
 
     pub(crate) fn export_active_obj(&self, path: &Path, view3d: &View3dState) -> Result<String, String> {
         if !self.has_mesh {
-            return Err(String::from("This workbench view is 2D only: there is no 3D mesh to export."));
+            return Err(String::from("This view is 2D only: there is no 3D mesh to export."));
         }
         crate::export_obj::write_gpu_mesh_obj(path, view3d.mesh_data())
     }

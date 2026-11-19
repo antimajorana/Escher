@@ -28,7 +28,10 @@ mod tests_nav;
 mod tests_nav2;
 #[cfg(test)]
 mod tests_session;
+#[cfg(test)]
+mod tests_review;
 
+pub(crate) use hud_bar::HUD_MIN_WINDOW_WIDTH;
 pub(crate) use realms::{CardId, LatticeRef};
 
 /// `id_salt` of the deck's filter TextEdit (its real `Id` is recorded in [`DeckState::filter_id`]).
@@ -144,7 +147,20 @@ pub(crate) struct DeckState {
     pub equip_request: Option<usize>,
     /// `/` focused the filter from its key event alone; its text event may still arrive in a later frame.
     pub slash_text_pending: bool,
+    /// The realm came from a session file: the next Tab / Codex opens the deck there (once), not at the realm of
+    /// the current view.
+    pub resume_saved_realm: bool,
+    /// How much of the HUD's right cluster is on the row (set each frame).
+    pub hud_density: hud_bar::HudDensity,
+    /// Width of the HUD rename controls last frame, with whether a rename was in progress then.
+    pub hud_rename_w: Option<(bool, f32)>,
+    /// HUD thumbnail of a tuned lattice (slider values off the stored recipe), keyed by what it was built from.
+    pub hud_thumb: Option<(HudThumbKey, std::sync::Arc<crate::gallery_tab::thumb_cache::ThumbGeom>)>,
 }
+
+/// What a tuned HUD thumbnail was built from: alias key, recipe and frame.
+pub(crate) type HudThumbKey =
+    (crate::aliases::LatticeAliasKey, papertilling_core::types::Recipe, papertilling_core::types::Frame2D);
 
 impl Default for DeckState {
     fn default() -> Self {
@@ -162,6 +178,10 @@ impl Default for DeckState {
             host_rect: egui::Rect::NOTHING,
             equip_request: None,
             slash_text_pending: false,
+            resume_saved_realm: false,
+            hud_density: hud_bar::HudDensity::Full,
+            hud_rename_w: None,
+            hud_thumb: None,
         }
     }
 }
@@ -179,6 +199,7 @@ impl DeckState {
         match parse_named(&Realm::ALL, name) {
             Some(r) => {
                 self.realm = r;
+                self.resume_saved_realm = true;
                 true
             }
             None => {
@@ -210,6 +231,7 @@ impl PapertillingApp {
         self.switcher.open = false;
         self.deck.open = true;
         self.deck.realm = realm;
+        self.deck.resume_saved_realm = false;
         self.deck.filter.clear();
         self.deck.focus_filter = false;
         self.deck.equip_request = None;
@@ -221,6 +243,12 @@ impl PapertillingApp {
         if let Some(i) = self.active_card_index(realm) {
             self.deck.set_cur(i);
         }
+    }
+
+    /// Realm for Tab / the Codex button: the realm saved in the restored session the first time, else the realm of
+    /// the current view.
+    pub(crate) fn deck_entry_realm(&mut self) -> Realm {
+        if std::mem::take(&mut self.deck.resume_saved_realm) { self.deck.realm } else { self.current_realm() }
     }
 
     pub(crate) fn deck_close(&mut self) {
