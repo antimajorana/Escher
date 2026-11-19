@@ -95,7 +95,8 @@ fn truncated_icosahedron_is_566_with_12_pentagons_and_20_hexagons() {
     assert_eq!(row(&o, "V / E / F"), "60 / 90 / 32");
     assert_eq!(table_col(&o, 0), ["5-gon", "6-gon"]);
     assert_eq!(table_col(&o, 1), ["12", "20"]);
-    assert!(o.notes[0].contains("[PROVED]"));
+    assert!(o.notes[0].contains("[COMPUTATIONAL EVIDENCE]"), "coordinates are floating point");
+    assert!(o.notes[1].contains("V − E + F = 2") && o.notes[1].contains("[PROVED]"), "closed S² tiling: Euler");
     let snub = wythoff::build(&wythoff::WyJob { p: 4, q: 3, op: 7, layers: 1 }).unwrap();
     assert_eq!(row(&snub, "V / E / F"), "24 / 60 / 38", "snub cube");
     assert!(snub.notes[0].contains("[COMPUTATIONAL EVIDENCE]"));
