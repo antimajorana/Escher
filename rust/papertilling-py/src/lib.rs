@@ -2,6 +2,7 @@
 
 mod atlas_py;
 mod insights_py;
+mod solver_py;
 mod stage5_py;
 
 use std::collections::BTreeMap;
@@ -291,6 +292,7 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(relax_defect_sheet_3d_json, m)?)?;
     m.add_function(wrap_pyfunction!(spectrum_json, m)?)?;
     atlas_py::register(m)?;
+    solver_py::register(m)?;
     Ok(())
 }
 

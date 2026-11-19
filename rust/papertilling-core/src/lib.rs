@@ -3,6 +3,7 @@
 pub mod bieberbach;
 pub mod defect;
 pub mod dsymbol;
+pub mod export;
 pub mod hyperbolic;
 pub mod plane;
 pub mod space3d;
