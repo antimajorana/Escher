@@ -67,6 +67,14 @@ pub struct CombineTabState {
     pub(crate) pending_disc_step: Option<PendingDiscStep>,
     pub(crate) pending_absorb: Option<AbsorptionPreview>,
     pub(crate) undo_stack: Vec<Vec<DefectSpec>>,
+    pub(crate) redo_stack: Vec<Vec<DefectSpec>>,
+    pub selected_pin: Option<usize>,
+    pub popover_open: bool,
+    pub(crate) cut_dragging: bool,
+    pub(crate) cut_drag_anchor: Option<(usize, Vec<DefectSpec>)>,
+    pub(crate) cut_edit_anchor: Option<(usize, Vec<DefectSpec>)>,
+    #[cfg(test)]
+    pub(crate) last_popover_rect: Option<egui::Rect>,
     pub view_mode: DefectViewMode,
     pub sheet_opts: Sheet3dViewOpts,
     pub(crate) last_build: CombineBuildOutput,
@@ -127,6 +135,14 @@ impl CombineTabState {
             pending_disc_step: None,
             pending_absorb: None,
             undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            selected_pin: None,
+            popover_open: false,
+            cut_dragging: false,
+            cut_drag_anchor: None,
+            cut_edit_anchor: None,
+            #[cfg(test)]
+            last_popover_rect: None,
             view_mode: DefectViewMode::Split2D3D,
             sheet_opts,
             last_build,
@@ -186,6 +202,7 @@ impl CombineTabState {
 
     pub(super) fn reset_lattice_defaults(&mut self, gallery_item: &CatalogueItemUi, info: CombineLatticeInfo) {
         self.clear_kinematic_drag_state(true);
+        self.clear_selection();
         self.inspectors.clear_for_switch();
         self.half_wall.refresh(gallery_item);
         self.init_error = None;
@@ -217,6 +234,7 @@ impl CombineTabState {
         sync_canvas: bool,
     ) {
         self.clear_kinematic_drag_state(true);
+        self.clear_selection();
         self.inspectors.clear_for_switch();
         self.override_item = None;
         self.init_error = None;

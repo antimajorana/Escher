@@ -61,10 +61,8 @@ pub struct ThemeTokens {
     pub ita_rotation: Color32,
     pub voronoi_edge: Color32,
     pub voronoi_fill: Color32,
-    #[allow(dead_code)] // Stage 6 selection overlay token
     pub selection_ring: Color32,
     pub cut_ray_line: Color32,
-    #[allow(dead_code)] // Stage 6 cut-ray handle token
     pub cut_ray_handle: Color32,
     pub cut_half_wall: Color32,
     pub cut_insertion: Color32,

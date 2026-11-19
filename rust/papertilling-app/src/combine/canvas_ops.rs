@@ -2,6 +2,7 @@ use super::{CombineTabState, MotionMode, ToolMode};
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
 use crate::core_panel::show_core_panel;
+use crate::live_combine::cuts::set_pin_cut_angle;
 use crate::mesh3d::DefectViewMode;
 use crate::theme::ThemeTokens;
 use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
@@ -94,6 +95,10 @@ impl CombineTabState {
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
     ) {
+        if self.selected_pin.is_some_and(|i| i >= self.specs.len()) {
+            self.clear_selection();
+            self.sync_selection_to_canvas(canvas);
+        }
         let header = match self.motion_mode {
             MotionMode::Conserved => "2D Pin Editor [Conserved ΔN=0: dislocations glide along b | Shift+drag disclination: emit b]",
             MotionMode::StepDisclinationEmit => "2D Pin Editor [Step D: dragging disclination emits b | dislocations glide along b]",
@@ -114,11 +119,43 @@ impl CombineTabState {
         let inter = canvas.show_interactive(ui, &markers, click_to_place, preview_world, tokens);
         self.last_hover_world = inter.hovered_world;
         if let Some((pin_idx, world)) = inter.dragged_marker {
+            self.commit_cut_edit_anchor();
             self.move_pin_with_mods(pin_idx, world, inter.shift_held, gallery_item, backend, canvas);
         }
         let released_elsewhere = self.dragging && !ui.input(|i| i.pointer.any_down());
         if inter.drag_released || released_elsewhere {
             self.finish_drag_kinematics(gallery_item, Some(canvas));
+        }
+        if let Some((idx, deg)) = inter.dragged_cut_ray
+            && !self.lattice_unavailable()
+            && !self.dragging
+            && idx < self.specs.len()
+        {
+            self.commit_cut_edit_anchor();
+            self.cut_drag_anchor.get_or_insert_with(|| (idx, self.specs.clone()));
+            self.cut_dragging = true;
+            set_pin_cut_angle(&mut self.specs[idx], Some(deg));
+            canvas.set_cut_rays(&self.current_cut_rays());
+            self.request_build(gallery_item, true, false, false);
+        }
+        let cut_released_elsewhere = self.cut_dragging && !ui.input(|i| i.pointer.any_down());
+        if inter.cut_drag_released || cut_released_elsewhere {
+            self.finish_cut_drag(gallery_item, Some(canvas));
+        }
+        if let Some(idx) = inter.clicked_marker
+            && idx < self.specs.len()
+        {
+            self.commit_cut_edit_anchor();
+            self.selected_pin = Some(idx);
+            self.popover_open = true;
+            self.sync_selection_to_canvas(canvas);
+        } else if inter.clicked_empty
+            && self.tool_mode == ToolMode::PanAndDrag
+            && (self.selected_pin.is_some() || self.popover_open)
+        {
+            self.commit_cut_edit_anchor();
+            self.clear_selection();
+            self.sync_selection_to_canvas(canvas);
         }
         if let Some(world) = inter.clicked_world {
             self.place_at_world(world, gallery_item, backend, canvas);
@@ -128,5 +165,6 @@ impl CombineTabState {
             self.on_combine_circuit_changed(gallery_item, canvas);
         }
         self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
+        self.show_pin_popover(ui, gallery_item, canvas, tokens);
     }
 }

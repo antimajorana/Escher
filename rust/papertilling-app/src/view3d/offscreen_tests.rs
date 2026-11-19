@@ -45,20 +45,33 @@ fn export_formats_follow_the_swapchain_encoding_and_eframe_depth() {
     assert_eq!(egui_wgpu::depth_format_from_bits(super::super::DEPTH_BITS, 0), Some(DEPTH_FORMAT));
 }
 
-/// A low-power adapter of this process, or `None` (with a note) when no GPU / driver is available.
-fn test_gpu() -> Option<OffscreenGpuContext> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let opts = wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::LowPower, ..Default::default() };
-    let Some(Ok(adapter)) = block_on(instance.request_adapter(&opts)) else {
-        eprintln!("note: no wgpu adapter in the test process; GPU offscreen test skipped");
-        return None;
-    };
-    let Some(Ok((device, queue))) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())) else {
-        eprintln!("note: wgpu device request failed; GPU offscreen test skipped");
-        return None;
-    };
-    // egui's swapchain choice (non-sRGB), so the export texture is Rgba8Unorm as in the app
-    Some(OffscreenGpuContext::new(device, queue, wgpu::TextureFormat::Bgra8Unorm))
+/// Shared low-power process adapter + serialization guard so concurrent test threads neither race
+/// `amdvlk64.dll` `VkInstance`/`VkDevice` creation/teardown (`0xc0000374`) nor interleave error scopes.
+fn test_gpu() -> Option<(std::sync::MutexGuard<'static, ()>, OffscreenGpuContext)> {
+    static GPU_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static SHARED_GPU: std::sync::OnceLock<Option<(wgpu::Instance, OffscreenGpuContext)>> =
+        std::sync::OnceLock::new();
+
+    let guard = GPU_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let shared = SHARED_GPU.get_or_init(|| {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let opts = wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            ..Default::default()
+        };
+        let Some(Ok(adapter)) = block_on(instance.request_adapter(&opts)) else {
+            eprintln!("note: no wgpu adapter in the test process; GPU offscreen test skipped");
+            return None;
+        };
+        let Some(Ok((device, queue))) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())) else {
+            eprintln!("note: wgpu device request failed; GPU offscreen test skipped");
+            return None;
+        };
+        // egui's swapchain choice (non-sRGB), so the export texture is Rgba8Unorm as in the app
+        let ctx = OffscreenGpuContext::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
+        Some((instance, ctx))
+    });
+    shared.as_ref().map(|(_, ctx)| (guard, ctx.clone()))
 }
 
 fn vertex(x: f32, y: f32) -> Vertex3d {
@@ -73,7 +86,7 @@ fn px(rgba: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
 #[test]
 fn gpu_renders_a_flat_triangle_with_the_shader_lighting_over_the_background() {
     let t0 = std::time::Instant::now();
-    let Some(gpu) = test_gpu() else { return };
+    let Some((_lock, gpu)) = test_gpu() else { return };
     // Top preset: view rotation = identity, camera on +z at distance 3.1 looking at the origin, so the triangle
     // (z = 0, normal +z, opaque) faces the camera. Visible half-height at the origin depth: 3.1 tan(22.5 deg) = 1.284,
     // so the triangle (|x| <= 0.6, -0.5 <= y <= 0.7) covers the centre and stays clear of every corner.
@@ -121,7 +134,7 @@ fn gpu_renders_a_flat_triangle_with_the_shader_lighting_over_the_background() {
 #[test]
 fn gpu_export_writes_a_png_of_the_viewport_size_times_the_scale() {
     let t0 = std::time::Instant::now();
-    let Some(gpu) = test_gpu() else { return };
+    let Some((_lock, gpu)) = test_gpu() else { return };
     let mut view = View3dState::default();
     view.set_mesh(
         GpuMeshData { faces: vec![vertex(-0.6, -0.5), vertex(0.6, -0.5), vertex(0.0, 0.7)], opaque_vertex_count: 3, ..Default::default() },
@@ -151,7 +164,7 @@ fn gpu_export_writes_a_png_of_the_viewport_size_times_the_scale() {
 
 #[test]
 fn gpu_render_over_the_device_texture_limit_is_an_error_not_a_panic() {
-    let Some(mut gpu) = test_gpu() else { return };
+    let Some((_lock, mut gpu)) = test_gpu() else { return };
     let limit = gpu.device.limits().max_texture_dimension_2d;
     // pretend the limit is higher, so the request reaches the device and fails its validation
     gpu.max_texture_side = u32::MAX;
@@ -167,7 +180,7 @@ fn gpu_render_over_the_device_texture_limit_is_an_error_not_a_panic() {
 #[test]
 fn gpu_wires_are_as_many_pixels_wide_as_the_export_scale() {
     let t0 = std::time::Instant::now();
-    let Some(gpu) = test_gpu() else { return };
+    let Some((_lock, gpu)) = test_gpu() else { return };
     // Top preset (rotation = identity): the wire y = 0, z = 0 from x = -0.6 to 0.6 projects to NDC y = 0, the boundary
     // between rows 23 and 24 of a 48 px high target, and spans the centre column 32 (NDC |x| <= 0.6 f / (4/3) / 3.1
     // = 0.35). A 4 px wide quad covers the rows whose centres lie within 2 px of it: 22, 23, 24, 25. The 1 px line
@@ -196,7 +209,7 @@ fn gpu_wires_are_as_many_pixels_wide_as_the_export_scale() {
 }
 #[test]
 fn gpu_wide_wires_on_a_tilted_face_are_not_cut_by_its_depth() {
-    let Some(gpu) = test_gpu() else { return };
+    let Some((_lock, gpu)) = test_gpu() else { return };
     // The 64 x 48 wire of the width test lying on an opaque face z = 0.8 y (tilted about x, towards the camera for
     // y > 0). An 8 px quad (rows 20..=27: centres within 4 px of the row 23/24 boundary) carries the line's depth over
     // its width, while the face nearer to the camera above the line is 0.8 y closer: at 3.5 px that is 3.5 px of

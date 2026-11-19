@@ -96,6 +96,7 @@ impl CombineTabState {
         };
         self.push_undo();
         self.clear_kinematic_drag_state(false);
+        self.clear_selection();
         self.specs = vec![build_half_wall_spec(&choice, [0.0, 0.0])];
         self.request_build(gallery_item, false, self.auto_compare, true);
     }

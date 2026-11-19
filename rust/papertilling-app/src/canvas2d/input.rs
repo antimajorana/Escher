@@ -1,4 +1,4 @@
-use super::circuit;
+use super::{circuit, cuts};
 use super::hit::{
     PIN_PICK_RADIUS_PX, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP_FACTOR, ZoomKeyAction, input_zoom_factor,
     pick_marker, take_keyboard_zoom_action,
@@ -77,6 +77,13 @@ impl Canvas2D {
         if interactive && !drag_from_hud && response.drag_started() {
             let origin = press_orig.or_else(|| response.interact_pointer_pos());
             self.active_drag_pin = origin.and_then(|pt| hit_pin_at(self, pt));
+            self.active_drag_cut = if self.active_drag_pin.is_none() {
+                origin.and_then(|pt| {
+                    cuts::pick_cut_handle(&self.cut_rays, self, rect, pt, cuts::CUT_HANDLE_PICK_RADIUS_PX)
+                })
+            } else {
+                None
+            };
         }
 
         if !drag_from_hud && response.dragged() {
@@ -87,6 +94,15 @@ impl Canvas2D {
                     }
                 } else {
                     self.active_drag_pin = None;
+                }
+            } else if let Some((spec_idx, origin_w)) = self.active_drag_cut {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let w = self.screen_to_world_at(rect, pos);
+                    let mut deg = (w[1] - origin_w[1]).atan2(w[0] - origin_w[0]).to_degrees();
+                    if out.shift_held {
+                        deg = (deg / 15.0).round() * 15.0;
+                    }
+                    out.dragged_cut_ray = Some((spec_idx, deg));
                 }
             } else if self.drag_reports_world
                 && response.dragged_by(egui::PointerButton::Primary)
@@ -102,8 +118,13 @@ impl Canvas2D {
             }
         }
 
-        if interactive && response.drag_stopped() && self.active_drag_pin.take().is_some() {
-            out.drag_released = true;
+        if interactive && response.drag_stopped() {
+            if self.active_drag_pin.take().is_some() {
+                out.drag_released = true;
+            }
+            if self.active_drag_cut.take().is_some() {
+                out.cut_drag_released = true;
+            }
         }
 
         if !over_hud && !drag_from_hud && response.double_clicked() {
@@ -117,12 +138,25 @@ impl Canvas2D {
             match hit_pin_at(self, pos) {
                 Some(idx) => out.clicked_marker = Some(idx),
                 None => {
-                    if let Some(circ) = &self.circuit_overlay
-                        && let Some(v) = circuit::pick_circuit_vertex(self, rect, circ, pos, 11.0)
-                    {
-                        out.clicked_circuit_vertex = Some(v);
-                    } else if click_to_place {
-                        out.clicked_world = Some(self.screen_to_world_at(rect, pos));
+                    let on_cut_handle = cuts::pick_cut_handle(
+                        &self.cut_rays,
+                        self,
+                        rect,
+                        pos,
+                        cuts::CUT_HANDLE_PICK_RADIUS_PX,
+                    )
+                    .is_some();
+                    if !on_cut_handle {
+                        if let Some(circ) = &self.circuit_overlay
+                            && let Some(v) = circuit::pick_circuit_vertex(self, rect, circ, pos, 11.0)
+                        {
+                            out.clicked_circuit_vertex = Some(v);
+                        } else {
+                            out.clicked_empty = true;
+                            if click_to_place {
+                                out.clicked_world = Some(self.screen_to_world_at(rect, pos));
+                            }
+                        }
                     }
                 }
             }
@@ -134,7 +168,7 @@ impl Canvas2D {
             && let Some(hpos) = response.hover_pos()
         {
             out.hovered_world = Some(self.screen_to_world_at(rect, hpos));
-            if self.active_drag_pin.is_some() {
+            if self.active_drag_pin.is_some() || self.active_drag_cut.is_some() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             } else if let Some(pidx) = hit_pin_at(self, hpos) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -152,6 +186,19 @@ impl Canvas2D {
                         m.pos[1]
                     ));
                 }
+            } else if cuts::pick_cut_handle(
+                &self.cut_rays,
+                self,
+                rect,
+                hpos,
+                cuts::CUT_HANDLE_PICK_RADIUS_PX,
+            )
+            .is_some()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                response.clone().on_hover_text(
+                    "Cut-ray handle — drag to rotate branch cut (Shift snaps to 15°)",
+                );
             } else if click_to_place {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
             }

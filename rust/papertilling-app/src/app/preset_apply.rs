@@ -154,6 +154,7 @@ impl PapertillingApp {
                 c.tool_mode = crate::combine::ToolMode::PanAndDrag;
                 c.dragging = false;
                 c.clear_kinematic_drag_state(false);
+                c.clear_selection();
                 c.json_status.clear();
                 c.view3d_dirty = true;
                 self.preset_pending = Some(PendingPreset::Combine {
@@ -230,6 +231,7 @@ impl PapertillingApp {
                 }
                 let c = &mut self.combine;
                 c.clear_kinematic_drag_state(false);
+                c.clear_selection();
                 if c.specs != specs {
                     if checkpoint {
                         c.push_undo();

@@ -89,8 +89,20 @@ impl CombineTabState {
             if ui.checkbox(&mut self.show_glide_lines, "Show glide rails").changed() {
                 self.sync_to_canvas(gallery_item, canvas, false);
             }
-            if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("↶ Undo").small()).clicked() {
+            let busy_drag = self.dragging || self.cut_dragging;
+            if ui
+                .add_enabled(!self.undo_stack.is_empty() && !busy_drag, egui::Button::new("↶ Undo").small())
+                .clicked()
+            {
                 self.undo_last(gallery_item);
+                self.sync_selection_to_canvas(canvas);
+            }
+            if ui
+                .add_enabled(!self.redo_stack.is_empty() && !busy_drag, egui::Button::new("↷ Redo").small())
+                .clicked()
+            {
+                self.redo_last(gallery_item);
+                self.sync_selection_to_canvas(canvas);
             }
         });
         if !self.kinematic_status.is_empty() {

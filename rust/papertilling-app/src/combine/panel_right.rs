@@ -2,6 +2,7 @@ use egui_extras::{Column, TableBuilder};
 use papertilling_core::defect::surgery::DefectSpec;
 
 use super::CombineTabState;
+use super::history::{CutDragResponse, show_cut_angle_drag_value};
 #[cfg(test)]
 use crate::backend::AppBackend;
 use crate::backend::CatalogueItemUi;
@@ -9,7 +10,7 @@ use crate::canvas2d::Canvas2D;
 use crate::live_combine::{
     cuts::{
         default_cut_angle_deg, has_coincident_same_kind_pins, merge_coincident_pins,
-        set_pin_cut_angle,
+        pin_explicit_cut_vec, set_pin_cut_angle,
     },
     spec_short_label, spec_world_pos,
 };
@@ -41,13 +42,31 @@ impl CombineTabState {
         if self.is_initializing() || self.init_error.is_some() {
             return;
         }
-        let mut dirty = false;
+        let mut build_preview: Option<bool> = None;
         ui.strong(format!("Placed Defects ({})", self.specs.len()));
         if self.specs.is_empty() {
             ui.small("Empty — use a preset or Click-to-Place.");
         } else {
-            if self.placed_table_ui(ui) {
-                dirty = true;
+            let outcome = self.placed_table_ui(ui);
+            if let Some(idx) = outcome.select_idx
+                && idx < self.specs.len()
+            {
+                if self.commit_cut_edit_anchor() {
+                    build_preview = Some(false);
+                }
+                self.selected_pin = Some(idx);
+                self.popover_open = true;
+                self.sync_selection_to_canvas(canvas);
+            }
+            if let Some(i) = outcome.flip_idx {
+                let _ = self.flip_pin(i, gallery_item, Some(canvas));
+            }
+            if let Some(i) = outcome.remove_idx {
+                let _ = self.delete_pin(i, gallery_item, Some(canvas));
+            }
+            if let Some(prev) = outcome.build_preview {
+                self.sync_selection_to_canvas(canvas);
+                build_preview = Some(build_preview.unwrap_or(true) && prev);
             }
             if has_coincident_same_kind_pins(&self.info, &self.specs)
                 && ui
@@ -55,13 +74,16 @@ impl CombineTabState {
                     .on_hover_text("Collapse superposed same-point pins permanently")
                     .clicked()
             {
+                self.commit_cut_edit_anchor();
                 self.push_undo();
                 merge_coincident_pins(&self.info, &mut self.specs);
-                dirty = true;
+                self.clear_selection();
+                self.sync_selection_to_canvas(canvas);
+                build_preview = Some(false);
             }
         }
-        if dirty {
-            self.request_build(gallery_item, false, self.auto_compare, false);
+        if let Some(preview_only) = build_preview {
+            self.request_build(gallery_item, preview_only, !preview_only && self.auto_compare, false);
         }
 
         ui.separator();
@@ -69,14 +91,16 @@ impl CombineTabState {
         self.show_inspectors_ui(ui, gallery_item, canvas, tokens);
     }
 
-    /// The placed-defects table; returns true when a defect was flipped, removed, or its cut angle changed.
-    fn placed_table_ui(&mut self, ui: &mut egui::Ui) -> bool {
-        let (mut flip_idx, mut remove_idx, mut cut_edit) = (None, None, None::<(usize, Option<f64>)>);
+    /// The placed-defects table; returns requested actions without double-building.
+    fn placed_table_ui(&mut self, ui: &mut egui::Ui) -> TableOutcome {
+        let mut out = TableOutcome::default();
+        let mut cut_edit: Option<(usize, Option<f64>)> = None;
+        let mut cut_drag: Option<(usize, CutDragResponse)> = None;
         ui.push_id("placed_specs_tbl", |ui| {
             TableBuilder::new(ui)
                 .striped(true)
                 .max_scroll_height(108.0)
-                .column(Column::exact(22.0))
+                .column(Column::exact(28.0))
                 .column(Column::exact(62.0))
                 .column(Column::remainder())
                 .column(Column::exact(58.0))
@@ -93,13 +117,14 @@ impl CombineTabState {
                     for (idx, sp) in self.specs.iter().enumerate() {
                         let pos = spec_world_pos(&self.info, idx, sp);
                         let kstr = spec_short_label(&self.info, sp);
-                        let cut_opt = match *sp {
-                            DefectSpec::Disclination { cut, .. } | DefectSpec::Dislocation { cut, .. } => cut,
-                            DefectSpec::HalfWall { direction, .. } => direction,
-                        };
+                        let cut_opt = pin_explicit_cut_vec(sp);
+                        let is_selected = self.selected_pin == Some(idx);
                         body.row(18.0, |mut row| {
+                            row.set_selected(is_selected);
                             row.col(|ui| {
-                                ui.strong(format!("#{}", idx + 1));
+                                if ui.selectable_label(is_selected, format!("#{}", idx + 1)).clicked() {
+                                    out.select_idx = Some(idx);
+                                }
                             });
                             row.col(|ui| {
                                 ui.label(kstr);
@@ -109,20 +134,12 @@ impl CombineTabState {
                             });
                             row.col(|ui| {
                                 if let Some(c) = cut_opt {
-                                    let mut deg = c[1].atan2(c[0]).to_degrees();
+                                    let deg = c[1].atan2(c[0]).to_degrees();
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 2.0;
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut deg)
-                                                    .range(-180.0..=180.0)
-                                                    .speed(2.0)
-                                                    .fixed_decimals(0)
-                                                    .suffix("°"),
-                                            )
-                                            .changed()
-                                        {
-                                            cut_edit = Some((idx, Some(deg)));
+                                        let ev = show_cut_angle_drag_value(ui, deg, 2.0);
+                                        if ev.started || ev.changed || ev.finished {
+                                            cut_drag = Some((idx, ev));
                                         }
                                         if ui.small_button("a").on_hover_text("Reset direction to auto").clicked() {
                                             cut_edit = Some((idx, None));
@@ -143,55 +160,30 @@ impl CombineTabState {
                             });
                             row.col(|ui| {
                                 if ui.small_button("±").clicked() {
-                                    flip_idx = Some(idx);
+                                    out.flip_idx = Some(idx);
                                 }
                             });
                             row.col(|ui| {
                                 if ui.small_button("×").clicked() {
-                                    remove_idx = Some(idx);
+                                    out.remove_idx = Some(idx);
                                 }
                             });
                         });
                     }
                 });
         });
-        let mut mutated = false;
+        if let Some((i, ev)) = cut_drag
+            && let Some(prev) = self.apply_cut_drag_response(i, ev)
+        {
+            out.build_preview = Some(prev);
+        }
         if let Some((i, ang_opt)) = cut_edit {
+            self.commit_cut_edit_anchor();
             self.push_undo();
             set_pin_cut_angle(&mut self.specs[i], ang_opt);
-            mutated = true;
+            out.build_preview = Some(false);
         }
-        if let Some(i) = flip_idx {
-            self.push_undo();
-            let hw_deg = if let DefectSpec::HalfWall { direction: None, .. } = &self.specs[i] {
-                Some(default_cut_angle_deg(
-                    &self.info,
-                    &self.specs,
-                    i,
-                    &self.last_build.applied_cuts,
-                ))
-            } else {
-                None
-            };
-            match &mut self.specs[i] {
-                DefectSpec::Disclination { angle_deg, .. } => *angle_deg = -*angle_deg,
-                DefectSpec::Dislocation { b, .. } => *b = [-b[0], -b[1]],
-                DefectSpec::HalfWall { direction, .. } => {
-                    let cur = direction.unwrap_or_else(|| {
-                        let rad = hw_deg.unwrap_or(0.0).to_radians();
-                        [rad.cos(), rad.sin()]
-                    });
-                    *direction = Some([-cur[0], -cur[1]]);
-                }
-            }
-            mutated = true;
-        }
-        if let Some(i) = remove_idx {
-            self.push_undo();
-            self.specs.remove(i);
-            mutated = true;
-        }
-        mutated
+        out
     }
 
     fn equivalence_ui(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
@@ -210,17 +202,17 @@ impl CombineTabState {
             let lc: Vec<&str> = self.last_build.local_cores.iter().map(|c| c.label.as_str()).collect();
             ui.small(format!("Cores: {}", lc.join(", ")));
         }
-        if self.is_comparing() || self.dragging {
+        if self.is_comparing() || self.dragging || self.cut_dragging {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.small(if self.dragging {
+                ui.small(if self.dragging || self.cut_dragging {
                     "Comparison runs when the drag ends"
                 } else {
                     "Comparing cores…"
                 });
             });
         }
-        let stale = self.compare_stale || self.is_comparing() || self.dragging;
+        let stale = self.compare_stale || self.is_comparing() || self.dragging || self.cut_dragging;
         match &self.compare_result {
             Some(Ok(rep)) => {
                 let (bg, fg, tag) = match (rep.equivalent, rep.match_tier.as_str()) {
@@ -272,4 +264,12 @@ impl CombineTabState {
             None => {}
         }
     }
+}
+
+#[derive(Default)]
+struct TableOutcome {
+    select_idx: Option<usize>,
+    flip_idx: Option<usize>,
+    remove_idx: Option<usize>,
+    build_preview: Option<bool>,
 }

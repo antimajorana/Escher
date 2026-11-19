@@ -4,30 +4,70 @@ use super::{CombineTabState, ToolMode};
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::{Canvas2D, CanvasCutRay, CanvasMarker, MarkerKind, Scene2D};
 use crate::live_combine::{
-    burgers_from_mn, cuts::build_cut_rays, preset_neighbour_pair, preset_shortest_dislocation,
-    spec_short_label, spec_world_pos,
+    burgers_from_mn,
+    cuts::{build_cut_rays_for_specs, build_fallback_cut_ray_for_spec},
+    preset_neighbour_pair, preset_shortest_dislocation, spec_short_label, spec_world_pos,
 };
 
 impl CombineTabState {
     pub fn current_cut_rays(&self) -> Vec<CanvasCutRay> {
-        if self.last_build.refused.is_some() {
+        if self.lattice_unavailable() {
             return Vec::new();
         }
-        let cuts: Vec<_> = if self.show_branch_cuts {
-            self.last_build.applied_cuts.clone()
+        let mut rays = if self.last_build.refused.is_some() {
+            Vec::new()
         } else {
-            self.last_build
-                .applied_cuts
-                .iter()
-                .copied()
-                .filter(|ac| ac.is_half_wall)
-                .collect()
+            build_cut_rays_for_specs(
+                &self.info,
+                &self.specs,
+                &self.last_build.applied_cuts,
+                self.last_build.patch_centre,
+                self.last_build.applied_radius,
+            )
         };
-        build_cut_rays(
-            &cuts,
-            self.last_build.patch_centre,
-            self.last_build.applied_radius,
-        )
+        let drag_idx_opt = self.cut_dragging.then(|| self.cut_drag_anchor.as_ref().map(|(i, _)| *i)).flatten();
+        if let Some(drag_idx) = drag_idx_opt
+            && let Some(ray) = build_fallback_cut_ray_for_spec(
+                &self.info,
+                &self.specs,
+                drag_idx,
+                &self.last_build.applied_cuts,
+                self.last_build.patch_centre,
+                self.last_build.applied_radius,
+            )
+        {
+            if let Some(existing) = rays.iter_mut().find(|r| r.spec_index == Some(drag_idx)) {
+                *existing = ray;
+            } else {
+                rays.push(ray);
+            }
+        }
+        if let Some(sel_idx) = self.selected_pin
+            && !rays.iter().any(|r| r.spec_index == Some(sel_idx))
+            && let Some(ray) = build_fallback_cut_ray_for_spec(
+                &self.info,
+                &self.specs,
+                sel_idx,
+                &self.last_build.applied_cuts,
+                self.last_build.patch_centre,
+                self.last_build.applied_radius,
+            )
+        {
+            rays.push(ray);
+        }
+        if !self.show_branch_cuts {
+            rays.retain(|r| {
+                r.is_half_wall
+                    || (self.selected_pin.is_some() && r.spec_index == self.selected_pin)
+                    || (drag_idx_opt.is_some() && r.spec_index == drag_idx_opt)
+            });
+        }
+        rays
+    }
+
+    pub(crate) fn sync_selection_to_canvas(&self, canvas: &mut Canvas2D) {
+        canvas.set_selected_marker(self.selected_pin);
+        canvas.set_cut_rays(&self.current_cut_rays());
     }
 
     pub fn sync_to_canvas(
@@ -53,6 +93,7 @@ impl CombineTabState {
             reset_view,
         );
         canvas.set_export_markers(&self.build_markers());
+        canvas.set_selected_marker(self.selected_pin);
         canvas.set_cut_rays(&self.current_cut_rays());
         canvas.set_kinematic_overlay(self.current_kinematic_overlay());
         self.sync_inspectors_to_canvas(gallery_item, canvas);
@@ -69,6 +110,7 @@ impl CombineTabState {
         }
         self.push_undo();
         self.clear_kinematic_drag_state(false);
+        self.clear_selection();
         self.specs = preset_neighbour_pair(&self.info);
         self.request_build(gallery_item, false, self.auto_compare, true);
     }
@@ -84,6 +126,7 @@ impl CombineTabState {
         }
         self.push_undo();
         self.clear_kinematic_drag_state(false);
+        self.clear_selection();
         self.specs = preset_shortest_dislocation(&self.info);
         self.request_build(gallery_item, false, self.auto_compare, true);
     }
@@ -101,6 +144,7 @@ impl CombineTabState {
             self.push_undo();
         }
         self.clear_kinematic_drag_state(false);
+        self.clear_selection();
         self.specs.clear();
         self.request_build(gallery_item, false, false, true);
     }

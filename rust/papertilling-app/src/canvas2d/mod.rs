@@ -22,6 +22,7 @@ mod tests;
 
 pub use circuit::CanvasCircuitOverlay;
 pub use cuts::{CanvasCutRay, CanvasKinematicOverlay, CanvasReactionArrow};
+pub(crate) use cuts::cut_ray_handle_screen_pos;
 pub(crate) use draw_helpers::{draw_arrow_mid_egui, draw_dashed_egui, draw_overlays, marker_colors, to_color32};
 pub use gauge_overlay::CrystalOverlayData;
 pub(crate) use hit::take_keyboard_zoom_action;
@@ -49,8 +50,13 @@ pub struct CanvasMarker {
 pub struct CanvasInteraction {
     /// A click (press and release without dragging) on empty canvas, in world coordinates.
     pub clicked_world: Option<[f64; 2]>,
+    /// An interactive click that hit neither a pin marker, nor a cut-ray handle, nor a Burgers circuit vertex.
+    pub clicked_empty: bool,
     pub dragged_marker: Option<(usize, [f64; 2])>,
     pub drag_released: bool,
+    /// Live cut-ray handle drag: `(spec_index, angle_deg)`.
+    pub dragged_cut_ray: Option<(usize, f64)>,
+    pub cut_drag_released: bool,
     pub hovered_world: Option<[f64; 2]>,
     pub shift_held: bool,
     /// A click that landed on a pin (its `CanvasMarker::index`); `clicked_world` is then `None`, so a click
@@ -69,6 +75,8 @@ pub struct Canvas2D {
     pub(super) world_center: [f32; 2],
     pub(super) auto_fit_pending: bool,
     pub(super) active_drag_pin: Option<usize>,
+    pub(super) active_drag_cut: Option<(usize, [f64; 2])>,
+    pub(super) selected_marker: Option<usize>,
     pub(super) scene: Scene2D,
     pub(super) compiled: ScenePrimitives,
     pub(super) export_markers: Vec<CanvasMarker>,
@@ -82,7 +90,6 @@ pub struct Canvas2D {
     /// Off by default: a background drag pans the view. On (set only around one interactive `show` by a caller that
     /// moves the content itself), the drag is reported in `CanvasInteraction::drag_world` and the view stays.
     pub(crate) drag_reports_world: bool,
-    #[cfg(test)]
     pub(crate) last_rect: egui::Rect,
 }
 
@@ -98,6 +105,8 @@ impl Canvas2D {
             world_center,
             auto_fit_pending: true,
             active_drag_pin: None,
+            active_drag_cut: None,
+            selected_marker: None,
             scene,
             compiled,
             export_markers: Vec::new(),
@@ -108,7 +117,6 @@ impl Canvas2D {
             gallery_overlay: None,
             export_title: None,
             drag_reports_world: false,
-            #[cfg(test)]
             last_rect: egui::Rect::NOTHING,
         }
     }
@@ -120,6 +128,7 @@ impl Canvas2D {
     pub fn set_scene_with_title(&mut self, scene: Scene2D, export_title: Option<String>, reset_view: bool) {
         self.export_markers.clear();
         self.cut_rays.clear();
+        self.selected_marker = None;
         self.kinematic_overlay = CanvasKinematicOverlay::default();
         self.circuit_overlay = None;
         self.gauge_overlay = None;
@@ -132,6 +141,7 @@ impl Canvas2D {
             self.world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
             self.auto_fit_pending = true;
             self.active_drag_pin = None;
+            self.active_drag_cut = None;
         }
     }
 
@@ -141,6 +151,7 @@ impl Canvas2D {
         self.pan = egui::Vec2::ZERO;
         self.auto_fit_pending = true;
         self.active_drag_pin = None;
+        self.active_drag_cut = None;
     }
 
     pub fn zoom_at(&mut self, rect: egui::Rect, factor: f32, anchor: Option<egui::Pos2>) {
@@ -232,6 +243,15 @@ impl Canvas2D {
         self.export_markers.extend_from_slice(markers);
     }
 
+    pub(crate) fn set_selected_marker(&mut self, idx: Option<usize>) {
+        self.selected_marker = idx;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selected_marker(&self) -> Option<usize> {
+        self.selected_marker
+    }
+
     pub(crate) fn set_cut_rays(&mut self, rays: &[CanvasCutRay]) {
         self.cut_rays.clear();
         self.cut_rays.extend_from_slice(rays);
@@ -241,7 +261,6 @@ impl Canvas2D {
         self.kinematic_overlay = overlay;
     }
 
-    #[cfg(test)]
     pub(crate) fn cut_rays(&self) -> &[CanvasCutRay] {
         &self.cut_rays
     }
@@ -292,10 +311,7 @@ impl Canvas2D {
     ) -> CanvasInteraction {
         let (rect, has_hud, hud_rect, out) =
             self.handle_canvas_input(ui, markers, click_to_place, interactive);
-        #[cfg(test)]
-        {
-            self.last_rect = rect;
-        }
+        self.last_rect = rect;
         self.render_canvas(ui, rect, has_hud.then_some(hud_rect), markers, preview_world, tokens);
         out
     }

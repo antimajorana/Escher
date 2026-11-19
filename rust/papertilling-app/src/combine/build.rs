@@ -128,11 +128,11 @@ impl CombineTabState {
         if self.canvas_dirty
             && let Some(canvas) = canvas
         {
-            let reset = std::mem::take(&mut self.reset_view_on_build) && !self.dragging;
+            let reset = std::mem::take(&mut self.reset_view_on_build) && !self.dragging && !self.cut_dragging;
             self.sync_to_canvas(gallery_item, canvas, reset);
             self.canvas_dirty = false;
         }
-        if self.dragging && self.preview_dirty && !self.builder.is_busy() {
+        if (self.dragging || self.cut_dragging) && self.preview_dirty && !self.builder.is_busy() {
             self.request_build(gallery_item, true, false, false);
         }
     }
@@ -168,7 +168,7 @@ impl CombineTabState {
         // A stiffness edit must not supersede a newer geometry job with the last completed crystal.
         if self.builder.is_busy() || self.last_build.preview {
             let compare = self.compare_after_build || self.auto_compare;
-            self.request_build(gallery_item, self.dragging, compare, false);
+            self.request_build(gallery_item, self.dragging || self.cut_dragging, compare, false);
             return;
         }
         let reuse = (!self.last_build.crystal.pos.is_empty()).then(|| self.last_build.clone());
@@ -256,6 +256,7 @@ impl CombineTabState {
         match result {
             Ok(info) => {
                 self.reset_lattice_defaults(gallery_item, (*info).clone());
+                self.clear_selection();
                 self.specs = preset_neighbour_pair(&self.info);
                 self.request_build(gallery_item, false, self.auto_compare, true);
             }

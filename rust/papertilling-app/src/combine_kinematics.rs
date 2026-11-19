@@ -28,38 +28,17 @@ pub(crate) struct PendingDiscStep {
 }
 
 impl CombineTabState {
-    pub fn push_undo(&mut self) {
-        if self.undo_stack.last().is_some_and(|prev| prev == &self.specs) {
-            return;
-        }
-        if self.undo_stack.len() >= 32 {
-            self.undo_stack.remove(0);
-        }
-        self.undo_stack.push(self.specs.clone());
-    }
-
-    pub fn undo_last(&mut self, gallery_item: &CatalogueItemUi) {
-        if self.lattice_unavailable() {
-            return;
-        }
-        if let Some(prev) = self.undo_stack.pop() {
-            self.drag_anchor = None;
-            self.pending_disc_step = None;
-            self.pending_absorb = None;
-            self.dragging = false;
-            self.specs = prev;
-            self.kinematic_status = String::from("Undid last defect edit");
-            self.request_build(gallery_item, false, self.auto_compare, false);
-        }
-    }
-
     pub(crate) fn clear_kinematic_drag_state(&mut self, clear_undo: bool) {
         self.drag_anchor = None;
         self.pending_disc_step = None;
         self.pending_absorb = None;
+        self.cut_drag_anchor = None;
+        self.cut_edit_anchor = None;
+        self.cut_dragging = false;
         self.kinematic_status.clear();
         if clear_undo {
             self.undo_stack.clear();
+            self.redo_stack.clear();
         }
     }
 
@@ -262,16 +241,14 @@ impl CombineTabState {
         if let (Some((_, anchor_specs)), Some(step)) = (&anchor, disc_step) {
             match step_disclination_emit(&item.group, &self.info.cell, item.frame, anchor_specs, step.idx, step.to) {
                 Ok(res) => {
-                    self.undo_stack.push(anchor_specs.clone());
-                    if self.undo_stack.len() > 32 {
-                        self.undo_stack.remove(0);
-                    }
+                    self.record_undo_snapshot(anchor_specs.clone());
                     let em_lbl = res.emitted.as_ref().and_then(|s| match *s {
                         DefectSpec::Dislocation { b, .. } => mn_from_burgers(&self.info, b)
                             .map(|(m, n)| format!("T({m},{n})")),
                         _ => None,
                     }).unwrap_or_else(|| String::from("dislocation"));
                     self.specs = res.specs;
+                    self.clear_selection();
                     self.kinematic_status = format!(
                         "Stepped disclination ({:+.2}, {:+.2}) -> ({:+.2}, {:+.2}) and emitted {em_lbl} on ΔN = 0 glide line",
                         step.from[0], step.from[1], step.to[0], step.to[1]
@@ -284,6 +261,7 @@ impl CombineTabState {
             }
             if let Some(cv) = canvas.as_deref_mut() {
                 cv.set_kinematic_overlay(self.current_kinematic_overlay());
+                self.sync_selection_to_canvas(cv);
             }
             self.request_build(gallery_item, false, self.auto_compare, false);
             return;
@@ -294,17 +272,16 @@ impl CombineTabState {
                 &item.group, &self.info.cell, item.frame, anchor_specs, *idx, abs_prev.disc_idx,
             )
         {
-            self.undo_stack.push(anchor_specs.clone());
-            if self.undo_stack.len() > 32 {
-                self.undo_stack.remove(0);
-            }
+            self.record_undo_snapshot(anchor_specs.clone());
             self.specs = new_specs;
+            self.clear_selection();
             self.kinematic_status = format!(
                 "Absorbed dislocation into disclination #{}: shifted centre to ({:+.2}, {:+.2}) (ΔN = 0)",
                 abs_prev.disc_idx + 1, c_new[0], c_new[1]
             );
             if let Some(cv) = canvas.as_deref_mut() {
                 cv.set_kinematic_overlay(self.current_kinematic_overlay());
+                self.sync_selection_to_canvas(cv);
             }
             self.request_build(gallery_item, false, self.auto_compare, false);
             return;
@@ -317,10 +294,7 @@ impl CombineTabState {
                 &item.group, &self.info.cell, item.frame, anchor_specs, &self.specs, *idx,
             ) {
                 Ok((final_specs, rotated)) => {
-                    self.undo_stack.push(anchor_specs.clone());
-                    if self.undo_stack.len() > 32 {
-                        self.undo_stack.remove(0);
-                    }
+                    self.record_undo_snapshot(anchor_specs.clone());
                     self.specs = final_specs;
                     self.kinematic_status = if rotated {
                         String::from("Glided across branch cut: Burgers vector parallel-transported to preserve G~+ holonomy")
@@ -333,11 +307,10 @@ impl CombineTabState {
                     self.kinematic_status = format!("Glide reverted: {err}");
                 }
             }
-        } else if let Some((_, anchor_specs)) = anchor {
-            self.undo_stack.push(anchor_specs);
-            if self.undo_stack.len() > 32 {
-                self.undo_stack.remove(0);
-            }
+        } else if let Some((_, anchor_specs)) = anchor
+            && anchor_specs != self.specs
+        {
+            self.record_undo_snapshot(anchor_specs);
         }
         if let Some(cv) = canvas {
             cv.set_kinematic_overlay(self.current_kinematic_overlay());

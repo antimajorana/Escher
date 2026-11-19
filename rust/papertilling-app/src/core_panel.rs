@@ -54,6 +54,12 @@ pub struct CorePanelState {
     inspector: Option<CoreInspectorModal>,
 }
 
+impl CorePanelState {
+    pub fn has_open_modal(&self) -> bool {
+        self.inspector.is_some()
+    }
+}
+
 /// Compiled card primitives of the report on display (compiled lazily, only for cards scrolled into view).
 #[derive(Default)]
 struct CardCache {

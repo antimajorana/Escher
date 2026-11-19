@@ -92,8 +92,15 @@ impl PapertillingApp {
                 });
                 self.session_menu(ui);
                 if ui
+                    .selectable_label(self.left_rail_open, "Sidebar")
+                    .on_hover_text("Toggle Left Sidebar panel (Ctrl+B)")
+                    .clicked()
+                {
+                    self.left_rail_open = !self.left_rail_open;
+                }
+                if ui
                     .selectable_label(self.right_inspector_open, "Inspector")
-                    .on_hover_text("Toggle Right Inspector panel")
+                    .on_hover_text("Toggle Right Inspector panel (Ctrl+I)")
                     .clicked()
                 {
                     self.right_inspector_open = !self.right_inspector_open;

@@ -63,17 +63,6 @@ enum Row {
 }
 
 impl PapertillingApp {
-    /// Ctrl+K toggles the palette (ignored while a text field has keyboard focus).
-    pub(crate) fn handle_switcher_shortcut(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() {
-            return;
-        }
-        let k = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
-        if ctx.input_mut(|i| i.consume_shortcut(&k)) {
-            self.toggle_switcher();
-        }
-    }
-
     pub(crate) fn toggle_switcher(&mut self) {
         if self.switcher.open {
             self.switcher.open = false;

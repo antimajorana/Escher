@@ -184,6 +184,9 @@ impl Canvas2D {
             let (fill, halo) = marker_colors(m.kind, tokens);
             let is_dragged = self.active_drag_pin == Some(m.index);
             painter.circle_filled(sp, if is_dragged { 16.5 } else { 13.5 }, halo);
+            if self.selected_marker == Some(m.index) {
+                painter.circle_stroke(sp, 15.5, egui::Stroke::new(2.4, tokens.selection_ring));
+            }
             painter.circle_filled(sp, 9.5, fill);
             painter.circle_stroke(sp, 9.5, egui::Stroke::new(1.8, tokens.bg_canvas_2d));
             painter.text(

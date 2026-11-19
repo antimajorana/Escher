@@ -3,6 +3,13 @@ use crate::backend::CatalogueRuleUi;
 
 impl PapertillingApp {
     pub(crate) fn show_left_rail(&mut self, ui: &mut egui::Ui) {
+        if !self.left_rail_open {
+            #[cfg(test)]
+            {
+                self.test_rects.left = egui::Rect::NOTHING;
+            }
+            return;
+        }
         let tokens = self.theme.tokens();
         let resp = egui::Panel::left("left_rail")
             .resizable(true)

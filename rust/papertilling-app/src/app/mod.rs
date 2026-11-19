@@ -112,6 +112,7 @@ pub struct PapertillingApp {
     /// The 3D PNG being composited and written on a worker thread (joined when dropped).
     pub(crate) export3d_job: Option<export3d::Export3dJob>,
     pub(crate) theme: StudioTheme,
+    pub(crate) left_rail_open: bool,
     pub(crate) left_rail_width: f32,
     pub(crate) right_inspector_open: bool,
     pub(crate) right_inspector_width: f32,
@@ -184,6 +185,7 @@ impl PapertillingApp {
             offscreen_gpu: None,
             export3d_job: None,
             theme: StudioTheme::Paper,
+            left_rail_open: true,
             left_rail_width: 300.0,
             right_inspector_open: true,
             right_inspector_width: 320.0,
@@ -217,11 +219,7 @@ impl PapertillingApp {
         self.poll_export_3d();
         self.pump_preset_pending(Some(&ctx));
         self.gallery.thumbs.begin_frame(ctx.cumulative_pass_nr());
-        self.handle_switcher_shortcut(&ctx);
-        if self.switcher.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            // consumed here, so an Esc meant for the palette never also closes a window drawn earlier
-            self.switcher.open = false;
-        }
+        self.handle_global_shortcuts(&ctx);
         let on_gallery = self.active_tab == NavTab::Gallery;
         let canvas = if on_gallery { Some(&mut self.canvas2d) } else { None };
         if self.gallery.poll_retune(canvas) && !on_gallery {
@@ -352,7 +350,9 @@ impl PapertillingApp {
             self.export_status = String::from("Wait for the surface build before exporting.");
             return;
         }
-        if self.active_tab == NavTab::Combine && (self.combine.is_building() || self.combine.dragging) {
+        if self.active_tab == NavTab::Combine
+            && (self.combine.is_building() || self.combine.dragging || self.combine.cut_dragging)
+        {
             self.export_status =
                 String::from("Finish moving the pins and wait for the crystal build before exporting.");
             return;
@@ -398,7 +398,9 @@ impl PapertillingApp {
             self.export_status = String::from("Wait for the surface build before exporting .obj.");
             return;
         }
-        if self.active_tab == NavTab::Combine && (self.combine.is_building() || self.combine.dragging) {
+        if self.active_tab == NavTab::Combine
+            && (self.combine.is_building() || self.combine.dragging || self.combine.cut_dragging)
+        {
             self.export_status =
                 String::from("Finish moving pins and wait for the crystal build before exporting .obj.");
             return;

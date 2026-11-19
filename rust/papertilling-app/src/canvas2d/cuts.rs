@@ -4,6 +4,9 @@
 use crate::canvas2d::{Canvas2D, CanvasMarker, draw_dashed_egui};
 use crate::theme::ThemeTokens;
 
+/// Pick radius in screen points for a branch-cut drag handle.
+pub(super) const CUT_HANDLE_PICK_RADIUS_PX: f32 = 12.0;
+
 /// World-space Volterra branch-cut ray (from defect core out to patch rim) and optional strip segment.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CanvasCutRay {
@@ -12,6 +15,49 @@ pub struct CanvasCutRay {
     pub strip: Option<([f64; 2], [f64; 2])>,
     pub is_insertion: bool,
     pub is_half_wall: bool,
+    pub spec_index: Option<usize>,
+}
+
+/// Screen position of the draggable handle along a ray associated with a specific pin.
+pub fn cut_ray_handle_screen_pos(
+    canvas: &Canvas2D,
+    rect: egui::Rect,
+    ray: &CanvasCutRay,
+) -> Option<egui::Pos2> {
+    ray.spec_index?;
+    let p0 = canvas.world_to_screen_at(rect, [ray.origin[0] as f32, ray.origin[1] as f32]);
+    let p1 = canvas.world_to_screen_at(rect, [ray.end[0] as f32, ray.end[1] as f32]);
+    let dv = p1 - p0;
+    let len = dv.length();
+    if len < 26.0 {
+        return None;
+    }
+    let d = (0.58 * len).clamp(24.0, 96.0).min(len - 4.0);
+    Some(p0 + (dv / len) * d)
+}
+
+/// Nearest cut-ray handle within `radius_px`, returning `(spec_index, ray.origin)`.
+pub(crate) fn pick_cut_handle(
+    rays: &[CanvasCutRay],
+    canvas: &Canvas2D,
+    rect: egui::Rect,
+    pt: egui::Pos2,
+    radius_px: f32,
+) -> Option<(usize, [f64; 2])> {
+    let mut best: Option<(f32, usize, [f64; 2])> = None;
+    for ray in rays {
+        let Some(spec_idx) = ray.spec_index else {
+            continue;
+        };
+        let Some(hp) = cut_ray_handle_screen_pos(canvas, rect, ray) else {
+            continue;
+        };
+        let d = hp.distance(pt);
+        if d <= radius_px && best.is_none_or(|(bd, _, _)| d <= bd) {
+            best = Some((d, spec_idx, ray.origin));
+        }
+    }
+    best.map(|(_, idx, origin)| (idx, origin))
 }
 
 /// Live preview arrow showing a disclination step + emitted Burgers vector or dislocation absorption.
@@ -75,6 +121,11 @@ pub(crate) fn draw_cut_rays(
             painter.line_segment([pa, pb], egui::Stroke::new(3.0, col));
             painter.circle_filled(pa, 2.8, col);
             painter.circle_filled(pb, 2.8, col);
+        }
+
+        if let Some(hp) = cut_ray_handle_screen_pos(canvas, rect, ray) {
+            painter.circle_filled(hp, 5.5, tokens.cut_ray_handle);
+            painter.circle_stroke(hp, 5.5, egui::Stroke::new(1.6, tokens.bg_canvas_2d));
         }
     }
 }
