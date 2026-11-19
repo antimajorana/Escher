@@ -16,13 +16,12 @@ use crate::types::FracOp2D;
 const SITE_TOL: f64 = 1e-5;
 
 impl PlaneTiling {
-    /// Image of vertex `v` under the fractional operation `op`, or `None` if it lands on no site.
-    fn vertex_image(&self, op: &FracOp2D, v: VertexId) -> Option<VertexId> {
+    /// Image of vertex `v` under the affine fractional operation `(mf, t)`, or `None` if it lands on no site.
+    fn vertex_image_affine(&self, mf: [[i32; 2]; 2], t: [f64; 2], v: VertexId) -> Option<VertexId> {
         let f = self.to_frac(self.vertex_point(v));
-        let m = op.mf;
         let y = [
-            f64::from(m[0][0]) * f[0] + f64::from(m[0][1]) * f[1] + op.t[0],
-            f64::from(m[1][0]) * f[0] + f64::from(m[1][1]) * f[1] + op.t[1],
+            f64::from(mf[0][0]) * f[0] + f64::from(mf[0][1]) * f[1] + t[0],
+            f64::from(mf[1][0]) * f[0] + f64::from(mf[1][1]) * f[1] + t[1],
         ];
         (0..self.basis.len()).find_map(|j| {
             let fj = self.to_frac(self.basis[j]);
@@ -32,14 +31,20 @@ impl PlaneTiling {
         })
     }
 
-    /// Image of face `face` under `op`: the face around the image of its first corner with the same vertex set.
-    pub fn face_image(&self, op: &FracOp2D, face: FaceId) -> Option<FaceId> {
-        let img: Option<HashSet<VertexId>> = self.face_vertices(face).into_iter().map(|v| self.vertex_image(op, v)).collect();
+    /// Image of face `face` under the exact affine fractional symmetry `(mf, t)`.
+    pub(super) fn affine_face_image(&self, mf: [[i32; 2]; 2], t: [f64; 2], face: FaceId) -> Option<FaceId> {
+        let img: Option<HashSet<VertexId>> =
+            self.face_vertices(face).into_iter().map(|v| self.vertex_image_affine(mf, t, v)).collect();
         let img = img?;
-        let w0 = self.vertex_image(op, self.face_vertices(face)[0])?;
+        let w0 = self.vertex_image_affine(mf, t, self.face_vertices(face)[0])?;
         self.vertex_faces(w0)
             .into_iter()
             .find(|&g| self.orbits[g.0].len() == img.len() && self.face_vertices(g).iter().all(|v| img.contains(v)))
+    }
+
+    /// Image of face `face` under `op`: the face around the image of its first corner with the same vertex set.
+    pub fn face_image(&self, op: &FracOp2D, face: FaceId) -> Option<FaceId> {
+        self.affine_face_image(op.mf, op.t, face)
     }
 
     /// Tile class of every face orbit: `class[f]` is the index of the `G`-orbit of face orbit `f`, classes numbered

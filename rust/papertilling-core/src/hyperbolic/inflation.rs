@@ -44,7 +44,7 @@ pub(crate) const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 
 /// (cancellation of order `eps * t^2`) is no longer trustworthy. Distance ~ `ln(2e6)` ~ 14.5.
 /// It gates face centres only: vertices of the last built shell lie up to ~`2 cosh R` times
 /// further out in `t` and are not limited (see the module doc, "Precision").
-const T_PRECISION_LIMIT: f64 = 1.0e6;
+pub(crate) const T_PRECISION_LIMIT: f64 = 1.0e6;
 
 pub(crate) fn mink(a: Vec3, b: Vec3) -> f64 { a[0] * b[0] + a[1] * b[1] - a[2] * b[2] }
 pub(crate) fn mat_vec(m: &Mat3, v: Vec3) -> Vec3 { core::array::from_fn(|i| m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2]) }
@@ -106,7 +106,7 @@ pub struct BaseFace {
     /// `s_k`: Lorentz reflection across edge `k`.
     pub reflections: Vec<Mat3>,
     /// `star[j][m]`, `m = 1..q-1`: the faces around vertex `j` are `g * star[j][m]`.
-    star: Vec<Vec<Mat3>>,
+    pub(crate) star: Vec<Vec<Mat3>>,
 }
 
 impl BaseFace {

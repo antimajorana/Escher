@@ -15,6 +15,7 @@ mod draw_tests;
 pub mod inflation;
 #[cfg(test)]
 mod inflation_tests;
+mod kagome;
 mod wedge;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,7 +55,7 @@ pub struct HyperbolicTiling {
 }
 
 #[inline]
-fn c_norm2(a: [f64; 2]) -> f64 { a[0] * a[0] + a[1] * a[1] }
+pub(super) fn c_norm2(a: [f64; 2]) -> f64 { a[0] * a[0] + a[1] * a[1] }
 
 /// Orthogonal circle center & R^2 for Poincare geodesic through A, B (or None if diameter).
 fn orthogonal_circle(a: [f64; 2], b: [f64; 2]) -> Option<([f64; 2], f64)> {
@@ -125,7 +126,7 @@ pub(crate) const DRAW_CAPS: DrawCaps = DrawCaps { max_faces: 1000, max_centre_ra
 /// Wedge path: face centres (and vertices) closer than this hyperbolic distance are one.
 const WEDGE_MERGE_DIST: f64 = 1e-3;
 
-struct Patch {
+pub(super) struct Patch {
     pts: Vec<[f64; 2]>,
     faces: Vec<Vec<usize>>,
     face_shell: Vec<usize>,
@@ -133,18 +134,10 @@ struct Patch {
     growth_rule: String,
 }
 
-/// Regular core (`wedge_delta == 0`): BDF vertex completion `S_0 .. S_layers` from one `p`-gon.
-/// Whole shells are kept while the total stays within `caps.max_faces`; faces whose centre lies
-/// beyond Poincare radius `caps.max_centre_radius` are dropped (the seed never is), which truncates
-/// that shell. `growth_rule` states which shells are complete.
-fn vertex_completion_patch(p: usize, q: usize, style: HyperbolicStyle, lay: usize, caps: DrawCaps) -> Result<Patch, String> {
-    let DrawCaps { max_faces, max_centre_radius } = caps;
-    // The next-shell estimate of `grow_vertex_completion` is >= the true shell, so twice the cap
-    // never stops a shell that would fit.
-    let vc = inflation::grow_vertex_completion(p, q, lay, 2 * max_faces)?;
+pub(super) fn keep_whole_shells(shell_sizes: &[usize], stopped: &Option<String>, max_faces: usize) -> (usize, Vec<String>) {
     let mut keep = 0;
     let mut total = 0;
-    for &a in &vc.shell_sizes {
+    for &a in shell_sizes {
         if total + a > max_faces {
             break;
         }
@@ -152,23 +145,34 @@ fn vertex_completion_patch(p: usize, q: usize, style: HyperbolicStyle, lay: usiz
         keep += 1;
     }
     let mut notes = Vec::new();
-    if let Some(&a) = vc.shell_sizes.get(keep) {
+    if let Some(&a) = shell_sizes.get(keep) {
         notes.push(format!("shell {keep} ({a} faces) omitted by the {max_faces}-face cap"));
     }
-    match &vc.stopped {
+    match stopped {
         // The compute budget (twice the cap) only stops shells that cannot fit the cap: the estimate is
         // exact for shell 1 and exceeds shell n + 1 by at most a_{n-1} < cap (by the recurrence
         // a_{n+1} = 2 gamma a_n - a_{n-1}, GT-observed; a_2 = 2 gamma a_1 in the hand counts {7,3}, {5,4}, {3,7}).
-        Some(s) if s.starts_with("face budget") && keep < vc.shell_sizes.len() => {}
+        Some(s) if s.starts_with("face budget") && keep < shell_sizes.len() => {}
         Some(s) if s.starts_with("face budget") => {
-            notes.push(format!("shell {} omitted by the {max_faces}-face cap (estimated larger)", vc.shell_sizes.len()))
+            notes.push(format!("shell {} omitted by the {max_faces}-face cap (estimated larger)", shell_sizes.len()))
         }
         Some(s) => notes.push(s.clone()),
         None => {}
     }
-    let kagome = style == HyperbolicStyle::RectifiedKagome;
-    let base_pts = if kagome { &vc.base.edge_midpoints } else { &vc.base.vertices };
-    let mut set = inflation::HypPointSet::new(inflation::hyp_dist(base_pts[0], base_pts[1]));
+    (keep, notes)
+}
+
+/// Regular core (`wedge_delta == 0`, non-kagome): BDF vertex completion `S_0 .. S_layers` from one `p`-gon.
+/// Whole shells are kept while the total stays within `caps.max_faces`; faces whose centre lies
+/// beyond Poincare radius `caps.max_centre_radius` are dropped (the seed never is), which truncates
+/// that shell. `growth_rule` states which shells are complete.
+fn vertex_completion_patch(p: usize, q: usize, lay: usize, caps: DrawCaps) -> Result<Patch, String> {
+    let DrawCaps { max_faces, max_centre_radius } = caps;
+    // The next-shell estimate of `grow_vertex_completion` is >= the true shell, so twice the cap
+    // never stops a shell that would fit.
+    let vc = inflation::grow_vertex_completion(p, q, lay, 2 * max_faces)?;
+    let (keep, mut notes) = keep_whole_shells(&vc.shell_sizes, &vc.stopped, max_faces);
+    let mut set = inflation::HypPointSet::new(inflation::hyp_dist(vc.base.vertices[0], vc.base.vertices[1]));
     let mut complete = keep - 1;
     let (mut faces, mut face_shell) = (Vec::new(), Vec::new());
     for (i, &s) in vc.shell.iter().enumerate().take_while(|&(_, &s)| s < keep) {
@@ -176,13 +180,12 @@ fn vertex_completion_patch(p: usize, q: usize, style: HyperbolicStyle, lay: usiz
             complete = complete.min(s - 1);
             continue;
         }
-        let pts3 = if kagome { vc.face_edge_midpoints(i) } else { vc.face_vertices(i) };
+        let pts3 = vc.face_vertices(i);
         faces.push(pts3.into_iter().map(|x| set.insert(x).0).collect());
         face_shell.push(s);
     }
-    // The band guard sees `hyp_dist` only, not drift off the hyperboloid; for the drawn range
-    // (centres within the default radius cap, p, q <= 12) that drift was measured below 1e-4 in
-    // |<x, x> + 1| (2026-11-18), against up to ~2e2 for far vertices of the counting path.
+    // The band guard sees `hyp_dist` only, not drift off the hyperboloid; for centres within the
+    // default radius cap 0.998 (p, q <= 12) that vertex drift was measured <= 4.4e-3 in |<x, x> + 1|.
     if set.suspect > 0 {
         return Err(format!(
             "{{{p},{q}}}: f64 precision: {} drawn points have an ambiguous dedup distance",
@@ -192,11 +195,8 @@ fn vertex_completion_patch(p: usize, q: usize, style: HyperbolicStyle, lay: usiz
     if complete + 1 < keep {
         notes.push(format!("shell {} truncated by the centre radius cap {max_centre_radius}", complete + 1));
     }
-    // Kagome: the (p.q.p.q) p-gons of the {p, q} vertex-completion patch; the q-gons are the gaps
-    // between them (not faces), and the flat cluster rule (decision 1) is not applied here.
-    let what = if kagome { "kagome on the p-gons of BDF vertex completion" } else { "BDF vertex completion" };
     let growth_rule = format!(
-        "{what} from one {p}-gon: S_0..S_{complete} complete, {} faces drawn (requested S_{lay}){}",
+        "BDF vertex completion from one {p}-gon: S_0..S_{complete} complete, {} faces drawn (requested S_{lay}){}",
         faces.len(),
         notes.iter().map(|n| format!("; {n}")).collect::<String>()
     );
@@ -206,22 +206,40 @@ fn vertex_completion_patch(p: usize, q: usize, style: HyperbolicStyle, lay: usiz
 
 /// Wedge-disclination core (`wedge_delta != 0`): vertex completion of copies of a regular
 /// `p_core`-gon (see [`wedge`]), with hyperbolic-distance dedup. For `q = 3` this is the original
-/// edge-BFS face set. The core's circumradius is the original one: `asinh(sinh(r) / sin(pi/p_core))`
-/// with `r` the INRADIUS of `{p, q}` (the old comment calls it the half edge), Poincare radius <= 0.96.
+/// edge-BFS face set. The core edge length matches `{p, q}` (`cosh(l/2) = cos(pi/p) / sin(pi/q)`,
+/// `sinh R_core = sinh(l/2) / sin(pi/p_core)`).
 fn wedge_patch(p: usize, q: usize, style: HyperbolicStyle, lay: usize, p_core: usize, caps: DrawCaps) -> Patch {
-    let inradius_pq = ((PI / (q as f64)).cos() / (PI / (p as f64)).sin()).max(1.0).acosh();
-    let rc_hyp = (inradius_pq.sinh() / (PI / (p_core as f64)).sin()).asinh();
-    let r_core = (0.5 * rc_hyp).tanh().min(0.96);
-    let poly = wedge::Polygon::regular(p_core, 2.0 * r_core.atanh());
+    let half_edge_pq = ((PI / (p as f64)).cos() / (PI / (q as f64)).sin()).max(1.0).acosh();
+    let rc_hyp = (half_edge_pq.sinh() / (PI / (p_core as f64)).sin()).asinh();
+    let poly = wedge::Polygon::regular(p_core, rc_hyp);
     let g = wedge::grow_polygon_vertex_completion(&poly, q, lay, caps.max_faces, caps.max_centre_radius, WEDGE_MERGE_DIST);
     let kagome = style == HyperbolicStyle::RectifiedKagome;
     let (pts, faces) = wedge::polygon_faces_to_poincare(&poly, &g.faces, kagome, WEDGE_MERGE_DIST);
     let mut notes = g.notes;
-    if g.suspect > 0 {
-        // Copies of a non-closing polygon can nearly coincide; they are kept, and counted here.
-        notes.push(format!("{} near-coincident copies (centres {:.1e}..{:.1e} apart) kept", g.suspect, 0.5 * WEDGE_MERGE_DIST, 1.5 * WEDGE_MERGE_DIST));
+    if g.near_coincident_merged > 0 {
+        notes.push(format!(
+            "{} near-coincident copies (centres {:.1e}..{:.1e} apart) merged",
+            g.near_coincident_merged,
+            0.5 * WEDGE_MERGE_DIST,
+            WEDGE_MERGE_DIST
+        ));
     }
-    let walk = if q == 3 { "= edge-BFS for q = 3".to_string() } else { format!("star walks of {} steps each side", q / 2) };
+    if g.near_coincident_kept > 0 {
+        notes.push(format!(
+            "{} near-coincident copies (centres {:.1e}..{:.1e} apart) kept",
+            g.near_coincident_kept,
+            WEDGE_MERGE_DIST,
+            1.5 * WEDGE_MERGE_DIST
+        ));
+    }
+    let walk = if q == 3 {
+        "= edge-BFS for q = 3".to_string()
+    } else {
+        let steps = (q - 1) / 2;
+        let unit = if steps == 1 { "step" } else { "steps" };
+        let opp = if q.is_multiple_of(2) { " + centred opposite copy" } else { "" };
+        format!("star walks of {steps} {unit} each side{opp}")
+    };
     let growth_rule = format!(
         "vertex completion of {p_core}-gon wedge-core copies ({walk}): S_0..S_{} complete, {} faces drawn (requested S_{lay}){}",
         g.complete_through,
@@ -267,10 +285,10 @@ pub(crate) fn build_hyperbolic_tiling_capped(
     let ds = DSymbol::new(vec![0], vec![0], vec![0], vec![p as u32], vec![q as u32])
         .map_err(|e| format!("D-symbol error: {e:?}"))?;
     let p_core = (p as i32 + wedge_delta).clamp(3, 12) as usize;
-    let patch = if wedge_delta == 0 {
-        vertex_completion_patch(p, q, style, lay, caps)?
-    } else {
-        wedge_patch(p, q, style, lay, p_core, caps)
+    let patch = match (wedge_delta, style) {
+        (0, HyperbolicStyle::RectifiedKagome) => kagome::kagome_cluster_patch(p, q, lay, caps)?,
+        (0, _) => vertex_completion_patch(p, q, lay, caps)?,
+        (_, _) => wedge_patch(p, q, style, lay, p_core, caps),
     };
     let Patch { pts: poincare_pts, faces, face_shell, complete_through_shell, growth_rule } = patch;
 

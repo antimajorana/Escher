@@ -1,26 +1,34 @@
 //! Dirichlet-cell seed (author decision 2, 2026-11-18): the faces whose centroids lie in the closed Wigner-Seitz
-//! (Dirichlet) cell of the lattice about the most symmetric point. A child module of `plane::inflation` (declared
-//! there with `#[path]`), so it reads the tiling's private tables.
+//! (Dirichlet) cell of the lattice about the most symmetric point, minimally repaired to a closed disk when the
+//! Wigner-Seitz cell has holes/disconnects or pinch vertices. A child module of `plane::inflation` (declared there
+//! with `#[path]`), so it reads the tiling's private tables.
 //!
 //! * Centroid of a face = the average of its corners (fixed by every symmetry that fixes the face).
 //! * Most symmetric point: among the candidates face-orbit centroids, basis sites and bond midpoints (one cell's
 //!   worth, offset `(0, 0)`), the one of largest site-symmetry order = number of coset representatives of the
-//!   cell's uncoloured symmetry group modulo translations that fix it modulo the lattice. Ties prefer a face
-//!   centroid, then a site, then a bond midpoint; among faces the larger polygon, then the lower orbit index;
-//!   among sites and bonds the lower index. The group is that of the given drawing (`symmetry_frac_ops(false)`).
+//!   cell's uncoloured symmetry group modulo translations that fix it modulo the lattice (`FIX_TOL = 1e-5`). Ties
+//!   prefer a face centroid, then a site, then a bond midpoint; among faces the larger polygon, then the lower orbit
+//!   index; among sites and bonds the lower index.
+//! * Group & supercells: the group comes from `symmetry_frac_ops(false)` on the entered cell's drawing modulo its own
+//!   lattice `(a1, a2)`, and the Wigner-Seitz cell is taken with respect to `(a1, a2)`. Consequently, a non-primitive
+//!   or elongated supercell drops point symmetries that do not map `(a1, a2)` to itself and gives the superlattice
+//!   Dirichlet cell.
 //! * Closed Wigner-Seitz cell about `c`: a face centroid `q` is in it iff `|q - c| <= |q - c - g|` for every lattice
 //!   vector `g`, i.e. `q` is a translate of its own orbit's centroid nearest to `c`. Ties (boundary points) are all
-//!   included, with one symmetric relative tolerance `1e-6 |b1|^2` on squared distances (`b1` the shortest
-//!   lattice vector), so a symmetric tie set is kept or dropped as a whole. Each face orbit has at least one face in
-//!   the seed. The lattice is that of the given cell: a non-primitive cell gives the Dirichlet cell of its
-//!   superlattice.
+//!   included, with symmetric tolerance `TIE_TOL * |b1|^2 = 1e-6 |b1|^2` on squared distances (`b1` the shortest
+//!   lattice vector). When `B_0 = FillHoles(D_0)` is disconnected (`chi != 1`) or has pinch vertices,
+//!   `dirichlet_faces_repaired` finds the fewest-tile `FillHoles`-closed union of `G_c`-orbits forming a disk, keeping
+//!   the full point-symmetry stabilizer `G_c` about `c`.
 
-use std::collections::HashSet;
+use std::cmp::Reverse;
+use std::collections::{BTreeSet, BinaryHeap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{FaceId, Off, PlaneTiling};
+use super::{FaceId, Off, PlaneTiling, SeedDetail};
 use crate::plane::cell::{mat2_inv, mat2_vec, reduce_basis_vectors};
+
+type AffineOp = ([[i32; 2]; 2], [f64; 2]);
 
 /// What the most symmetric point is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,12 +74,27 @@ impl PlaneTiling {
     /// Site-symmetry order of the Cartesian point `p`: the number of symmetry operations (modulo translations) of
     /// the cell that fix `p` modulo the lattice.
     pub fn site_symmetry_order(&self, p: [f64; 2]) -> usize {
-        let x = self.to_frac(p);
-        let near_int = |v: f64| (v - v.round()).abs() < FIX_TOL;
-        let fixes = |m: &[[i32; 2]; 2], t: [f64; 2]| {
-            (0..2).all(|r| near_int(f64::from(m[r][0]) * x[0] + f64::from(m[r][1]) * x[1] + t[r] - x[r]))
-        };
-        self.ops.iter().filter(|op| fixes(&op.mf, op.t)).count()
+        self.stabilizer(p).len()
+    }
+
+    /// Exact affine fractional symmetries `(mf, t - s)` fixing the Cartesian point `c` (without lattice wrap).
+    fn stabilizer(&self, c: [f64; 2]) -> Vec<AffineOp> {
+        let x = self.to_frac(c);
+        self.ops
+            .iter()
+            .filter_map(|op| {
+                let mut s = [0.0; 2];
+                for (r, sr) in s.iter_mut().enumerate() {
+                    let d = f64::from(op.mf[r][0]) * x[0] + f64::from(op.mf[r][1]) * x[1] + op.t[r] - x[r];
+                    let rv = d.round();
+                    if (d - rv).abs() >= FIX_TOL {
+                        return None;
+                    }
+                    *sr = rv;
+                }
+                Some((op.mf, [op.t[0] - s[0], op.t[1] - s[1]]))
+            })
+            .collect()
     }
 
     /// The most symmetric point of the tiling (see the module notes for the candidates and the tie-break).
@@ -132,5 +155,101 @@ impl PlaneTiling {
             out.extend(cands.into_iter().filter(|x| x.0 <= best + tie).map(|x| (f, x.1)));
         }
         out
+    }
+
+    /// Orbit of `face` under the point-symmetry stabilizer `stab` about `c`.
+    fn stabilizer_orbit(&self, stab: &[AffineOp], face: FaceId) -> Result<BTreeSet<FaceId>, String> {
+        let mut orb = BTreeSet::from([face]);
+        for &(mf, t) in stab {
+            let g = self
+                .affine_face_image(mf, t, face)
+                .ok_or_else(|| format!("point symmetry mapped face {face:?} outside tiling"))?;
+            orb.insert(g);
+        }
+        Ok(orb)
+    }
+
+    fn candidate_orbits(
+        &self,
+        pool: &BTreeSet<FaceId>,
+        stab: &[AffineOp],
+        base: &BTreeSet<FaceId>,
+    ) -> Result<Vec<BTreeSet<FaceId>>, String> {
+        let mut seen = HashSet::new();
+        let mut orbits = Vec::new();
+        for &f in pool {
+            let orb = self.stabilizer_orbit(stab, f)?;
+            if !orb.is_subset(base) && seen.insert(orb.clone()) {
+                orbits.push(orb);
+            }
+        }
+        Ok(orbits)
+    }
+
+    /// Best-first Dijkstra over `FillHoles`-closed unions of `G_c`-orbits: the state is the patch set alone,
+    /// deduplicated by set and ordered by `|set| - |b0|`, so the first disk popped is a true minimum-tile repair.
+    fn search_repair(&self, b0: &BTreeSet<FaceId>, orbits: &[BTreeSet<FaceId>], cap: usize) -> Option<HashSet<FaceId>> {
+        let mut heap: BinaryHeap<Reverse<(usize, BTreeSet<FaceId>)>> = BinaryHeap::new();
+        let mut seen: HashSet<BTreeSet<FaceId>> = HashSet::from([b0.clone()]);
+        heap.push(Reverse((0, b0.clone())));
+        let mut expanded = 0usize;
+        while let Some(Reverse((_, cur))) = heap.pop() {
+            let hs: HashSet<FaceId> = cur.iter().copied().collect();
+            let top = self.topology(&hs);
+            if top.chi == 1 && top.pinch_vertices == 0 {
+                return Some(hs);
+            }
+            expanded += 1;
+            if expanded >= cap {
+                return None;
+            }
+            for orb in orbits {
+                if orb.is_subset(&cur) {
+                    continue;
+                }
+                let mut next = hs.clone();
+                next.extend(orb.iter().copied());
+                self.fill_holes(&mut next);
+                let key: BTreeSet<FaceId> = next.into_iter().collect();
+                if seen.insert(key.clone()) {
+                    heap.push(Reverse((key.len().saturating_sub(b0.len()), key)));
+                }
+            }
+        }
+        None
+    }
+
+    /// Dirichlet faces about `c`, repaired minimally while keeping the point symmetry `G_c` if `FillHoles(D_0)`
+    /// is disconnected or has a pinch vertex. Returns `(faces, Some((added_beyond_b0, order)))` when repaired.
+    pub(super) fn dirichlet_faces_repaired(&self, c: [f64; 2]) -> Result<SeedDetail, String> {
+        let d0 = self.dirichlet_faces(c);
+        let mut b0_hs = d0.clone();
+        self.fill_holes(&mut b0_hs);
+        let top = self.topology(&b0_hs);
+        if top.chi == 1 && top.pinch_vertices == 0 {
+            return Ok((d0, None));
+        }
+        let stab = self.stabilizer(c);
+        let ord = stab.len().max(1);
+        let b0: BTreeSet<FaceId> = b0_hs.iter().copied().collect();
+        let u1 = self.completion(&b0_hs);
+        let orb1 = self.candidate_orbits(&u1, &stab, &b0)?;
+        if let Some(rep) = self.search_repair(&b0, &orb1, 3000) {
+            let added = rep.len().saturating_sub(b0.len());
+            return Ok((rep, Some((added, ord))));
+        }
+        let mut wide = b0_hs;
+        wide.extend(u1.iter().copied());
+        let mut u2 = u1;
+        u2.extend(self.completion(&wide));
+        let orb2 = self.candidate_orbits(&u2, &stab, &b0)?;
+        if let Some(rep) = self.search_repair(&b0, &orb2, 5000) {
+            let added = rep.len().saturating_sub(b0.len());
+            return Ok((rep, Some((added, ord))));
+        }
+        Err(format!(
+            "Dirichlet seed is not a disk (chi = {}, pinch_vertices = {}) and could not be repaired within two vertex-completion shells",
+            top.chi, top.pinch_vertices
+        ))
     }
 }

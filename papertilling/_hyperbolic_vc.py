@@ -248,14 +248,18 @@ def grow_vertex_completion(p: int, q: int, n_max: int, face_budget: int) -> VcPa
 
 
 # Wedge-disclination patch (wedge_delta != 0): port of rust/papertilling-core/src/hyperbolic/wedge.rs.
-# Copies of a regular n-gon under reflections across their edges (not a tiling: the interior angle is
-# not 2 pi / q in general), grown by vertex completion: at every vertex j of every face of the last
-# shell, floor(q/2) alternating reflections across the two edges at j, starting on each side. For an
-# angle 2 pi / q this is BDF vertex completion; for q = 3 it is exactly edge-BFS.
+# Copies of a regular p_core-gon whose edge length matches {p, q} (cosh(l/2) = cos(pi/p)/sin(pi/q))
+# grown by vertex completion: two star walks of (q - 1) // 2 alternating reflections (1 step each side
+# for q = 3, 4; edge-BFS for q = 3) plus, for even q, the centred opposite hyperboloid half-turn H_{v_j}.
+
+
+def _half_turn(v):
+    jv = (v[0], v[1], -v[2])
+    return tuple(tuple((-1.0 if i == j else 0.0) - 2.0 * v[i] * jv[j] for j in range(3)) for i in range(3))
 
 
 class Polygon:
-    """A regular n-gon centred at (0, 0, 1) on the hyperboloid, with its edge reflections."""
+    """A regular n-gon centred at (0, 0, 1) on the hyperboloid, with reflections and vertex half-turns."""
 
     def __init__(self, n: int, circumradius: float):
         # Right triangle centre / edge midpoint / vertex: tanh r = tanh R cos(pi / n).
@@ -274,27 +278,55 @@ class Polygon:
             self.reflections.append(
                 tuple(tuple(_IDENTITY[i][j] - 2.0 * nv[i] * jn[j] for j in range(3)) for i in range(3))
             )
+        self.half_turns = [_half_turn(v) for v in self.vertices]
 
 
 def grow_polygon_vertex_completion(poly: Polygon, q: int, n_max: int, max_faces: int, max_centre_radius: float,
                                    merge_dist: float):
-    """S_0 .. S_{n_max} of copies of `poly`; returns (faces, shell, complete_through, notes, suspect).
+    """S_0 .. S_{n_max} of copies of `poly`; returns (faces, shell, complete_through, notes, merged, kept).
 
     Faces whose Poincare vertex centroid lies beyond radius max_centre_radius are dropped (truncating
     their shell); a shell that would bring the total above max_faces is dropped whole; centres closer than
-    merge_dist (hyperbolic) are one face; `suspect` counts centre-dedup band hits (near-coincident
-    copies, kept).
+    merge_dist (hyperbolic) are one face; near-coincident guard-band hits split into (merged, kept).
     """
-    n, walk = poly.n, q // 2
+    n, walk, even_q = poly.n, (q - 1) // 2, (q % 2 == 0)
     centres = HypPointSet(2.0 * merge_dist)
     centres.insert(_ORIGIN)
     faces, shell, notes = [_IDENTITY], [0], []
     complete_through, truncated = 0, False
+    merged, kept = 0, 0
     r2_max = max_centre_radius * max_centre_radius
     for s in range(n_max):
         start = shell.index(s) if s in shell else len(faces)
         end = len(faces)
         over_cap = False
+        shell_trunc = False
+
+        def _try_push(w):
+            nonlocal shell_trunc, over_cap, merged, kept
+            c = mat_vec(w, _ORIGIN)
+            zx = zy = 0.0
+            for v in poly.vertices:
+                x = hyperboloid_to_poincare(mat_vec(w, v))
+                zx, zy = zx + x[0] / n, zy + x[1] / n
+            if not (zx * zx + zy * zy <= r2_max):
+                shell_trunc = True
+                return False
+            prev_suspect = centres.suspect
+            _, inserted = centres.insert(c)
+            if centres.suspect > prev_suspect:
+                if inserted:
+                    kept += 1
+                else:
+                    merged += 1
+            if inserted:
+                faces.append(w)
+                shell.append(s + 1)
+                if len(faces) > max_faces:
+                    over_cap = True
+                    return True
+            return False
+
         for fi in range(start, end):
             g = faces[fi]
             for j in range(n):
@@ -303,25 +335,13 @@ def grow_polygon_vertex_completion(poly: Polygon, q: int, n_max: int, max_faces:
                     w = g
                     for step in range(walk):
                         w = mat_mul(w, poly.reflections[first if step % 2 == 0 else second])
-                        c = mat_vec(w, _ORIGIN)
-                        # Radius cap on the Euclidean centroid of the face's Poincare vertices (the
-                        # pre-upgrade criterion, kept by the Rust engine so q = 3 reproduces edge-BFS).
-                        zx = zy = 0.0
-                        for v in poly.vertices:
-                            x = hyperboloid_to_poincare(mat_vec(w, v))
-                            zx, zy = zx + x[0] / n, zy + x[1] / n
-                        if not (zx * zx + zy * zy <= r2_max):
-                            truncated = True
-                            continue
-                        if centres.insert(c)[1]:
-                            faces.append(w)
-                            shell.append(s + 1)
-                            if len(faces) > max_faces:
-                                over_cap = True
-                                break
+                        if _try_push(w):
+                            break
                     if over_cap:
                         break
                 if over_cap:
+                    break
+                if even_q and _try_push(mat_mul(g, poly.half_turns[j])):
                     break
             if over_cap:
                 break
@@ -330,13 +350,161 @@ def grow_polygon_vertex_completion(poly: Polygon, q: int, n_max: int, max_faces:
             del shell[end:]
             notes.append(f"shell {s + 1} omitted by the {max_faces}-face cap")
             break
+        truncated = truncated or shell_trunc
         if len(faces) == end:
             break
         if not truncated:
             complete_through = s + 1
     if truncated:
         notes.append(f"shell {complete_through + 1} truncated by the centre radius cap {max_centre_radius}")
-    return faces, shell, complete_through, notes, centres.suspect
+    return faces, shell, complete_through, notes, merged, kept
+
+
+def keep_whole_shells(shell_sizes, stopped, max_faces: int):
+    """Whole-shell face-cap selection matching rust/papertilling-core/src/hyperbolic/mod.rs."""
+    keep, total = 0, 0
+    for a in shell_sizes:
+        if total + a > max_faces:
+            break
+        total += a
+        keep += 1
+    notes = []
+    if keep < len(shell_sizes):
+        notes.append(f"shell {keep} ({shell_sizes[keep]} faces) omitted by the {max_faces}-face cap")
+    if stopped is not None and stopped.startswith("face budget"):
+        if keep >= len(shell_sizes):
+            notes.append(f"shell {len(shell_sizes)} omitted by the {max_faces}-face cap (estimated larger)")
+    elif stopped is not None:
+        notes.append(stopped)
+    return keep, notes
+
+
+def _bx_rz_pi(r: float):
+    ch, sh = math.cosh(r), math.sinh(r)
+    return ((-ch, 0.0, sh), (0.0, -1.0, 0.0), (-sh, 0.0, ch))
+
+
+def _qgon_midpoints_at_vertex(base: BaseFace, j: int):
+    p, q = base.p, base.q
+    a, b = j, (j + p - 1) % p
+    pts = [base.edge_midpoints[b], base.edge_midpoints[a]]
+    for k in range(2, q):
+        side = b if (k % 2 == 0) else a
+        pts.append(mat_vec(base.star[j][k - 2], base.edge_midpoints[side]))
+    pts.reverse()
+    return pts
+
+
+def grow_kagome_cluster(p: int, q: int, lay: int, max_faces: int, max_centre_radius: float):
+    """Rectified (p.q.p.q) kagome grown by the cluster rule (mirrors hyperbolic/kagome.rs)."""
+    r2_max = max_centre_radius * max_centre_radius
+    if p == q:
+        vc4 = grow_vertex_completion(p, 4, lay, 2 * max_faces)
+        keep, notes = keep_whole_shells(vc4.shell_sizes, vc4.stopped, max_faces)
+        ang = math.pi / p
+        ca, sa = math.cos(ang), math.sin(ang)
+        pset = HypPointSet(hyp_dist(vc4.base.vertices[0], vc4.base.vertices[1]))
+        complete = keep - 1
+        faces, face_shell = [], []
+        for i, s in enumerate(vc4.shell):
+            if s >= keep:
+                break
+            if i > 0:
+                z = hyperboloid_to_poincare(vc4.centre(i))
+                if z[0] * z[0] + z[1] * z[1] > r2_max:
+                    complete = min(complete, s - 1)
+                    continue
+            faces.append([pset.insert((ca * v[0] - sa * v[1], sa * v[0] + ca * v[1], v[2]))[0] for v in vc4.face_vertices(i)])
+            face_shell.append(s)
+        if pset.suspect > 0:
+            raise ValueError(f"{{{p},{p}}}: f64 precision: {pset.suspect} drawn points have an ambiguous dedup distance")
+        if complete + 1 < keep:
+            notes.append(f"shell {complete + 1} truncated by the centre radius cap {max_centre_radius}")
+        pts = [hyperboloid_to_poincare(x) for x in pset.pts]
+        return pts, faces, face_shell, complete, notes
+
+    dual_mode = p < q
+    base = BaseFace(q, p) if dual_mode else BaseFace(p, q)
+    bp = base.p
+    t_mat = _bx_rz_pi(base.circumradius) if dual_mode else _IDENTITY
+    l_k = hyp_dist(base.edge_midpoints[0], base.edge_midpoints[1 % bp])
+    centres = HypPointSet(2.0 * base.inradius)
+    verts = HypPointSet(base.edge_length())
+    p_mats = [_IDENTITY] + list(base.star[0]) if dual_mode else [_IDENTITY]
+    for g in p_mats:
+        centres.insert(mat_vec(g, _ORIGIN))
+
+    def _face_pair(g):
+        wg = mat_mul(t_mat, g)
+        return mat_vec(wg, _ORIGIN), [mat_vec(wg, x) for x in base.edge_midpoints]
+
+    def _dec_pair(g, j):
+        wg = mat_mul(t_mat, g)
+        return mat_vec(wg, base.vertices[j]), [mat_vec(wg, x) for x in _qgon_midpoints_at_vertex(base, j)]
+
+    dec0 = []
+    for g in p_mats:
+        for j in range(bp):
+            if verts.insert(mat_vec(g, base.vertices[j]))[1]:
+                dec0.append(_dec_pair(g, j))
+    p0_faces = [_face_pair(g) for g in p_mats]
+    s0 = ([dec0[0]] + p0_faces + dec0[1:]) if dual_mode else (p0_faces + dec0)
+    total = len(s0)
+    raw_shells, notes, p_start = [s0], [], 0
+    for s in range(lay):
+        p_end = len(p_mats)
+        next_p, next_dec, aborted = [], [], None
+        for fi in range(p_start, p_end):
+            g = p_mats[fi]
+            for k in range(bp):
+                h = mat_mul(g, base.reflections[k])
+                c = mat_vec(h, _ORIGIN)
+                if not all(math.isfinite(x) for x in c) or c[2] > T_PRECISION_LIMIT:
+                    aborted = f"f64 precision limit: shell {s + 1} not built"
+                    break
+                if centres.insert(c)[1]:
+                    p_mats.append(h)
+                    next_p.append(_face_pair(h))
+                    for j in range(bp):
+                        if verts.insert(mat_vec(h, base.vertices[j]))[1]:
+                            next_dec.append(_dec_pair(h, j))
+                    if total + len(next_p) + len(next_dec) > 2 * max_faces:
+                        aborted = f"shell {s + 1} omitted by the {max_faces}-face cap (estimated larger)"
+                        break
+            if aborted is not None:
+                break
+        if aborted is not None:
+            notes.append(aborted)
+            break
+        if centres.suspect + verts.suspect > 0:
+            notes.append(f"f64 precision: ambiguous dedup: shell {s + 1} not built")
+            break
+        a = len(next_p) + len(next_dec)
+        if total + a > max_faces:
+            notes.append(f"shell {s + 1} ({a} faces) omitted by the {max_faces}-face cap")
+            break
+        raw_shells.append(next_p + next_dec)
+        total += a
+        p_start = p_end
+    keep = len(raw_shells)
+    complete = keep - 1
+    kag_set = HypPointSet(l_k)
+    faces, face_shell = [], []
+    for s, sh in enumerate(raw_shells):
+        for cen, vpts in sh:
+            if s > 0:
+                z = hyperboloid_to_poincare(cen)
+                if z[0] * z[0] + z[1] * z[1] > r2_max:
+                    complete = min(complete, s - 1)
+                    continue
+            faces.append([kag_set.insert(x)[0] for x in vpts])
+            face_shell.append(s)
+    if kag_set.suspect > 0:
+        raise ValueError(f"{{{p},{q}}}: f64 precision: {kag_set.suspect} drawn points have an ambiguous dedup distance")
+    if complete + 1 < keep:
+        notes.append(f"shell {complete + 1} truncated by the centre radius cap {max_centre_radius}")
+    pts = [hyperboloid_to_poincare(x) for x in kag_set.pts]
+    return pts, faces, face_shell, complete, notes
 
 
 def polygon_faces_to_poincare(poly: Polygon, faces, kagome: bool, merge_dist: float):

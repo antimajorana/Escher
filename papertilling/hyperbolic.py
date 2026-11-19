@@ -69,28 +69,11 @@ def _geodesic_arc(a, b, segs: int = 8):
     return [[cx + rad * math.cos(th0 + dth * k / segs), cy + rad * math.sin(th0 + dth * k / segs)] for k in range(segs + 1)]
 
 
-def _vertex_completion_patch(p: int, q: int, style: str, lay: int):
-    """Drawn patch for wedge_delta == 0: whole vertex-completion shells within the caps (Rust mirror)."""
+def _vertex_completion_patch(p: int, q: int, lay: int):
+    """Drawn patch for wedge_delta == 0 (RegularPQ/DualQP): whole vertex-completion shells within the caps."""
     patch = vc.grow_vertex_completion(p, q, lay, 2 * MAX_DRAWN_FACES)
-    keep, total = 0, 0
-    for a in patch.shell_sizes:
-        if total + a > MAX_DRAWN_FACES:
-            break
-        total += a
-        keep += 1
-    notes = []
-    if keep < len(patch.shell_sizes):
-        notes.append(f"shell {keep} ({patch.shell_sizes[keep]} faces) omitted by the {MAX_DRAWN_FACES}-face cap")
-    stopped = patch.stopped
-    if stopped is not None and stopped.startswith("face budget"):
-        # The compute budget (twice the cap) only stops shells that cannot fit the cap (Rust mirror).
-        if keep >= len(patch.shell_sizes):
-            notes.append(f"shell {len(patch.shell_sizes)} omitted by the {MAX_DRAWN_FACES}-face cap (estimated larger)")
-    elif stopped is not None:
-        notes.append(stopped)
-    kagome = style == "RectifiedKagome"
-    base_pts = patch.base.edge_midpoints if kagome else patch.base.vertices
-    pset = vc.HypPointSet(vc.hyp_dist(base_pts[0], base_pts[1]))
+    keep, notes = vc.keep_whole_shells(patch.shell_sizes, patch.stopped, MAX_DRAWN_FACES)
+    pset = vc.HypPointSet(vc.hyp_dist(patch.base.vertices[0], patch.base.vertices[1]))
     complete = keep - 1
     faces, face_shell = [], []
     for i, s in enumerate(patch.shell):
@@ -101,20 +84,37 @@ def _vertex_completion_patch(p: int, q: int, style: str, lay: int):
             if z[0] * z[0] + z[1] * z[1] > MAX_CENTRE_RADIUS**2:
                 complete = min(complete, s - 1)
                 continue
-        pts3 = patch.face_edge_midpoints(i) if kagome else patch.face_vertices(i)
-        faces.append([pset.insert(x)[0] for x in pts3])
+        faces.append([pset.insert(x)[0] for x in patch.face_vertices(i)])
         face_shell.append(s)
     if pset.suspect > 0:
         raise ValueError(f"{{{p},{q}}}: f64 precision: {pset.suspect} drawn points have an ambiguous dedup distance")
     if complete + 1 < keep:
         notes.append(f"shell {complete + 1} truncated by the centre radius cap {MAX_CENTRE_RADIUS}")
-    # Kagome: the (p.q.p.q) p-gons of the {p, q} vertex-completion patch; the q-gons are the gaps.
-    what = "kagome on the p-gons of BDF vertex completion" if kagome else "BDF vertex completion"
     growth_rule = (
-        f"{what} from one {p}-gon: S_0..S_{complete} complete, {len(faces)} faces drawn "
+        f"BDF vertex completion from one {p}-gon: S_0..S_{complete} complete, {len(faces)} faces drawn "
         f"(requested S_{lay})" + "".join(f"; {n}" for n in notes)
     )
     pts = [vc.hyperboloid_to_poincare(x) for x in pset.pts]
+    return pts, faces, face_shell, complete, growth_rule
+
+
+def _kagome_cluster_patch(p: int, q: int, lay: int):
+    """Drawn patch for wedge_delta == 0, RectifiedKagome: cluster rule on (p.q.p.q) including q-gons."""
+    pts, faces, face_shell, complete, notes = vc.grow_kagome_cluster(
+        p, q, lay, MAX_DRAWN_FACES, MAX_CENTRE_RADIUS
+    )
+    suffix = "".join(f"; {n}" for n in notes)
+    if p == q:
+        growth_rule = (
+            f"cluster rule on ({p}.{p}.{p}.{p}) kagome (all {p}-gons are centres): "
+            f"S_0..S_{complete} complete, {len(faces)} faces drawn (requested S_{lay}){suffix}"
+        )
+    else:
+        c_sides = max(p, q)
+        growth_rule = (
+            f"cluster rule on ({p}.{q}.{p}.{q}) kagome (centres: {c_sides}-gons; {p}-gons and {q}-gons): "
+            f"S_0..S_{complete} complete, {len(faces)} faces drawn (requested S_{lay}){suffix}"
+        )
     return pts, faces, face_shell, complete, growth_rule
 
 
@@ -127,22 +127,28 @@ def _rust_e(x: float) -> str:
 def _wedge_patch(p: int, q: int, style: str, lay: int, p_core: int):
     """Drawn patch for wedge_delta != 0 (Rust mirror): vertex completion of wedge-core copies.
 
-    The core is a regular p_core-gon of circumradius asinh(sinh(r) / sin(pi / p_core)), r the inradius
-    of {p, q}, capped at Poincare radius 0.96 (the original core geometry); dedup is hyperbolic.
+    The core is a regular p_core-gon matching {p, q} edge length: cosh(l/2) = cos(pi/p)/sin(pi/q),
+    sinh(R_core) = sinh(l/2)/sin(pi/p_core); dedup is hyperbolic.
     """
-    inradius_pq = math.acosh(max(1.0, math.cos(math.pi / q) / math.sin(math.pi / p)))
-    rc_hyp = math.asinh(math.sinh(inradius_pq) / math.sin(math.pi / p_core))
-    r_core = min(math.tanh(0.5 * rc_hyp), 0.96)
-    poly = vc.Polygon(p_core, 2.0 * math.atanh(r_core))
-    faces3, shell, complete, notes, suspect = vc.grow_polygon_vertex_completion(
+    half_edge_pq = math.acosh(max(1.0, math.cos(math.pi / p) / math.sin(math.pi / q)))
+    rc_hyp = math.asinh(math.sinh(half_edge_pq) / math.sin(math.pi / p_core))
+    poly = vc.Polygon(p_core, rc_hyp)
+    faces3, shell, complete, notes, merged, kept = vc.grow_polygon_vertex_completion(
         poly, q, lay, MAX_DRAWN_FACES, MAX_CENTRE_RADIUS, WEDGE_MERGE_DIST
     )
     pts, faces = vc.polygon_faces_to_poincare(poly, faces3, style == "RectifiedKagome", WEDGE_MERGE_DIST)
-    if suspect > 0:
-        # Copies of a non-closing polygon can nearly coincide; they are kept, and counted here.
-        lo, hi = _rust_e(0.5 * WEDGE_MERGE_DIST), _rust_e(1.5 * WEDGE_MERGE_DIST)
-        notes = notes + [f"{suspect} near-coincident copies (centres {lo}..{hi} apart) kept"]
-    walk = "= edge-BFS for q = 3" if q == 3 else f"star walks of {q // 2} steps each side"
+    notes = list(notes)
+    if merged > 0:
+        notes.append(f"{merged} near-coincident copies (centres {_rust_e(0.5 * WEDGE_MERGE_DIST)}..{_rust_e(WEDGE_MERGE_DIST)} apart) merged")
+    if kept > 0:
+        notes.append(f"{kept} near-coincident copies (centres {_rust_e(WEDGE_MERGE_DIST)}..{_rust_e(1.5 * WEDGE_MERGE_DIST)} apart) kept")
+    if q == 3:
+        walk = "= edge-BFS for q = 3"
+    else:
+        steps = (q - 1) // 2
+        unit = "step" if steps == 1 else "steps"
+        opp = " + centred opposite copy" if q % 2 == 0 else ""
+        walk = f"star walks of {steps} {unit} each side{opp}"
     growth_rule = (
         f"vertex completion of {p_core}-gon wedge-core copies ({walk}): S_0..S_{complete} complete, "
         f"{len(faces)} faces drawn (requested S_{lay})" + "".join(f"; {n}" for n in notes)
@@ -159,10 +165,11 @@ def build_hyperbolic_tiling(
 ) -> dict[str, Any]:
     """Generate a hyperbolic {p, q} / rectified (p.q.p.q) / dual {q, p} tiling patch in D and H^2.
 
-    For wedge_delta == 0 the patch is BDF vertex completion S_layers of one p-gon (layers clamped to
-    1..4), trimmed to whole shells within MAX_DRAWN_FACES faces and to face centres within Poincare
-    radius MAX_CENTRE_RADIUS; `face_shell`, `complete_through_shell` and `growth_rule` say which. For
-    wedge_delta != 0 it is vertex completion of copies of a p_core-gon wedge core, with the same caps.
+    For wedge_delta == 0 the patch is BDF vertex completion S_layers of one p-gon (or the cluster
+    rule on (p.q.p.q) kagome; layers clamped to 1..4), trimmed to whole shells within MAX_DRAWN_FACES
+    faces and to face centres within Poincare radius MAX_CENTRE_RADIUS; `face_shell`,
+    `complete_through_shell` and `growth_rule` say which. For wedge_delta != 0 it is vertex
+    completion of copies of a p_core-gon wedge core, with the same caps.
     """
     rs = _rust.get()
     if rs is not None and hasattr(rs, "hyperbolic_tiling_json"):
@@ -174,8 +181,10 @@ def build_hyperbolic_tiling(
         raise ValueError(f"{{{pe}, {qe}}} is not hyperbolic (requires (p-2)(q-2) > 4)")
     lay = max(1, min(4, int(layers)))
     p_core = max(3, min(12, pe + wd))
-    if wd == 0:
-        pts, faces, face_shell, complete, growth_rule = _vertex_completion_patch(pe, qe, st, lay)
+    if wd == 0 and st == "RectifiedKagome":
+        pts, faces, face_shell, complete, growth_rule = _kagome_cluster_patch(pe, qe, lay)
+    elif wd == 0:
+        pts, faces, face_shell, complete, growth_rule = _vertex_completion_patch(pe, qe, lay)
     else:
         pts, faces, face_shell, complete, growth_rule = _wedge_patch(pe, qe, st, lay, p_core)
     eset = set()

@@ -42,10 +42,7 @@ impl PlaneTiling {
             let fs = s.iter().flat_map(|&f| self.face_vertices(f));
             fs.flat_map(|v| self.vertex_faces(v)).map(wf).filter(|g| !s.contains(g)).collect()
         };
-        let mask = match rule {
-            InflationRule::Bdf => None,
-            InflationRule::Cluster(c) => Some(self.centre_mask(c)?),
-        };
+        let (_, mask, _) = self.resolve_rule(rule)?;
         let mut s: HashSet<FaceId> = seed.iter().map(|&f| wf(f)).collect();
         let mut p: HashSet<FaceId> = HashSet::new();
         if let Some(m) = &mask {

@@ -338,7 +338,9 @@ fn patch_face_cap_keeps_whole_shells() {
 }
 
 /// Default caps make the layers slider meaningful: {5,4} layers 1..4 draw |S_1..S_4| = 11, 51, 201,
-/// 761 (hand counts 1 + 10, + 40; GT shells 150, 560), {7,3} 8, 29, 85, 232 (hand / GT), all complete.
+/// 761 (hand counts 1 + 10, + 40; boundary letters: S_2 has 55*'1' + 40*'2' -> a_3 = 55*2 + 40 = 150,
+/// S_3 has 205*'1' + 150*'2' -> a_4 = 205*2 + 150 = 560, GT), and {7,3} draws 8, 29, 85, 232 (hand counts
+/// 1 + 7 + 21 + 56, S_4 = 147 GT), all complete.
 #[test]
 fn default_caps_draw_four_whole_shells() {
     for (p, q, want) in [(5, 4, [11, 51, 201, 761]), (7, 3, [8, 29, 85, 232])] {
@@ -349,18 +351,48 @@ fn default_caps_draw_four_whole_shells() {
     }
 }
 
-/// Styles: dual of {7,3} is {3,7} (|S_1| = 1 + 15 = 16 triangles); kagome keeps the p-gon count.
+/// Default caps exercise:
+/// * Face cap (1000): {10,7} has a_0 = 1, a_1 = 10*(7-2) = 50 (|S_1| = 51 <= 1000); S_1 boundary has
+///   10*6 + 10*4*7 = 340 vertices with o = 6 (1 outside edge+corner count 5) and 50 with o = 5 (count 4), so
+///   a_2 = 340*5 + 50*4 = 1900 (|S_2| = 1951 > 1000) -> S_2 omitted at layers = 2.
+/// * Radius cap (0.998): {5,5} has |S_2| = 1 + 15 + 105 = 121 and a_3 = 720 (|S_3| = 841 <= 1000), a_4 = 4935.
+///   At layers = 3, outermost S_3 corner tiles pass 0.998 (truncated, complete_through == 2); at layers = 4,
+///   shell 3 is truncated AND shell 4 is omitted.
+#[test]
+fn default_caps_face_cap_and_radius_cap() {
+    let t10 = build_hyperbolic_tiling(10, 7, HyperbolicStyle::RegularPQ, 2, 0).unwrap();
+    assert_eq!((t10.faces.len(), t10.complete_through_shell), (51, 1));
+    assert!(t10.growth_rule.contains("omitted"), "{}", t10.growth_rule);
+
+    let t3 = build_hyperbolic_tiling(5, 5, HyperbolicStyle::RegularPQ, 3, 0).unwrap();
+    assert!(121 < t3.faces.len() && t3.faces.len() < 841, "{}", t3.faces.len());
+    assert_eq!(t3.complete_through_shell, 2);
+    assert!(t3.growth_rule.contains("truncated") && !t3.growth_rule.contains("omitted"), "{}", t3.growth_rule);
+
+    let t4 = build_hyperbolic_tiling(5, 5, HyperbolicStyle::RegularPQ, 4, 0).unwrap();
+    assert_eq!((t4.faces.len(), t4.complete_through_shell), (t3.faces.len(), 2));
+    assert!(t4.growth_rule.contains("truncated") && t4.growth_rule.contains("omitted"), "{}", t4.growth_rule);
+}
+
+/// Styles: dual of {7,3} is {3,7} (|S_1| = 16 triangles); kagome uses the cluster rule on (p.q.p.q)
+/// including q-gons ((7,3) L2: 29 7-gons + 112 3-gons = 141; (5,4) L2: 21 5-gons + 60 4-gons = 81);
+/// wedge + kagome stays on the rectified edges of the wedge copies.
 #[test]
 fn patch_styles() {
     let d = build_hyperbolic_tiling(7, 3, HyperbolicStyle::DualQP, 1, 0).unwrap();
     assert_eq!((d.p, d.q, d.faces.len(), d.faces[0].len()), (3, 7, 16, 3));
-    let k = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RectifiedKagome, 2, 0).unwrap();
-    assert_eq!(k.faces.len(), 29);
-    // Kagome vertices are edge midpoints: E(S_2) of {7,3} = V + F - 1 (chi = 1).
-    let r = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RegularPQ, 2, 0).unwrap();
-    assert_eq!(k.poincare_pts.len(), r.edges.len());
+    let k73 = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RectifiedKagome, 2, 0).unwrap();
+    assert_eq!(k73.faces.len(), 141);
+    assert_eq!((k73.faces.iter().filter(|f| f.len() == 7).count(), k73.faces.iter().filter(|f| f.len() == 3).count()), (29, 112));
+    assert!(k73.growth_rule.contains("cluster rule"), "{}", k73.growth_rule);
+    let k54 = build_hyperbolic_tiling(5, 4, HyperbolicStyle::RectifiedKagome, 2, 0).unwrap();
+    assert_eq!((k54.faces.len(), k54.faces.iter().filter(|f| f.len() == 5).count(), k54.faces.iter().filter(|f| f.len() == 4).count()), (81, 21, 60));
+    assert_eq!(k54.poincare_pts.len() as i64 - k54.edges.len() as i64 + 81, 1);
+
     let cone = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RegularPQ, 2, -1).unwrap();
     assert!(cone.growth_rule.contains("edge-BFS for q = 3"), "{}", cone.growth_rule);
+    let wk = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RectifiedKagome, 2, -1).unwrap();
+    assert_eq!(wk.poincare_pts.len(), cone.edges.len());
 }
 
 /// {12,12} layers 1 with the old radius cap 0.985: S_1 = 121 faces fits the face cap, but corner tiles

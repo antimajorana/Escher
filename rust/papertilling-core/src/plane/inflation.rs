@@ -4,11 +4,12 @@
 //! vertex completion `S_{n+1} = S_n U {faces sharing >= 1 vertex with S_n}`. Here every shell is also closed
 //! under FillHoles: `S~_{n+1} = FillHoles(S~_n U U(S~_n))`, so that each shell is a closed topological disk.
 //!
-//! Everything is exact and combinatorial. A face of the infinite periodic tiling is `(face orbit, cell offset of
-//! its first corner)` with the orbits enumerated by `surface::quotient::plane_faces`; a vertex is `(site,
-//! offset)`. Floats enter only through the cell geometry of `plane_faces` (angular order at a site), the
-//! planarity and signed-area checks in [`PlaneTiling::new`], the generous FillHoles box margin, and the polygons
-//! for drawing. [`PatchTopology`] and the incremental shell bookkeeping live in `inflation_topology.rs`.
+//! Combinatorial structure and exact face-ID tables: a face of the infinite periodic tiling is `(face orbit, cell
+//! offset of its first corner)` with the orbits enumerated by `surface::quotient::plane_faces`; a vertex is
+//! `(site, offset)`. Floats enter through the cell geometry of `plane_faces` (angular order at a site), the
+//! planarity and signed-area checks in [`PlaneTiling::new`], the generous FillHoles box margin, vertex/symmetry
+//! matching (`FIX_TOL` and `SITE_TOL`), Wigner-Seitz centroid distance ties (`TIE_TOL`), and output polygons.
+//! [`PatchTopology`] and incremental shell bookkeeping live in `inflation_topology.rs`.
 //!
 //! FillHoles uses SHARED-EDGE adjacency between non-patch faces: the open edge between two non-patch faces lies
 //! outside the closed patch, so edge-adjacency components are exactly the connected components of the
@@ -34,7 +35,9 @@ pub use topology::PatchTopology;
 use topology::Tracker;
 #[path = "inflation_grow.rs"]
 mod grow;
-pub use grow::{CentreSet, InflationFace, InflationResult, InflationRule, ShellStats, inflate, inflate_with};
+pub use grow::{
+    AutoEligibility, CentreSet, InflationFace, InflationResult, InflationRule, ShellStats, inflate, inflate_with,
+};
 #[path = "inflation_dirichlet.rs"]
 mod dirichlet;
 pub use dirichlet::{CentreKind, SymmetricPoint};
@@ -50,6 +53,8 @@ pub type Off = [i32; 2];
 pub type FaceId = (usize, Off);
 /// A vertex of the infinite tiling: `(basis site, cell offset)`.
 pub type VertexId = (usize, Off);
+/// Seed faces paired with optional `(added_beyond_b0, point_order)` when Dirichlet repair ran.
+pub(super) type SeedDetail = (HashSet<FaceId>, Option<(usize, usize)>);
 
 /// Largest number of inflation steps accepted by [`inflate`].
 pub const MAX_STEPS: usize = 64;
@@ -229,17 +234,28 @@ impl PlaneTiling {
         self.face_vertices(face).into_iter().map(|(s, p)| [at(s, p, 0), at(s, p, 1)]).collect()
     }
 
-    /// Faces of the initial patch for `seed`, before FillHoles.
-    pub fn seed_faces(&self, seed: InflationSeed) -> Result<HashSet<FaceId>, String> {
+    /// Initial patch for `seed` together with `Some((added_faces, point_order))` when Dirichlet repair ran.
+    pub(super) fn seed_faces_detail(&self, seed: InflationSeed) -> Result<SeedDetail, String> {
         let star = |s: usize| self.vertex_faces((s, [0, 0]));
         match seed {
-            InflationSeed::Face(f) if f < self.orbits.len() => Ok(HashSet::from([(f, [0, 0])])),
+            InflationSeed::Face(f) if f < self.orbits.len() => Ok((HashSet::from([(f, [0, 0])]), None)),
             InflationSeed::Face(f) => Err(format!("face orbit {f} out of range ({} orbits)", self.orbits.len())),
-            InflationSeed::VertexStar(s) if s < self.rotation.len() => Ok(star(s).into_iter().collect()),
+            InflationSeed::VertexStar(s) if s < self.rotation.len() => Ok((star(s).into_iter().collect(), None)),
             InflationSeed::VertexStar(s) => Err(format!("site {s} out of range ({} sites)", self.rotation.len())),
-            InflationSeed::Dirichlet => Ok(self.dirichlet_faces(self.most_symmetric_point().point)),
-            InflationSeed::DirichletAt(c) => Ok(self.dirichlet_faces(c)),
+            InflationSeed::Dirichlet => self.dirichlet_faces_repaired(self.most_symmetric_point().point),
+            InflationSeed::DirichletAt(c) => self.dirichlet_faces_repaired(c),
         }
+    }
+
+    /// Initial patch for `seed` paired with whether Dirichlet pinch/disconnect repair ran.
+    pub fn seed_faces_with_status(&self, seed: InflationSeed) -> Result<(HashSet<FaceId>, bool), String> {
+        let (faces, repair) = self.seed_faces_detail(seed)?;
+        Ok((faces, repair.is_some()))
+    }
+
+    /// Faces of the initial patch for `seed`, before FillHoles (with Dirichlet pinch/disconnect repair if needed).
+    pub fn seed_faces(&self, seed: InflationSeed) -> Result<HashSet<FaceId>, String> {
+        self.seed_faces_detail(seed).map(|(faces, _)| faces)
     }
 
     /// Vertex completion `U(S)`: every face not in `patch` that shares at least one vertex with it.

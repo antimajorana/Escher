@@ -211,7 +211,7 @@ impl HyperbolicPanelState {
             ui.small(format!("Table stops early: {stop}"));
         }
         if self.style == HyperbolicStyle::RectifiedKagome {
-            ui.small("Kagome: counts are of the underlying {p,q} p-gons.");
+            ui.small("Kagome: drawn patch uses the cluster rule on (p.q.p.q) including q-gons; this table shows BDF on {p,q}.");
         }
         if self.wedge_delta != 0 {
             ui.small(

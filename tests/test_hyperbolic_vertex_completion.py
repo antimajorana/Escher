@@ -34,7 +34,7 @@ def _poincare_dist(z, w) -> float:
 
 
 def _edge_length(p: int, q: int) -> float:
-    """Edge length l of {p, q}: cosh(l / 2) = cos(pi / p) / sin(pi / q) (Coxeter, regular polytopes)."""
+    """Edge length l of {p, q} from the right triangle (centre, edge midpoint, vertex): cos(pi/p) = cosh(l/2) sin(pi/q)."""
     return 2.0 * math.acosh(math.cos(math.pi / p) / math.sin(math.pi / q))
 
 
@@ -113,24 +113,115 @@ def test_points_lie_in_disk_and_on_upper_hyperboloid(fallback):
             assert abs(tt * tt - x * x - y * y - 1.0) < 1e-6 * tt * tt
 
 
-def test_kagome_vertices_are_the_edge_midpoints(fallback):
-    # The rectified patch puts one vertex at the midpoint of each edge of the {p, q} patch and keeps
-    # one p-gon per face, so |V_kagome| = |E_regular| and the face shells agree.
-    reg = fallback(5, 4, style="RegularPQ", layers=2, wedge_delta=0)
-    kag = fallback(5, 4, style="RectifiedKagome", layers=2, wedge_delta=0)
-    assert kag["symbol_label"] == "(5.4.5.4) kagome"
-    assert len(kag["poincare_pts"]) == len(reg["edges"])
-    assert kag["face_shell"] == reg["face_shell"]
-    assert all(len(f) == 5 for f in kag["faces"])
+def test_kagome_cluster_rule_hand_counts(fallback):
+    # H^2 rectified (p.q.p.q) kagome grown by the cluster rule:
+    # * (5, 4), p > q: P_0..P_2 has 1 + 5 + 15 = 21 pentagons; vertices = 5 + 15 + 40 = 60 squares -> 81 faces.
+    # * (7, 3), p > q: P_0..P_2 has 1 + 7 + 21 = 29 heptagons; vertices = 7 + 28 + 77 = 112 triangles -> 141 faces [8, 35, 98].
+    # * (3, 7), p < q: P_0 = 3 heptagons around F_0, 16 triangles -> 19 at S_0; 15 + 61 = 76 at S_1.
+    # * (5, 5), p == q: {5, 4} rotated by pi / 5 -> 1 + 10 + 40 = 51 pentagons.
+    k54 = fallback(5, 4, style="RectifiedKagome", layers=2, wedge_delta=0)
+    assert k54["symbol_label"] == "(5.4.5.4) kagome"
+    assert "cluster rule" in k54["growth_rule"]
+    assert len(k54["faces"]) == 81
+    assert sum(len(f) == 5 for f in k54["faces"]) == 21
+    assert sum(len(f) == 4 for f in k54["faces"]) == 60
+    assert len(k54["poincare_pts"]) - len(k54["edges"]) + len(k54["faces"]) == 1
+
+    k73 = fallback(7, 3, style="RectifiedKagome", layers=2, wedge_delta=0)
+    assert _shell_sizes(k73) == [8, 35, 98]
+    assert sum(len(f) == 7 for f in k73["faces"]) == 29
+    assert sum(len(f) == 3 for f in k73["faces"]) == 112
+
+    k37 = fallback(3, 7, style="RectifiedKagome", layers=1, wedge_delta=0)
+    assert _shell_sizes(k37) == [19, 57]
+    assert len(k37["faces"][0]) == 3
+    cen0 = [sum(k37["poincare_pts"][i][ax] for i in k37["faces"][0]) / 3.0 for ax in (0, 1)]
+    assert abs(cen0[0]) < 1e-12 and abs(cen0[1]) < 1e-12
+
+    k55 = fallback(5, 5, style="RectifiedKagome", layers=2, wedge_delta=0)
+    assert _shell_sizes(k55) == [1, 10, 40]
 
 
 def test_face_cap_keeps_whole_shells(fallback):
-    # {5,4} shells start 1, 10, 40 (hand count above). The cap value is not assumed: whatever it is,
-    # the drawn faces form whole shells S_0..S_m with m = complete_through_shell >= 2 (51 faces fit).
-    t = fallback(5, 4, style="RegularPQ", layers=4, wedge_delta=0)
-    sizes = _shell_sizes(t)
-    m = t["complete_through_shell"]
-    assert len(sizes) == m + 1 and sizes[:3] == [1, 10, 40]
+    # {10, 7}: a_0 = 1, a_1 = 10*(7 - 2) = 50 (|S_1| = 51 <= 1000). S_1 boundary has 10*(10 - 4) + 10*4*(10 - 3)
+    # = 340 vertices with o = 6 (count 5) and 50 with o = 5 (count 4), so a_2 = 340*5 + 50*4 = 1900 (> 1000).
+    t = fallback(10, 7, style="RegularPQ", layers=2, wedge_delta=0)
+    assert len(t["faces"]) == 51
+    assert _shell_sizes(t) == [1, 50]
+    assert t["complete_through_shell"] == 1
+    assert "omitted" in t["growth_rule"]
+
+
+def test_radius_cap_0998_truncates_and_combines_with_face_cap(fallback):
+    # {5, 5}: a_0 = 1, a_1 = 15, a_2 = 105 (|S_2| = 121), a_3 = 720 (|S_3| = 841 <= 1000), a_4 = 4935 (> 1000).
+    t3 = fallback(5, 5, style="RegularPQ", layers=3, wedge_delta=0)
+    assert 121 < len(t3["faces"]) < 841
+    assert t3["complete_through_shell"] == 2
+    assert "truncated" in t3["growth_rule"] and "omitted" not in t3["growth_rule"]
+    for f in t3["faces"]:
+        zc = [sum(t3["poincare_pts"][i][ax] for i in f) / 5.0 for ax in (0, 1)]
+        # RegularPQ caps the hyperbolic centre at 0.998; {5,5}'s Euclidean vertex centroid can exceed it by ~2.1e-4 near the rim.
+        assert math.hypot(*zc) <= 0.998 + 5e-4
+    t4 = fallback(5, 5, style="RegularPQ", layers=4, wedge_delta=0)
+    assert len(t4["faces"]) == len(t3["faces"]) and t4["complete_through_shell"] == 2
+    assert "truncated" in t4["growth_rule"] and "omitted" in t4["growth_rule"]
+
+
+def test_wedge_q4_and_odd_q_gt3_hand_counts(fallback):
+    # {5, 4} delta = -1 (p_core = 4, q = 4): matched edge length cosh(l/2) = cos(pi/5) / sin(pi/4),
+    # alpha ~ 76.345 deg (neither 4*alpha nor 5*alpha is 2*pi). walk = (4-1)//2 = 1 edge reflection each
+    # side -> 4 edge faces, plus 1 centred half-turn opposite per corner -> |S_1| = 1 + 4 + 4 = 9.
+    half_edge = math.acosh(math.cos(math.pi / 5) / math.sin(math.pi / 4))
+    rc = math.asinh(math.sinh(half_edge) / math.sin(math.pi / 4))
+    alpha = 2.0 * math.atan(1.0 / (math.cosh(rc) * math.tan(math.pi / 4)))
+    assert abs(4 * alpha - 2 * math.pi) > 0.1 and abs(5 * alpha - 2 * math.pi) > 0.1
+
+    w_neg = fallback(5, 4, style="RegularPQ", layers=1, wedge_delta=-1)
+    assert len(w_neg["faces"]) == 9 and len(w_neg["faces"][0]) == 4
+    cens = [[sum(w_neg["poincare_pts"][i][ax] for i in f) / 4.0 for ax in (0, 1)] for f in w_neg["faces"]]
+    for cx, cy in cens:
+        rot = (-cy, cx)
+        assert any(math.dist(rot, d) < 1e-9 for d in cens)
+        for k in range(4):
+            th = math.pi * k / 4.0
+            s = 2.0 * (cx * math.cos(th) + cy * math.sin(th))
+            ref = (s * math.cos(th) - cx, s * math.sin(th) - cy)
+            assert any(math.dist(ref, d) < 1e-9 for d in cens)
+
+    # Equal gaps (pi - 2*alpha ~ 27.309 deg) beside the centred opposite copy at vertex 0 (delta = -1).
+    v0_id = w_neg["faces"][0][0]
+    r0 = complex(*w_neg["poincare_pts"][v0_id])
+    spans = []
+    for f in w_neg["faces"]:
+        if v0_id in f:
+            pos = f.index(v0_id)
+            p1 = (complex(*w_neg["poincare_pts"][f[(pos + 1) % 4]]) - r0) / (1.0 - r0.conjugate() * complex(*w_neg["poincare_pts"][f[(pos + 1) % 4]]))
+            p2 = (complex(*w_neg["poincare_pts"][f[(pos + 3) % 4]]) - r0) / (1.0 - r0.conjugate() * complex(*w_neg["poincare_pts"][f[(pos + 3) % 4]]))
+            t1, t2 = math.atan2(p1.imag, p1.real), math.atan2(p2.imag, p2.real)
+            mid = (t1 + 0.5 * ((t2 - t1 + math.pi) % (2 * math.pi) - math.pi)) % (2 * math.pi)
+            if mid > math.pi:
+                mid -= 2 * math.pi
+            spans.append((mid - 0.5 * alpha, mid + 0.5 * alpha))
+    opp = next(sp for sp in spans if abs(sp[0] + sp[1]) < 1e-6)
+    above = next(sp for sp in spans if 0.0 < sp[0] - opp[1] < 1.0)
+    below = next(sp for sp in spans if 0.0 < opp[0] - sp[1] < 1.0)
+    assert abs((above[0] - opp[1]) - (math.pi - 2 * alpha)) < 1e-9
+    assert abs((opp[0] - below[1]) - (math.pi - 2 * alpha)) < 1e-9
+
+    assert len(fallback(5, 4, style="RegularPQ", layers=1, wedge_delta=1)["faces"]) == 13
+    assert len(fallback(4, 6, style="RegularPQ", layers=1, wedge_delta=1)["faces"]) == 21
+    assert len(fallback(3, 7, style="RegularPQ", layers=1, wedge_delta=1)["faces"]) == 21
+
+
+def test_wedge_kagome_rectifies_wedge_copies(fallback):
+    for p, q, lay in [(7, 3, 2), (5, 4, 1)]:
+        kag = fallback(p, q, style="RectifiedKagome", layers=lay, wedge_delta=-1)
+        reg = fallback(p, q, style="RegularPQ", layers=lay, wedge_delta=-1)
+        assert kag["symbol_label"] == f"({p}.{q}.{p}.{q}) kagome"
+        assert len(kag["faces"]) == len(reg["faces"])
+        assert kag["face_shell"] == reg["face_shell"]
+        assert len(kag["poincare_pts"]) == len(reg["edges"])
+        assert kag["poincare_pts"] != reg["poincare_pts"]
 
 
 def test_layers_clamped_and_non_hyperbolic_rejected(fallback):
@@ -157,6 +248,8 @@ def test_wedge_core_q3_first_shell_is_one_face_per_core_edge(fallback, p, delta)
     # exactly what a wedge defect breaks; so they share only that core vertex, and
     # V = p_core + p_core (p_core - 2) = p_core (p_core - 1).
     assert len(t["poincare_pts"]) == p_core * (p_core - 1)
+    # Rotational holonomy of |delta| sectors around a p_core-gon cone has angle theta = 2*pi*|delta|/p_core;
+    # in PSU(1, 1), diag(exp(i*theta/2), exp(-i*theta/2)) has unsigned half-trace |cos(theta / 2)|.
     assert abs(t["psu11_half_trace"] - abs(math.cos(math.pi * abs(delta) / p_core))) < 1e-12
     assert all(z[0] ** 2 + z[1] ** 2 < 1.0 for z in t["poincare_pts"])
 
@@ -165,23 +258,35 @@ def _extension_with_face_shell():
     rs = pytest.importorskip("papertilling_rs")
     if not hasattr(rs, "hyperbolic_tiling_json"):
         pytest.skip("papertilling_rs has no hyperbolic_tiling_json")
-    if "face_shell" not in json.loads(rs.hyperbolic_tiling_json(7, 3, "RegularPQ", 1, 0)):
-        pytest.skip("installed papertilling_rs predates vertex completion (no face_shell); rebuild it")
+    probe = json.loads(rs.hyperbolic_tiling_json(7, 3, "RectifiedKagome", 1, 0))
+    if "face_shell" not in probe or "cluster rule" not in probe.get("growth_rule", ""):
+        pytest.skip("installed papertilling_rs predates Phase 2 hyperbolic cluster/wedge updates; rebuild it")
     return rs
 
 
-@pytest.mark.parametrize("style", ["RegularPQ", "RectifiedKagome", "DualQP"])
-@pytest.mark.parametrize("p,q,layers", [(7, 3, 3), (5, 4, 3), (4, 5, 2), (3, 8, 2), (8, 8, 2)])
-@pytest.mark.parametrize("delta", [0, -1, 1])
-def test_parity_with_rust_extension(fallback, style, p, q, layers, delta):
-    rs = _extension_with_face_shell()
+def _assert_parity(fallback, rs, style, p, q, layers, delta):
     r = json.loads(rs.hyperbolic_tiling_json(p, q, style, layers, delta))
     f = fallback(p, q, style=style, layers=layers, wedge_delta=delta)
     assert f.keys() == r.keys()
-    for key in ("p", "q", "style", "layers", "wedge_delta", "symbol_label", "geometry_kind", "complete_through_shell"):
+    for key in ("p", "q", "style", "layers", "wedge_delta", "symbol_label", "geometry_kind", "complete_through_shell", "growth_rule"):
         assert f[key] == r[key], key
+    assert abs(f["psu11_half_trace"] - r["psu11_half_trace"]) < 1e-12
     assert f["face_shell"] == r["face_shell"]
     assert f["faces"] == r["faces"]
     assert [list(e) for e in f["edges"]] == [list(e) for e in r["edges"]]
     assert len(f["poincare_pts"]) == len(r["poincare_pts"])
     assert max(math.dist(a, b) for a, b in zip(f["poincare_pts"], r["poincare_pts"])) < 1e-9
+    assert max(math.dist(a, b) for a, b in zip(f["klein_pts"], r["klein_pts"])) < 1e-9
+    assert max(max(abs(x - y) for x, y in zip(a, b)) for a, b in zip(f["hyperboloid_pts"], r["hyperboloid_pts"])) < 1e-8
+
+
+@pytest.mark.parametrize("style", ["RegularPQ", "RectifiedKagome", "DualQP"])
+@pytest.mark.parametrize("p,q,layers", [(7, 3, 3), (5, 4, 3), (4, 5, 2), (3, 8, 2), (8, 8, 2), (5, 5, 3)])
+@pytest.mark.parametrize("delta", [0, -1, 1])
+def test_parity_with_rust_extension(fallback, style, p, q, layers, delta):
+    _assert_parity(fallback, _extension_with_face_shell(), style, p, q, layers, delta)
+
+
+@pytest.mark.parametrize("style", ["RegularPQ", "RectifiedKagome", "DualQP"])
+def test_parity_10_7_delta0_with_rust_extension(fallback, style):
+    _assert_parity(fallback, _extension_with_face_shell(), style, 10, 7, 2, 0)

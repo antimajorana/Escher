@@ -6,7 +6,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use super::catalogue::{NamedLattice, parse_catalogue_str, parse_named_str};
-use super::inflation::{FaceId, InflationResult, InflationSeed, PatchTopology, PlaneTiling, VertexId, inflate};
+use super::inflation::{
+    FaceId, InflationResult, InflationRule, InflationSeed, PatchTopology, PlaneTiling, VertexId, inflate, inflate_with,
+};
 use super::test_fixtures::named;
 use crate::types::{Bond2D, Cell2D};
 
@@ -16,16 +18,20 @@ fn tiles(res: &InflationResult) -> Vec<usize> {
     res.shells.iter().map(|s| s.topology.faces).collect()
 }
 
-/// Inflate and return the tile counts for n = 0..=n_max.
+fn bdf(cell: &Cell2D, seed: InflationSeed, n_max: usize) -> Result<InflationResult, String> {
+    inflate_with(cell, seed, &InflationRule::Bdf, n_max)
+}
+
+/// Inflate under pure BDF and return the tile counts for n = 0..=n_max.
 fn counts(cell: &Cell2D, seed: InflationSeed, n_max: usize) -> Vec<usize> {
-    tiles(&inflate(cell, seed, n_max).unwrap())
+    tiles(&bdf(cell, seed, n_max).unwrap())
 }
 
 #[test]
 fn inflation_pilot_square_face_seed() {
     // {4,4}: the squares sharing a vertex with one square form its 3x3 block, so |S_1| = 9.
     let t0 = Instant::now();
-    let res = inflate(&named("square").cell, InflationSeed::Face(0), 1).unwrap();
+    let res = bdf(&named("square").cell, InflationSeed::Face(0), 1).unwrap();
     println!("# time pilot square n=1: {:?}", t0.elapsed());
     assert_eq!(res.shells[1].topology.faces, 9);
 }
@@ -44,7 +50,7 @@ fn inflation_square_known_counts() {
     assert_eq!(counts(&cell, InflationSeed::Face(0), 4), face);
     assert_eq!(counts(&cell, InflationSeed::VertexStar(0), 4), vert);
     // Block boundary: an a x a block has 4a boundary edges, (a+1)^2 vertices, 2a(a+1) edges.
-    let res = inflate(&cell, InflationSeed::Face(0), 4).unwrap();
+    let res = bdf(&cell, InflationSeed::Face(0), 4).unwrap();
     for s in &res.shells {
         let a = 2 * s.n + 1;
         assert_eq!(s.topology.boundary_edges, 4 * a);
@@ -115,7 +121,7 @@ fn inflation_euclidean_corona_recurrence() {
     for (key, c) in [("square", 8), ("honeycomb", 6), ("triangular", 12)] {
         let cell = named(key).cell;
         for f in 0..PlaneTiling::new(&cell).unwrap().orbit_count() {
-            let a: Vec<usize> = inflate(&cell, InflationSeed::Face(f), 5).unwrap().shells.iter().map(|s| s.new_tiles).collect();
+            let a: Vec<usize> = bdf(&cell, InflationSeed::Face(f), 5).unwrap().shells.iter().map(|s| s.new_tiles).collect();
             assert_eq!(a, [1, c, 2 * c, 3 * c, 4 * c, 5 * c], "{key} face orbit {f}");
             for k in 2..=4 {
                 assert_eq!(a[k + 1], 2 * a[k] - a[k - 1], "{key} face orbit {f}, k = {k}");
@@ -219,7 +225,7 @@ fn naive_topology(cell: &Cell2D, t: &PlaneTiling, patch: &HashSet<FaceId>) -> Pa
 /// `completion`, `fill_holes` and `topology`, and with `naive_topology`. Returns failure descriptions and the
 /// number of faces FillHoles added over all shells (a measure of how often vertex completion traps pockets).
 fn disk_failures(label: &str, cell: &Cell2D, seed: InflationSeed) -> (Vec<String>, usize) {
-    let res = match inflate(cell, seed, 4) {
+    let res = match bdf(cell, seed, 4) {
         Ok(r) => r,
         Err(e) => return (vec![format!("{label} {seed:?}: inflate error {e}")], 0),
     };
@@ -287,7 +293,7 @@ impl Sweep {
                 self.filled.push(format!("{label} {seed:?}: {filled} faces"));
             }
         }
-        match inflate(cell, InflationSeed::Dirichlet, 4) {
+        match bdf(cell, InflationSeed::Dirichlet, 4) {
             Err(e) if e.contains(NOT_DISK) => self.dirichlet_err.push(format!("{label}: {e}")),
             _ => self.bad.extend(disk_failures(label, cell, InflationSeed::Dirichlet).0),
         }
@@ -310,6 +316,7 @@ fn inflation_named_lattices_shells_are_disks() {
     }
     println!("# time named sweep (21 lattices, n <= 4): {:?}", t0.elapsed());
     sw.report("named");
+    assert!(sw.dirichlet_err.is_empty(), "{:#?}", sw.dirichlet_err);
     assert!(sw.bad.is_empty(), "{:#?}", sw.bad);
 }
 
@@ -343,7 +350,7 @@ fn inflation_kagome_hexagon_seed_known_counts() {
     let hex = sizes.iter().position(|&k| k == 6).unwrap();
     sizes.sort_unstable();
     assert_eq!((sizes, cell.basis.len()), (vec![3, 3, 6], 3));
-    let res = inflate(&cell, InflationSeed::Face(hex), 4).unwrap();
+    let res = bdf(&cell, InflationSeed::Face(hex), 4).unwrap();
     assert_eq!(tiles(&res), (0..=4).map(|n| 9 * n * n + 3 * n + 1).collect::<Vec<_>>());
     assert!(res.shells.iter().all(|s| s.filled == 0 && s.topology.chi == 1));
 }
@@ -478,6 +485,7 @@ fn catalogue_sweep(file: &str, text: &str) {
     println!("# time {file}: {:?} for {total} drawings ({mixed} with mixed face sizes)", t0.elapsed());
     sw.report(file);
     assert!(mixed > 0);
+    assert!(sw.dirichlet_err.is_empty(), "{:#?}", sw.dirichlet_err);
     assert!(sw.bad.is_empty(), "{:#?}", sw.bad);
 }
 
@@ -525,12 +533,11 @@ fn inflation_handoff_mixed_polygon_entries_are_disks() {
             sw.add(&label, &cell);
             let seeds = (0..t.orbit_count()).map(InflationSeed::Face).chain((0..cell.basis.len()).map(InflationSeed::VertexStar));
             for seed in seeds.chain([InflationSeed::Dirichlet]) {
-                // A Dirichlet seed whose S~_0 is pinched is rejected (sheet/p6/all[5]: chi = 1, 1 pinch); it is
-                // counted in `Sweep::dirichlet_err` and printed, any other error fails.
-                let res = match inflate(&cell, seed, 4) {
-                    Err(e) if seed == InflationSeed::Dirichlet && e.contains(NOT_DISK) => continue,
-                    r => r.unwrap_or_else(|e| panic!("{label} {seed:?}: {e}")),
-                };
+                // Every seed, including repaired Dirichlet (e.g. sheet/p6/all[5]), yields closed-disk BDF shells.
+                let res = bdf(&cell, seed, 4).unwrap_or_else(|e| panic!("{label} {seed:?}: {e}"));
+                if seed == InflationSeed::Dirichlet && label == "sheet/p6/all[5]" {
+                    assert!(res.seed_repaired && res.readout.contains("repaired"), "{}", res.readout);
+                }
                 let dangling: Vec<usize> = res.shells.iter().map(|s| s.topology.dangling_bonds).collect();
                 if dangling != vec![0; 5] {
                     println!("DANGLING {label} {seed:?}: {dangling:?}");
@@ -545,6 +552,7 @@ fn inflation_handoff_mixed_polygon_entries_are_disks() {
     for want in ["sheet/p4m/all[5]", "sheet/p6/all[4]", "sheet/pmm/all[4]"] {
         assert!(checked.iter().any(|c| c == want), "{want} missing");
     }
+    assert!(sw.dirichlet_err.is_empty(), "{:#?}", sw.dirichlet_err);
     assert!(sw.bad.is_empty(), "{:#?}", sw.bad);
 }
 
@@ -562,7 +570,7 @@ fn inflation_dangling_bond_notches() {
     for (i, j) in [(1, 2), (1, 3), (2, 3), (4, 5), (4, 6), (5, 6)] {
         assert!(cell.bonds.iter().any(|b| (b.i, b.j, b.n1, b.n2) == (i, j, 0, 0)), "bond {i}-{j}");
     }
-    let s0 = &inflate(&cell, InflationSeed::VertexStar(0), 0).unwrap().shells[0].topology;
+    let s0 = &bdf(&cell, InflationSeed::VertexStar(0), 0).unwrap().shells[0].topology;
     assert_eq!((s0.faces, s0.chi, s0.pinch_vertices, s0.dangling_bonds), (6, 1, 0, 6));
 }
 

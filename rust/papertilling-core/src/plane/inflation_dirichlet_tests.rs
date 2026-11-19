@@ -3,8 +3,19 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use super::inflation::{CentreKind, CentreSet, InflationRule, InflationSeed, PlaneTiling, inflate, inflate_with};
+use super::catalogue::parse_catalogue_str;
+use super::inflation::{
+    CentreKind, CentreSet, InflationResult, InflationRule, InflationSeed, PlaneTiling, inflate, inflate_with,
+};
 use super::test_fixtures::named;
+use crate::types::Cell2D;
+
+const POINTS_JSON: &str = include_str!("../../../../papertilling/data/points.json");
+const SHEET_JSON: &str = include_str!("../../../../papertilling/data/sheet.json");
+
+fn bdf(cell: &Cell2D, seed: InflationSeed, n_max: usize) -> Result<InflationResult, String> {
+    inflate_with(cell, seed, &InflationRule::Bdf, n_max)
+}
 
 fn centroid(poly: &[[f64; 2]]) -> [f64; 2] {
     let k = poly.len() as f64;
@@ -52,13 +63,15 @@ fn dirichlet_seed_known_counts() {
         let CentreKind::Face(f) = sp.kind else { panic!("{key}: centre {sp:?} is not a face centroid") };
         let size = t.face_sizes()[f];
         assert_eq!(size, *t.face_sizes().iter().max().unwrap(), "{key}");
-        let res = inflate(&cell, InflationSeed::Dirichlet, 0).unwrap();
+        let res = bdf(&cell, InflationSeed::Dirichlet, 0).unwrap();
         let s0 = &res.shells[0];
         assert_eq!((s0.topology.faces, s0.filled, s0.topology.chi), (faces, 0, 1), "{key}");
+        assert!(!res.seed_repaired && !res.readout.contains("repaired"), "{key}: {}", res.readout);
         assert_eq!(res.faces.iter().filter(|g| g.polygon.len() == size).count(), big, "{key}");
         // An explicit centre gives the same seed.
-        let at = inflate(&cell, InflationSeed::DirichletAt(sp.point), 0).unwrap();
+        let at = bdf(&cell, InflationSeed::DirichletAt(sp.point), 0).unwrap();
         assert_eq!(at.shells[0].topology.faces, faces, "{key}");
+        assert!(!at.seed_repaired, "{key}");
     }
 }
 
@@ -98,7 +111,7 @@ fn boundary_statistics_square_and_triangular() {
     // {4,4} face seed: S_n is the a x a block, a = 2n + 1. Its boundary vertices are the 4 corners (1 square each)
     // and 4(a - 1) - 4 = 8n side vertices (2 squares each); the boundary tiles are the 4(a - 1) = 8n squares of the
     // outer ring (n >= 1), 1 for the single square.
-    let res = inflate(&named("square").cell, InflationSeed::Face(0), 4).unwrap();
+    let res = bdf(&named("square").cell, InflationSeed::Face(0), 4).unwrap();
     for s in &res.shells {
         let mut want = BTreeMap::from([(1, 4)]);
         if s.n > 0 {
@@ -114,7 +127,7 @@ fn boundary_statistics_square_and_triangular() {
     // A tile touching the boundary only at a vertex does not count: along a side of length L there are 2L - 1 such
     // strip triangles, so the vertex definition would give 2(6n + 3) - 6 = 12n (12 vs 9 at n = 1, where only the
     // seed triangle is interior). n = 0: one triangle, 3 vertices of type 1.
-    let res = inflate(&named("triangular").cell, InflationSeed::Face(0), 4).unwrap();
+    let res = bdf(&named("triangular").cell, InflationSeed::Face(0), 4).unwrap();
     for s in &res.shells {
         let (want, tiles) = match s.n {
             0 => (BTreeMap::from([(1, 3)]), 1),
@@ -145,6 +158,75 @@ fn torus_square_face_seed_wrap_step() {
             let w = &res.shells[wrap];
             let l2 = (l * l) as usize;
             assert_eq!((w.faces, w.vertices, w.edges, w.chi), (l2, l2, 2 * l2, 0), "L = {l}");
+        }
+    }
+}
+
+struct RepairCase<'a> {
+    label: &'a str,
+    cell: Cell2D,
+    ord: usize,
+    k_rot: usize,
+    mirrors: bool,
+    base: (usize, i64, usize),
+    rep_faces: usize,
+}
+
+#[test]
+fn dirichlet_repair_pinch_and_disconnect_known_cases() {
+    let pts_cat = parse_catalogue_str(POINTS_JSON).unwrap();
+    let sht_cat = parse_catalogue_str(SHEET_JSON).unwrap();
+    // Stabilizer orders and base topologies come from the cell point groups; minimum repaired face counts follow
+    // orbit-size lower bounds (every non-empty G_c-orbit adds |orbit| tiles: e.g. +6 for order-6 C_6 without mirrors
+    // on sheet/p6/all[5], +2 for bridging mirror gaps on points/cmm/drawings[0] and sheet/p2/drawings[7], with
+    // the full repaired totals pinned from U_1 symmetric search regression on these catalogue entries):
+    let cases = [
+        // Hub order 6 (C6, no mirror): 12 squares leave 6 alternating gaps around 1 pinch vertex at the hub;
+        // any C6-symmetric addition touching the hub adds a full 6-orbit -> +6 = 18 tiles.
+        RepairCase { label: "sheet/p6/all[5]", cell: sht_cat["p6"].all[5].family.cell(), ord: 6, k_rot: 6, mirrors: false, base: (12, 1, 1), rep_faces: 18 },
+        // Order 2 (C2): 2 triangles meet at 1 pinch vertex; minimal U_1 symmetric disk fills two 2-orbits -> +4 = 6.
+        RepairCase { label: "points/p2/drawings[0]", cell: pts_cat["p2"].drawings[0].family.cell(), ord: 2, k_rot: 2, mirrors: false, base: (2, 1, 1), rep_faces: 6 },
+        // Order 4 (2mm: 180-deg rotation + x/y axis mirrors about c = [0, 0]): 4 triangles leave 1 pinch; smallest symmetric orbit adds +2 = 6.
+        RepairCase { label: "points/cmm/drawings[0]", cell: pts_cat["cmm"].drawings[0].family.cell(), ord: 4, k_rot: 2, mirrors: true, base: (4, 1, 1), rep_faces: 6 },
+        // Order 2 (C2): 3 disconnected pieces (chi = 3); bridging both gaps symmetrically requires at least one 2-orbit -> +2 = 5.
+        RepairCase { label: "sheet/p2/drawings[7]", cell: sht_cat["p2"].drawings[7].family.cell(), ord: 2, k_rot: 2, mirrors: false, base: (3, 3, 0), rep_faces: 5 },
+        // Order 1 (C1): 2 disconnected pieces (chi = 2); minimal U_1 bridge in this geometry takes +2 = 5 faces.
+        RepairCase { label: "sheet/p1/drawings[17]", cell: sht_cat["p1"].drawings[17].family.cell(), ord: 1, k_rot: 1, mirrors: false, base: (3, 2, 0), rep_faces: 5 },
+    ];
+    for case in cases {
+        let RepairCase { label, cell, ord, k_rot, mirrors, base: base_want, rep_faces } = case;
+        let t = PlaneTiling::new(&cell).unwrap();
+        let sp = t.most_symmetric_point();
+        assert_eq!(sp.order, ord, "{label}");
+        let c = sp.point;
+        let d0 = t.dirichlet_faces(c);
+        let d0_top = t.topology(&d0);
+        assert_eq!((d0_top.faces, d0_top.chi, d0_top.pinch_vertices), base_want, "{label}");
+        let (rep, flagged) = t.seed_faces_with_status(InflationSeed::Dirichlet).unwrap();
+        let rep_top = t.topology(&rep);
+        assert!(flagged, "{label}: expected seed repair flag");
+        assert_eq!((rep.len(), rep_top.chi, rep_top.pinch_vertices), (rep_faces, 1, 0), "{label}");
+
+        let th = 2.0 * std::f64::consts::PI / k_rot as f64;
+        let rot = |p: [f64; 2]| {
+            let d = [p[0] - c[0], p[1] - c[1]];
+            [c[0] + th.cos() * d[0] - th.sin() * d[1], c[1] + th.sin() * d[0] + th.cos() * d[1]]
+        };
+        let bdf_res = bdf(&cell, InflationSeed::Dirichlet, 2).unwrap();
+        assert!(bdf_res.seed_repaired && bdf_res.readout.contains("repaired"), "{label}: {}", bdf_res.readout);
+        assert_eq!(bdf_res.shells[0].topology.faces, rep_faces, "{label}");
+        let auto_res = inflate(&cell, InflationSeed::Dirichlet, 2).unwrap();
+        assert!(auto_res.seed_repaired && auto_res.readout.contains("repaired"), "{label}: {}", auto_res.readout);
+        for (tag, res) in [("bdf", &bdf_res), ("auto", &auto_res)] {
+            for s in &res.shells {
+                assert_eq!((s.topology.chi, s.topology.pinch_vertices), (1, 0), "{label} {tag} n={}", s.n);
+                let pts: Vec<[f64; 2]> = res.faces.iter().filter(|f| f.shell <= s.n).map(|f| centroid(&f.polygon)).collect();
+                assert!(invariant(&pts, rot), "{label} {tag} n={}: lost {k_rot}-fold symmetry", s.n);
+                if mirrors {
+                    assert!(invariant(&pts, |p| [p[0], 2.0 * c[1] - p[1]]), "{label} {tag} n={}: lost x mirror", s.n);
+                    assert!(invariant(&pts, |p| [2.0 * c[0] - p[0], p[1]]), "{label} {tag} n={}: lost y mirror", s.n);
+                }
+            }
         }
     }
 }

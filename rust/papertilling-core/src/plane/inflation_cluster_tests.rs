@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::Instant;
 
 use super::catalogue::{parse_catalogue_str, parse_named_str};
-use super::inflation::{CentreSet, FaceId, InflationResult, InflationRule, InflationSeed, PlaneTiling, VertexId, inflate_with};
+use super::inflation::{
+    CentreSet, FaceId, InflationResult, InflationRule, InflationSeed, PlaneTiling, VertexId, inflate, inflate_with,
+};
 use super::test_fixtures::named;
 use crate::types::Cell2D;
 
@@ -389,4 +391,79 @@ fn cluster_pilot_kagome() {
     println!("# time pilot kagome cluster n=3: {:?}", t0.elapsed());
     // Hexagon seed, n = 1: the hexagon and its 6 vertex-neighbour hexagons, each with 4 edge triangles: 7 + 24.
     assert_eq!(res.shells[1].topology.faces, 31);
+}
+
+#[test]
+fn auto_rule_kagome_and_regular_vs_fallback_lattices() {
+    let kag = named("kagome").cell;
+    let kag_hex = kagome_hex(&PlaneTiling::new(&kag).unwrap());
+    let kag_res = inflate(&kag, InflationSeed::Dirichlet, 3).unwrap();
+    assert_eq!(kag_res.rule_used, CLUSTER);
+    assert!(kag_res.readout.contains("cluster"), "{}", kag_res.readout);
+    assert_eq!(hex_tri(&kag_res), (0..=3).map(|n| (3 * n * (n + 1) + 1, 6 * (n + 1) * (n + 1))).collect::<Vec<_>>());
+
+    for key in ["square", "honeycomb", "triangular", "shastry_sutherland"] {
+        let res = inflate(&named(key).cell, InflationSeed::Dirichlet, 2).unwrap();
+        assert_eq!(res.rule_used, CLUSTER, "{key}: {}", res.readout);
+        assert!(res.readout.contains("cluster"), "{key}: {}", res.readout);
+    }
+
+    let pts_cat = parse_catalogue_str(POINTS_JSON).unwrap();
+    let fallbacks = [
+        ("elongated_triangular", named("elongated_triangular").cell, "1D strips"),
+        ("shastrys_ladder", named("shastrys_ladder").cell, "1D strips"),
+        ("points/p6/drawings[0]", pts_cat["p6"].drawings[0].family.cell(), "connected component"),
+        ("points/p31m/drawings[6]", pts_cat["p31m"].drawings[6].family.cell(), "connected component"),
+        ("points/p4/drawings[7]", pts_cat["p4"].drawings[7].family.cell(), "shares no edge"),
+    ];
+    for (label, cell, why) in fallbacks {
+        let res = inflate(&cell, InflationSeed::Dirichlet, 3).unwrap();
+        assert_eq!(res.rule_used, InflationRule::Bdf, "{label}: {}", res.readout);
+        assert!(res.readout.contains("plain BDF (auto fallback"), "{label}: {}", res.readout);
+        assert!(res.readout.contains(why), "{label}: missing `{why}` in {}", res.readout);
+        assert!(res.shells.iter().all(|s| is_disk(&s.topology)), "{label}");
+    }
+
+    // Hand overrides bypass automatic selection and state override in readout.
+    let kag_bdf = inflate_with(&kag, InflationSeed::Face(kag_hex), &InflationRule::Bdf, 3).unwrap();
+    assert_eq!(kag_bdf.rule_used, InflationRule::Bdf);
+    assert_eq!(kag_bdf.readout, "plain BDF (override)");
+    assert_eq!(kag_bdf.shells.iter().map(|s| s.topology.faces).collect::<Vec<_>>(), vec![1, 13, 43, 91]);
+
+    let el = named("elongated_triangular").cell;
+    let el_sq = PlaneTiling::new(&el).unwrap().face_sizes().iter().position(|&k| k == 4).unwrap();
+    let el_cl = inflate_with(&el, InflationSeed::Face(el_sq), &CLUSTER, 4).unwrap();
+    assert_eq!(el_cl.rule_used, CLUSTER);
+    assert!(el_cl.readout.contains("override"), "{}", el_cl.readout);
+    assert_eq!(el_cl.shells.iter().map(|s| s.centres.unwrap()).collect::<Vec<_>>(), vec![1, 3, 5, 7, 9]);
+}
+
+#[test]
+fn auto_rule_all_685_cells_give_disks() {
+    let cells = all_cells();
+    assert_eq!(cells.len(), 685);
+    let (mut cluster_n, mut bdf_n) = (0usize, 0usize);
+    let mut bad = Vec::new();
+    for (label, cell) in &cells {
+        let res = match inflate(cell, InflationSeed::Dirichlet, 4) {
+            Ok(r) => r,
+            Err(e) => {
+                bad.push(format!("{label}: {e}"));
+                continue;
+            }
+        };
+        match res.rule_used {
+            InflationRule::Cluster(CentreSet::MaxPolygon) => cluster_n += 1,
+            InflationRule::Bdf => bdf_n += 1,
+            other => bad.push(format!("{label}: unexpected rule {other:?}")),
+        }
+        for s in &res.shells {
+            if !is_disk(&s.topology) {
+                bad.push(format!("{label} n={}: {:?}", s.n, s.topology));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+    // Measured regression pin over all 685 stored cells (0 disk failures: 574 eligible for cluster, 111 plain-BDF fallback).
+    assert_eq!((cluster_n, bdf_n), (574, 111));
 }
