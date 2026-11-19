@@ -3,6 +3,7 @@
 pub mod bieberbach;
 pub mod defect_fields;
 pub mod flat3d;
+pub mod growth;
 pub mod honeycomb3d;
 pub mod noneuclidean2d;
 pub mod defect;
