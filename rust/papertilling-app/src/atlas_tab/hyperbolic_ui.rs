@@ -8,7 +8,8 @@
 use papertilling_core::hyperbolic::{HyperbolicStyle, HyperbolicTiling, build_hyperbolic_tiling};
 
 use super::hyperbolic_scene::{disk_scene, empty_scene, sheet_mesh};
-use super::hyperbolic_view::{DiskIsometry, face_generations, vertex_generations, view_tiling};
+use super::hyperbolic_shells::{SHELL_CACHE_MAX, ShellTable, shell_table};
+use super::hyperbolic_view::{DiskIsometry, vertex_generations, view_tiling};
 use crate::mesh3d::GpuMeshData;
 use crate::scene2d::Scene2D;
 use crate::theme::ThemeTokens;
@@ -55,6 +56,13 @@ pub struct HyperbolicPanelState {
     pub(super) cache: Option<CachedTiling>,
     /// The panned tiling of the last build (what is drawn and picked).
     pub(super) view: Option<HyperbolicTiling>,
+    /// Effective `{p, q}` whose shell table the inspector shows.
+    pub shell_key: Option<(usize, usize)>,
+    /// Uncapped BDF vertex-completion shell counts, at most [`SHELL_CACHE_MAX`] `{p, q}` keys
+    /// (oldest dropped first), so Regular <-> Dual toggles and revisits do not recompute.
+    pub shell_cache: Vec<((usize, usize), Result<ShellTable, String>)>,
+    /// Which shells the drawn patch contains (from the tiling's `growth_rule`).
+    pub drawn_patch_note: String,
 }
 
 impl Default for HyperbolicPanelState {
@@ -74,6 +82,9 @@ impl Default for HyperbolicPanelState {
             view_changed: false,
             cache: None,
             view: None,
+            shell_key: None,
+            shell_cache: Vec::new(),
+            drawn_patch_note: String::new(),
         }
     }
 }
@@ -179,14 +190,25 @@ impl HyperbolicPanelState {
         ));
         ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
         self.show_pick_readout(ui, tokens);
+        self.show_shell_table(ui);
     }
 
     fn key(&self) -> TilingKey {
         (self.p, self.q, self.style, self.layers, self.wedge_delta)
     }
 
-    /// Build (or reuse) the origin-frame tiling of the current key; a new key clears the pick.
+    /// Build (or reuse) the origin-frame tiling of the current key and update the shell table cache;
+    /// a new key clears the pick.
     fn ensure_tiling(&mut self) -> Result<(), String> {
+        let (pe, qe) = if self.style == HyperbolicStyle::DualQP { (self.q, self.p) } else { (self.p, self.q) };
+        if !self.shell_cache.iter().any(|(k, _)| *k == (pe, qe)) {
+            let res = shell_table(pe, qe);
+            if self.shell_cache.len() >= SHELL_CACHE_MAX {
+                self.shell_cache.drain(..1); // drop the oldest table
+            }
+            self.shell_cache.push(((pe, qe), res));
+        }
+        self.shell_key = Some((pe, qe));
         let key = self.key();
         if self.cache.as_ref().is_some_and(|c| c.key == key) {
             return Ok(());
@@ -194,8 +216,15 @@ impl HyperbolicPanelState {
         self.cache = None;
         self.picked = None;
         self.hovered = None;
-        let base = build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.wedge_delta)?;
-        let face_gen = face_generations(&base.faces, self.style == HyperbolicStyle::RectifiedKagome);
+        let base = match build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.wedge_delta) {
+            Ok(b) => b,
+            Err(e) => {
+                self.drawn_patch_note.clear();
+                return Err(e);
+            }
+        };
+        self.drawn_patch_note = base.growth_rule.clone();
+        let face_gen = base.face_shell.clone();
         let vertex_gen = vertex_generations(base.poincare_pts.len(), &base.faces, &face_gen);
         self.cache = Some(CachedTiling { key, base, face_gen, vertex_gen });
         Ok(())
@@ -224,5 +253,47 @@ impl HyperbolicPanelState {
         let cap = format!("Hyperboloid H² {} ({} faces)", hyp.symbol_label, hyp.faces.len());
         self.view = Some(hyp);
         (scene, mesh, cap)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use papertilling_core::hyperbolic::inflation::is_hyperbolic;
+
+    use super::*;
+
+    /// Full scene build (tiling + 2D primitives + hyperboloid mesh) for every pair, layer count and
+    /// wedge, timed: the worst case is what one slider step costs.
+    #[test]
+    fn build_scenes_all_pairs_timed() {
+        let t = Instant::now();
+        let mut worst = (0.0, (0, 0, 0, 0_i32), 0, 0);
+        for p in 3..=12 {
+            for q in (3..=12).filter(|&q| is_hyperbolic(p, q)) {
+                for layers in 1..=4 {
+                    for wedge_delta in [0, -1, 1] {
+                        let mut st = HyperbolicPanelState { p, q, layers, wedge_delta, ..Default::default() };
+                        let t1 = Instant::now();
+                        let (scene, _mesh, _cap) = st.build_scenes();
+                        let dt = t1.elapsed().as_secs_f64();
+                        assert!(st.cache.is_some(), "({p},{q},{layers},{wedge_delta}) failed: {}", st.status);
+                        let Scene2D::VectorScene { primitives } = scene else { panic!("vector scene") };
+                        if dt > worst.0 {
+                            worst = (dt, (p, q, layers, wedge_delta), primitives.lines.len(), primitives.polygons.len());
+                        }
+                    }
+                }
+            }
+        }
+        println!(
+            "# time build_scenes 92 pairs x 4 layers x 3 wedges: {:?}; worst {:.1} ms at {:?} ({} line prims, {} polygons)",
+            t.elapsed(),
+            1e3 * worst.0,
+            worst.1,
+            worst.2,
+            worst.3
+        );
     }
 }

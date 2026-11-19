@@ -15,6 +15,7 @@ use crate::live_plane::{slider_params_ui, tune_item};
 pub(crate) mod browser;
 mod builder_ui;
 pub(crate) mod filter;
+pub(crate) mod inflation_ui;
 mod inspector;
 mod retune_async;
 mod search_worker;
@@ -56,6 +57,8 @@ pub struct GalleryTabState {
     pub show_unit_cell: bool,
     /// View only: ITA symmetry elements / Voronoi cells over the drawn patch.
     pub overlays: crate::scene2d::overlays::GalleryOverlayToggles,
+    /// View only: BDF / cluster shell inflation patch overlay mode.
+    pub inflation: inflation_ui::GalleryInflationState,
     pub readout: DSymbolReadoutUi,
     /// `base_item` at the slider values (what the other tabs use).
     active_item: CatalogueItemUi,
@@ -116,6 +119,7 @@ impl GalleryTabState {
             repeat: 3,
             show_unit_cell: true,
             overlays: Default::default(),
+            inflation: inflation_ui::GalleryInflationState::default(),
             readout: t.readout,
             active_item: item.clone(),
             cell: t.cell,
@@ -341,21 +345,28 @@ impl GalleryTabState {
         self.readout = t.readout;
     }
 
-    fn sync_scene(&self, canvas: &mut Canvas2D, reset_view: bool) {
+    pub(super) fn sync_scene(&mut self, canvas: &mut Canvas2D, reset_view: bool) {
         self.draw_cell(self.cell().clone(), canvas, reset_view);
     }
 
-    fn draw_cell(&self, cell: Cell2D, canvas: &mut Canvas2D, reset_view: bool) {
+    fn draw_cell(&mut self, cell: Cell2D, canvas: &mut Canvas2D, reset_view: bool) {
         let title = format!("{} ({})", self.active_item.display_with_orig(), self.active_item.group);
+        let inflated = if self.inflation.enabled {
+            self.inflation.build_scene(&cell, self.show_unit_cell).ok()
+        } else {
+            self.inflation.clear_status();
+            None
+        };
+        let overlay_repeat = inflated.as_ref().map_or(self.repeat, |&(_, rep)| rep);
         let overlay = self.overlays.any().then(|| {
             let it = &self.active_item;
-            crate::scene2d::overlays::build_gallery_overlay(&cell, &it.group, it.frame, self.repeat, self.overlays)
+            crate::scene2d::overlays::build_gallery_overlay(&cell, &it.group, it.frame, overlay_repeat, self.overlays)
         });
-        canvas.set_scene_with_title(
-            Scene2D::PeriodicCell { cell, repeat: self.repeat, show_unit_cell: self.show_unit_cell },
-            Some(title),
-            reset_view,
-        );
+        let scene = match inflated {
+            Some((scene, _)) => scene,
+            None => Scene2D::PeriodicCell { cell, repeat: self.repeat, show_unit_cell: self.show_unit_cell },
+        };
+        canvas.set_scene_with_title(scene, Some(title), reset_view);
         if overlay.is_some() {
             canvas.set_gallery_overlay(overlay);
         }
@@ -367,8 +378,14 @@ impl GalleryTabState {
         self.sync_scene(canvas, false);
     }
 
+    /// View only: toggle between the periodic grid and finite shell inflation patch.
+    pub fn set_inflation_enabled(&mut self, enabled: bool, canvas: &mut Canvas2D) {
+        self.inflation.enabled = enabled;
+        self.sync_scene(canvas, true);
+    }
+
     /// Draw the current lattice again from the stored item and the slider values (e.g. back on the Gallery tab).
-    pub fn sync_canvas(&self, backend: &AppBackend, canvas: &mut Canvas2D, reset_view: bool) {
+    pub fn sync_canvas(&mut self, backend: &AppBackend, canvas: &mut Canvas2D, reset_view: bool) {
         let (cell, _) = backend.build_cell(&self.base_item, &self.param_values());
         self.draw_cell(cell, canvas, reset_view);
     }

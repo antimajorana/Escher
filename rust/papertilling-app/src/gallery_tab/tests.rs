@@ -306,3 +306,90 @@ fn stage1_rule_defaults_naming_alias_slugs_and_chirality_badge_update_live() {
     assert!(!st.readout.chiral, "square special locus must flip readout.chiral to false");
     assert_eq!(st.readout.active_group, "p4m");
 }
+
+#[test]
+fn shell_inflation_toggle_kagome_produces_exact_shells_and_keeps_revision() {
+    use papertilling_core::plane::inflation::{CentreSet, InflationRule, InflationSeed, PlaneTiling};
+
+    use crate::scene2d::overlays::GalleryOverlayToggles;
+
+    let backend = AppBackend::new();
+    let mut cv = canvas();
+    let mut st = GalleryTabState::new(&backend, &mut cv);
+    let ctx = egui::Context::default();
+    select(&mut st, &backend, &mut cv, "named", "p6m", "kagome");
+    assert!(!st.inflation.enabled);
+    assert!(matches!(cv.scene(), Scene2D::PeriodicCell { .. }));
+    let rev = st.revision();
+
+    // Hand counts for kagome cluster shells S_n (n = 0, 1, 2):
+    // H_n = 3n(n+1)+1 = 1, 7, 19 hexagons; T_n = 6(n+1)^2 = 6, 24, 54 triangles => F_n = 7, 31, 73.
+    // Every kagome edge belongs to exactly one of the T_2 = 54 edge-disjoint triangles => E_2 = 3 * 54 = 162,
+    // and Euler's disk formula V - E + F = 1 gives V_2 = 162 + 1 - 73 = 90.
+    st.set_show_unit_cell(false, &mut cv);
+    st.inflation.rule = InflationRule::Auto;
+    st.inflation.seed = InflationSeed::Dirichlet;
+    st.inflation.steps = 2;
+    st.set_inflation_enabled(true, &mut cv);
+    assert_eq!(st.revision(), rev);
+    assert!(st.inflation.last_error.is_none(), "{:?}", st.inflation.last_error);
+    assert_eq!(st.inflation.last_shells.iter().map(|s| s.topology.faces).collect::<Vec<_>>(), vec![7, 31, 73]);
+    match cv.scene() {
+        Scene2D::VectorScene { primitives } => {
+            assert_eq!(primitives.polygons.len(), 73);
+            assert_eq!(primitives.site_count, 90);
+            assert_eq!(primitives.bond_count, 162);
+        }
+        _ => panic!("expected VectorScene when shell inflation is enabled"),
+    }
+
+    // Explicit Cluster rule + hexagon Face seed + unit cell + ITA/Voronoi overlays.
+    let hex = PlaneTiling::new(st.cell()).unwrap().face_sizes().iter().position(|&k| k == 6).unwrap();
+    st.inflation.rule = InflationRule::Cluster(CentreSet::MaxPolygon);
+    st.inflation.seed = InflationSeed::Face(hex);
+    st.set_show_unit_cell(true, &mut cv);
+    st.set_overlays(GalleryOverlayToggles { symmetry: true, voronoi: true }, &mut cv);
+    assert_eq!(st.revision(), rev);
+    assert_eq!(st.inflation.last_shells.iter().map(|s| s.topology.faces).collect::<Vec<_>>(), vec![7, 31, 73]);
+    assert!(cv.gallery_overlay.is_some());
+    match cv.scene() {
+        Scene2D::VectorScene { primitives } => {
+            assert_eq!(primitives.polygons.len(), 74); // 73 shell faces + 1 unit-cell parallelogram
+            assert_eq!(primitives.site_count, 90);
+            assert_eq!(primitives.bond_count, 162);
+        }
+        _ => panic!("expected VectorScene with unit cell and overlays"),
+    }
+    frame(&ctx, &mut st, &backend, &mut cv);
+
+    // Switching back to Periodic grid restores PeriodicCell without bumping revision.
+    st.set_inflation_enabled(false, &mut cv);
+    assert!(matches!(cv.scene(), Scene2D::PeriodicCell { .. }));
+    assert_eq!(st.revision(), rev);
+}
+
+#[test]
+fn shell_inflation_error_falls_back_to_periodic_cell_without_panicking() {
+    use papertilling_core::plane::inflation::InflationSeed;
+
+    let backend = AppBackend::new();
+    let mut cv = canvas();
+    let mut st = GalleryTabState::new(&backend, &mut cv);
+    let ctx = egui::Context::default();
+    select(&mut st, &backend, &mut cv, "named", "p6m", "kagome");
+    let rev = st.revision();
+
+    st.inflation.seed = InflationSeed::Face(999);
+    st.set_inflation_enabled(true, &mut cv);
+    assert!(st.inflation.last_error.is_some());
+    assert!(st.inflation.last_shells.is_empty());
+    assert!(matches!(cv.scene(), Scene2D::PeriodicCell { .. }));
+    frame(&ctx, &mut st, &backend, &mut cv);
+
+    st.inflation.seed = InflationSeed::Dirichlet;
+    st.inflation.steps = 999;
+    st.sync_scene(&mut cv, true);
+    assert!(st.inflation.last_error.is_some());
+    assert!(matches!(cv.scene(), Scene2D::PeriodicCell { .. }));
+    assert_eq!(st.revision(), rev);
+}

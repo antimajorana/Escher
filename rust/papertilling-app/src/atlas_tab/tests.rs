@@ -448,6 +448,50 @@ fn kittest_h2_picking_klein_toggle_drag_pan_and_inspector_readout() {
 }
 
 #[test]
+fn hyperbolic_kagome_cluster_faces_shells_and_picking() {
+    use papertilling_core::hyperbolic::HyperbolicStyle;
+
+    let mut h = HyperbolicPanelState { p: 7, q: 3, style: HyperbolicStyle::RectifiedKagome, ..Default::default() };
+    let (_sc, mesh, _) = h.build_scenes();
+    let cache = h.cache.as_ref().unwrap();
+    assert!(cache.base.faces.iter().any(|f| f.len() == 7), "missing 7-gons in (7.3.7.3) kagome");
+    assert!(cache.base.faces.iter().any(|f| f.len() == 3), "missing 3-gons in (7.3.7.3) kagome");
+    assert_eq!(cache.face_gen, cache.base.face_shell);
+    assert_eq!(h.shell_key, Some((7, 3)));
+    assert_eq!(h.drawn_patch_note, cache.base.growth_rule);
+
+    // 2D picking: central 7-gon at origin, adjacent 3-gon at face 1, and vertex 0.
+    let hyp = h.view.as_ref().unwrap().clone();
+    let tri_idx = hyp.faces.iter().position(|f| f.len() == 3).unwrap();
+    let tri_c = lorentz_centroid(&hyp.faces[tri_idx].iter().map(|&u| hyp.poincare_pts[u]).collect::<Vec<_>>());
+    assert_eq!(h.pick_2d([0.0, 0.0], 100.0, 9.0), Some(HypPick::Face(0)));
+    assert_eq!(h.pick_2d(tri_c, 100.0, 4.0), Some(HypPick::Face(tri_idx)));
+    assert_eq!(h.pick_2d(hyp.poincare_pts[0], 100.0, 9.0), Some(HypPick::Vertex(0)));
+    h.disk_proj = DiskProjection::Klein;
+    h.build_scenes();
+    assert_eq!(h.pick_2d(poincare_to_klein(tri_c), 100.0, 4.0), Some(HypPick::Face(tri_idx)));
+
+    // 3D sheet picking: central 7-gon, 3-gon, and vertex 0.
+    let mut v = View3dState::default();
+    v.apply_preset(CameraPreset::Top);
+    v.distance = 1.2;
+    v.set_mesh(mesh, "kagome");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 600.0));
+    let mvp = v.mvp_for_rect(rect);
+    let pts = sheet_points(&hyp, v.mesh_data().center, v.mesh_data().radius);
+    let f0 = &hyp.faces[0];
+    let c0: [f32; 3] = core::array::from_fn(|k| f0.iter().map(|&u| pts[u][k]).sum::<f32>() / f0.len() as f32);
+    let tri_f = &hyp.faces[tri_idx];
+    let c3: [f32; 3] = core::array::from_fn(|k| tri_f.iter().map(|&u| pts[u][k]).sum::<f32>() / tri_f.len() as f32);
+    let (sc0, _) = project_point(&mvp, rect, c0).unwrap();
+    let (sct, _) = project_point(&mvp, rect, c3).unwrap();
+    let (sv0, _) = project_point(&mvp, rect, pts[0]).unwrap();
+    assert_eq!(h.pick_3d(&v, rect, sc0), Some(HypPick::Face(0)));
+    assert_eq!(h.pick_3d(&v, rect, sct), Some(HypPick::Face(tri_idx)));
+    assert_eq!(h.pick_3d(&v, rect, sv0), Some(HypPick::Vertex(0)));
+}
+
+#[test]
 fn net_frame_matches_all_canonical_nets_and_defect_block_origin() {
     use papertilling_core::space3d::nets3d::build_net_3d;
     let mod1_dist = |a: f64, b: f64| {

@@ -5,6 +5,7 @@
 //! Conventions: complex numbers are `[re, im]`; the Poincare point `z` has Klein image `k = 2 z / (1 + |z|^2)` and
 //! hyperboloid image `(2 z, 1 + |z|^2) / (1 - |z|^2)`; `d(0, z) = 2 artanh |z|` (curvature -1).
 
+#[cfg(test)]
 use std::collections::{HashMap, VecDeque};
 
 use papertilling_core::hyperbolic::{HyperbolicTiling, to_hyperboloid, to_klein};
@@ -123,6 +124,7 @@ pub fn point_in_convex(poly: &[C], p: C) -> bool {
     !(pos && neg)
 }
 
+#[cfg(test)]
 fn for_each_face_key(f: &[usize], share_vertex: bool, mut visit: impl FnMut((usize, usize))) {
     if share_vertex {
         for &u in f {
@@ -139,6 +141,7 @@ fn for_each_face_key(f: &[usize], share_vertex: bool, mut visit: impl FnMut((usi
 /// Generation (layer) of each face: graph distance from face 0 in the patch's face adjacency (faces sharing an edge;
 /// for the kagome style, whose faces are the midpoint polygons of the `{p,q}` faces, sharing a vertex). This is the
 /// reflection depth at which the core's breadth-first construction reached the face.
+#[cfg(test)]
 pub fn face_generations(faces: &[Vec<usize>], share_vertex: bool) -> Vec<usize> {
     let mut gens = vec![usize::MAX; faces.len()];
     if faces.is_empty() {
@@ -171,8 +174,10 @@ pub fn vertex_generations(n_vertices: usize, faces: &[Vec<usize>], face_gen: &[u
     let mut g = vec![usize::MAX; n_vertices];
     for (f, face) in faces.iter().enumerate() {
         for &u in face {
-            if u < n_vertices {
-                g[u] = g[u].min(face_gen[f]);
+            if let Some(&fg) = face_gen.get(f)
+                && u < n_vertices
+            {
+                g[u] = g[u].min(fg);
             }
         }
     }

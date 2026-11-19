@@ -8,6 +8,7 @@ use crate::view3d::View3dState;
 
 mod hyperbolic_pick;
 pub mod hyperbolic_scene;
+pub mod hyperbolic_shells;
 pub mod hyperbolic_ui;
 pub mod hyperbolic_view;
 pub mod layers_ui;
