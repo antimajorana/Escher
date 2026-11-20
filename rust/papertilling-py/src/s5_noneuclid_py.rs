@@ -2,7 +2,7 @@
 
 use papertilling_core::noneuclidean2d::{
     H2Kernel, H2LargePatch, H2SurfaceKind, RegionFilter, SnubHandedness, WythoffOp,
-    build_h2_surface_mesh, build_hyperbolic_large, build_unified_pq, build_wythoff, delta_pq,
+    build_h2_surface_mesh, build_hyperbolic_large, build_unified_pq, build_unified_pq_seeded, build_wythoff, delta_pq,
     embed_tiling_on_surface, geodesic_arc_poincare, geodesic_arc_uhp, geometry_kind_pq,
     hyp_distance_poincare, hyp_distance_uhp, hyperboloid_to_poincare_exact, klein_to_poincare,
     list_tgcell_quotients, map_poincare_to_surface, orbifold_to_wallpaper, parse_orbifold,
@@ -10,6 +10,8 @@ use papertilling_core::noneuclidean2d::{
     tgcell_quotient, uhp_to_poincare, unfold_papercraft_net, wallpaper_orbifold_table,
     wallpaper_to_orbifold,
 };
+use papertilling_core::growth::SeedKind;
+use papertilling_core::hyperbolic::{HyperbolicStyle, build_hyperbolic_tiling_seeded};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -75,6 +77,40 @@ pub fn py_geometry_kind_pq(p: usize, q: usize) -> PyResult<String> {
 #[pyo3(signature = (p, q, layers=2))]
 pub fn unified_pq_tiling_json(p: usize, q: usize, layers: usize) -> PyResult<String> {
     let res = build_unified_pq(p, q, layers).map_err(py_err)?;
+    serde_json::to_string(&res).map_err(py_err)
+}
+
+/// Parse a seed name ("vertex", "edge", "face", "cell", "dirichlet") into `SeedKind` (C1 WP-G3).
+fn parse_seed(seed: &str) -> PyResult<SeedKind> {
+    serde_json::from_value(serde_json::Value::String(seed.to_lowercase()))
+        .map_err(|_| PyValueError::new_err(format!("unknown seed {seed:?}; expected vertex, edge, face, cell or dirichlet")))
+}
+
+/// `{p, q}` in S² / E² / H² grown from `seed` (0-based layers; `build_unified_pq_seeded`, C1 WP-G3).
+#[pyfunction]
+#[pyo3(signature = (p, q, layers=2, seed="cell"))]
+pub fn unified_pq_seeded_json(p: usize, q: usize, layers: usize, seed: &str) -> PyResult<String> {
+    let res = build_unified_pq_seeded(p, q, layers, parse_seed(seed)?).map_err(py_err)?;
+    serde_json::to_string(&res).map_err(py_err)
+}
+
+/// Hyperbolic `{p, q}` patch grown from `seed` (`build_hyperbolic_tiling_seeded`, C1 WP-G3).
+#[pyfunction]
+#[pyo3(signature = (p=7, q=3, style="RegularPQ", layers=2, wedge_delta=0, seed="cell"))]
+pub fn hyperbolic_tiling_seeded_json(
+    p: usize,
+    q: usize,
+    style: &str,
+    layers: usize,
+    wedge_delta: i32,
+    seed: &str,
+) -> PyResult<String> {
+    let st = match style {
+        "RectifiedKagome" => HyperbolicStyle::RectifiedKagome,
+        "DualQP" => HyperbolicStyle::DualQP,
+        _ => HyperbolicStyle::RegularPQ,
+    };
+    let res = build_hyperbolic_tiling_seeded(p, q, st, layers, wedge_delta, parse_seed(seed)?).map_err(py_err)?;
     serde_json::to_string(&res).map_err(py_err)
 }
 
@@ -330,6 +366,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_delta_pq, m)?)?;
     m.add_function(wrap_pyfunction!(py_geometry_kind_pq, m)?)?;
     m.add_function(wrap_pyfunction!(unified_pq_tiling_json, m)?)?;
+    m.add_function(wrap_pyfunction!(unified_pq_seeded_json, m)?)?;
+    m.add_function(wrap_pyfunction!(hyperbolic_tiling_seeded_json, m)?)?;
     m.add_function(wrap_pyfunction!(wallpaper_orbifold_table_json, m)?)?;
     m.add_function(wrap_pyfunction!(py_wallpaper_to_orbifold, m)?)?;
     m.add_function(wrap_pyfunction!(py_orbifold_to_wallpaper, m)?)?;

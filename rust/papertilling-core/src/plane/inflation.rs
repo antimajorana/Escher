@@ -69,6 +69,9 @@ pub enum InflationSeed {
     Face(usize),
     /// All faces around basis site `i` at offset `(0, 0)`.
     VertexStar(usize),
+    /// The faces on the bond joining these two vertices (2 faces, or 1 on a dangling bond); refused when the two
+    /// vertices are not joined by exactly one bond.
+    Edge(VertexId, VertexId),
     /// Faces whose centroids lie in the closed Wigner-Seitz cell of the lattice about the most symmetric point
     /// ([`PlaneTiling::most_symmetric_point`]), boundary ties included.
     Dirichlet,
@@ -242,6 +245,7 @@ impl PlaneTiling {
             InflationSeed::Face(f) => Err(format!("face orbit {f} out of range ({} orbits)", self.orbits.len())),
             InflationSeed::VertexStar(s) if s < self.rotation.len() => Ok((star(s).into_iter().collect(), None)),
             InflationSeed::VertexStar(s) => Err(format!("site {s} out of range ({} sites)", self.rotation.len())),
+            InflationSeed::Edge(u, w) => Ok((self.edge_faces(u, w)?, None)),
             InflationSeed::Dirichlet => self.dirichlet_faces_repaired(self.most_symmetric_point().point),
             InflationSeed::DirichletAt(c) => self.dirichlet_faces_repaired(c),
         }

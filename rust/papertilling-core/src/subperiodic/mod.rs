@@ -1,11 +1,17 @@
 //! Subperiodic 0D rosettes (`C_n, D_n`) and all 7 1D frieze groups (`p1 .. p2mg`):
-//! Bieberbach cohomology, abelianization, cylinder / Mobius strip quotients, and defects.
+//! Bieberbach cohomology, abelianization, cylinder / Möbius strip quotients (glued seams, [PROVED] refusals), and defects.
 
 use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
 use crate::bieberbach::{analyze_subperiodic_summary, BieberbachSummary, ConvOp, Rat};
+
+mod frieze_patch;
+pub use frieze_patch::{
+    build_frieze_patch, frieze_decoration, mobius_columns, FriezeDefect, FriezePatch, FriezeTopology,
+    NOT_ISOMETRIC_NOTE,
+};
 
 pub const FRIEZE_SYMBOLS: [&str; 7] = ["p1", "p11m", "p1m1", "p11g", "p2", "p2mm", "p2mg"];
 
@@ -20,34 +26,6 @@ pub struct RosettePatch {
     pub ab_label: String,
     pub positions: Vec<[f64; 2]>,
     pub edges: Vec<(usize, usize, u8)>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FriezeTopology {
-    OpenStrip,
-    Cylinder,
-    Mobius,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FriezeDefect {
-    None,
-    HalfTurn180,
-    GlideDispiration,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FriezePatch {
-    pub symbol: String,
-    pub iucr_name: String,
-    pub cells: usize,
-    pub topology: FriezeTopology,
-    pub defect: FriezeDefect,
-    pub summary: BieberbachSummary,
-    pub pos2d: Vec<[f64; 2]>,
-    pub pos3d: Vec<[f64; 3]>,
-    pub edges: Vec<(usize, usize, u8)>,
-    pub quads: Vec<[usize; 4]>,
 }
 
 /// Build a 0D rosette `C_n` or `D_n` ring+spoke graph with optional wedge disclination or mirror wall.
@@ -130,114 +108,5 @@ pub fn analyze_frieze_group(symbol: &str) -> Result<(BieberbachSummary, &'static
     Ok((summary, iucr))
 }
 
-/// Build a 2D strip / 3D cylinder / Mobius ribbon patch for a 1D frieze group with optional strip defect.
-pub fn build_frieze_patch(
-    symbol: &str,
-    cells: usize,
-    topology: FriezeTopology,
-    defect: FriezeDefect,
-) -> Result<FriezePatch, String> {
-    let (summary, iucr) = analyze_frieze_group(symbol)?;
-    let n_cells = cells.clamp(4, 24);
-    let nx = n_cells * 2 + 1;
-    let ny = 3usize;
-    let mut pos2d = Vec::with_capacity(nx * ny);
-    let mut pos3d = Vec::with_capacity(nx * ny);
-
-    let radius = (n_cells as f64) / PI;
-    let width = 1.4_f64;
-    let length = n_cells as f64;
-
-    for ix in 0..nx {
-        let u = (ix as f64) / (nx.saturating_sub(1) as f64); // 0..1
-        let x2 = (u - 0.5) * length;
-        for iy in 0..ny {
-            let v = (iy as f64) / ((ny - 1) as f64) - 0.5; // -0.5..0.5
-            let defect_shift = if defect == FriezeDefect::GlideDispiration && ix > nx / 2 {
-                0.5
-            } else {
-                0.0
-            };
-            let y2 = v * width + if defect == FriezeDefect::HalfTurn180 && ix > nx / 2 { -2.0 * v * width } else { 0.0 };
-            pos2d.push([x2, y2]);
-
-            let p3 = match topology {
-                FriezeTopology::OpenStrip => [x2, y2, defect_shift * 0.25],
-                FriezeTopology::Cylinder => {
-                    let th = 2.0 * PI * u;
-                    let r_eff = radius + defect_shift * 0.15;
-                    [r_eff * th.cos(), v * width, r_eff * th.sin()]
-                }
-                FriezeTopology::Mobius => {
-                    let th = 2.0 * PI * u;
-                    let tw = 0.5 * th;
-                    let r = radius + v * width * tw.cos();
-                    let z = v * width * tw.sin();
-                    [r * th.cos(), z, r * th.sin()]
-                }
-            };
-            pos3d.push(p3);
-        }
-    }
-
-    let vid = |ix: usize, iy: usize| ix * ny + iy;
-    let mut edges = Vec::new();
-    let mut quads = Vec::new();
-    for ix in 0..(nx - 1) {
-        let seam_col = matches!(defect, FriezeDefect::HalfTurn180 | FriezeDefect::GlideDispiration) && ix == nx / 2;
-        for iy in 0..ny {
-            let k = if seam_col { 1_u8 } else { 0_u8 };
-            edges.push((vid(ix, iy), vid(ix + 1, iy), k));
-        }
-        for iy in 0..(ny - 1) {
-            edges.push((vid(ix, iy), vid(ix, iy + 1), 0));
-            if matches!(symbol, "p11g" | "p2mg") && ix % 2 == 0 {
-                edges.push((vid(ix, iy), vid(ix + 1, iy + 1), 2));
-            }
-            if matches!(symbol, "p1m1" | "p2mm" | "p2") && iy == 0 {
-                edges.push((vid(ix, 0), vid(ix, ny - 1), 2));
-            }
-            quads.push([vid(ix, iy), vid(ix + 1, iy), vid(ix + 1, iy + 1), vid(ix, iy + 1)]);
-        }
-    }
-    for iy in 0..(ny - 1) {
-        edges.push((vid(nx - 1, iy), vid(nx - 1, iy + 1), 0));
-    }
-    Ok(FriezePatch {
-        symbol: symbol.to_string(),
-        iucr_name: iucr.to_string(),
-        cells: n_cells,
-        topology,
-        defect,
-        summary,
-        pos2d,
-        pos3d,
-        edges,
-        quads,
-    })
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn seven_friezes_have_exact_five_split_and_two_nonsymmorphic() {
-        let mut split = 0usize;
-        let mut nonsym = Vec::new();
-        for &sym in &FRIEZE_SYMBOLS {
-            let (s, _) = analyze_frieze_group(sym).unwrap();
-            if s.is_split {
-                split += 1;
-            } else {
-                nonsym.push(sym);
-            }
-        }
-        assert_eq!(split, 5);
-        assert_eq!(nonsym, vec!["p11g", "p2mg"]);
-        assert_eq!(analyze_frieze_group("p11m").unwrap().0.ab_full_label, "Z_2 x Z");
-        assert_eq!(analyze_frieze_group("p11g").unwrap().0.ab_full_label, "Z");
-        let mob = build_frieze_patch("p2mg", 10, FriezeTopology::Mobius, FriezeDefect::GlideDispiration).unwrap();
-        assert!(!mob.pos3d.is_empty() && !mob.quads.is_empty());
-    }
-}
+mod tests;

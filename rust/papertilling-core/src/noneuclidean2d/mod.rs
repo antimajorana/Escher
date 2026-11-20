@@ -7,6 +7,7 @@ pub mod h2_comb_builder;
 pub mod h2_spatial_hash;
 pub mod models_surfaces;
 pub mod orbifold_conway;
+pub mod s2_seeds;
 #[cfg(test)]
 mod tests;
 pub mod tgcell_quotients;
@@ -34,6 +35,6 @@ pub use tgcell_quotients::{
     SidePairing, TGCELL_NAMES, TgCellQuotient, list_tgcell_quotients, tgcell_quotient,
     verify_tgcell_invariants,
 };
-pub use unified_pq::{UnifiedPqTiling, build_unified_pq, delta_pq, geometry_kind_pq};
+pub use unified_pq::{PqGrowth, UnifiedPqTiling, build_unified_pq, build_unified_pq_seeded, delta_pq, geometry_kind_pq};
 pub use vertex_config::{VertexConfigInfo, canonical_vertex_symbol, parse_vertex_config};
 pub use wythoff_archimedean::{SnubHandedness, WythoffOp, WythoffTiling, build_wythoff};
