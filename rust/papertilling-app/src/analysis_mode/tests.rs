@@ -452,8 +452,8 @@ fn atlas_preserves_defect_selection_across_pristine_lattices_round_trip() {
 
     app.select_defects_view(DefectsView::AtlasDefects);
     assert!(!app.atlas.pristine_only);
-    // C1: with the 3D line defects hidden the Defects atlas opens on the H² wedge disclinations
-    assert_eq!(app.atlas.sub_tab, AtlasSubTab::HyperbolicH2);
+    // C1 (user, round 5): the Defects atlas opens on the flat 2D defects (0D/1D rosettes and friezes)
+    assert_eq!(app.atlas.sub_tab, AtlasSubTab::Subperiodic);
     assert_eq!(app.atlas.space3d.selected_defect, LineDefect3d::PureDisclination90_123);
     assert_eq!(app.atlas.hyperbolic.wedge_delta, -2);
 

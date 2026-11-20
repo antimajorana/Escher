@@ -98,6 +98,57 @@ fn match_wyckoff_label(
         .map(|w| w.label.clone())
 }
 
+/// The C1 vertex angle shear: at each site, the bonds are ordered by the angle of their rest vectors, and each pair of
+/// *adjacent* bonds (consecutive in that order, cyclically) whose rest angle is below 180° gives one angle change
+/// |Δθ| = |θ_now − θ_rest| (wrapped to [0, π]), θ_now taken from the drawn positions. Opposite bonds are never paired,
+/// and the outer gap at a rim site (180° or more) is not a lattice angle, so it is skipped. Returns the mean |Δθ| per
+/// site (0 with no counted pair) and per bond (over the counted pairs that contain it, at either end), aligned with
+/// `crystal.edges`. A uniform stretch and a rigid motion change no angle, so both give 0 exactly.
+pub fn adjacent_angle_shear(crystal: &BuiltCrystal) -> (Vec<f64>, Vec<f64>) {
+    use std::collections::HashMap;
+    use std::f64::consts::{PI, TAU};
+    let n = crystal.pos.len();
+    let edge_of: HashMap<(usize, usize), usize> =
+        crystal.edges.iter().enumerate().map(|(i, &(a, b))| ((a.min(b), a.max(b)), i)).collect();
+    let wrap = |a: f64| a.rem_euclid(TAU);
+    let mut site = vec![0.0_f64; n];
+    let (mut bond_sum, mut bond_cnt) = (vec![0.0_f64; crystal.edges.len()], vec![0_usize; crystal.edges.len()]);
+    for u in 0..n.min(crystal.adj.len()) {
+        let mut arms: Vec<(f64, f64, Option<usize>)> = crystal.adj[u]
+            .iter()
+            .filter(|b| b.to < n && b.vec[0].hypot(b.vec[1]) > 1e-12)
+            .map(|b| {
+                let now = [crystal.pos[b.to][0] - crystal.pos[u][0], crystal.pos[b.to][1] - crystal.pos[u][1]];
+                (b.vec[1].atan2(b.vec[0]), now[1].atan2(now[0]), edge_of.get(&(u.min(b.to), u.max(b.to))).copied())
+            })
+            .collect();
+        if arms.len() < 2 {
+            continue;
+        }
+        arms.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (mut sum, mut cnt) = (0.0, 0_usize);
+        for i in 0..arms.len() {
+            let (a, b) = (arms[i], arms[(i + 1) % arms.len()]);
+            let rest = wrap(b.0 - a.0);
+            if rest >= PI - 1e-9 || rest <= 1e-12 {
+                continue;
+            }
+            let d = (wrap(b.1 - a.1) - rest + PI).rem_euclid(TAU) - PI;
+            sum += d.abs();
+            cnt += 1;
+            for e in [a.2, b.2].into_iter().flatten() {
+                bond_sum[e] += d.abs();
+                bond_cnt[e] += 1;
+            }
+        }
+        if cnt > 0 {
+            site[u] = sum / cnt as f64;
+        }
+    }
+    let bond = bond_sum.iter().zip(&bond_cnt).map(|(&s, &c)| if c > 0 { s / c as f64 } else { 0.0 }).collect();
+    (site, bond)
+}
+
 pub fn build_ao_crystal_overlay(
     crystal: &BuiltCrystal,
     mode: CrystalOverlayMode,
@@ -126,9 +177,9 @@ pub fn build_ao_crystal_overlay(
             Some(bond_strain_overlay(crystal.pos.len(), &crystal.edges, &diag.bond_strain))
         }
         CrystalOverlayMode::VertexAngleShear => {
-            let diag = gsv_diagnostics_2d(crystal, &crystal.pos).ok()?;
-            let (site_cols, legend) = perceptual_colorbar(&diag.site_shear, "Site shear E (√; bonds: |γ|)");
-            let (bond_cols, _bmax) = heat_bonds(&diag.bond_shear_strain);
+            let (site, bond) = adjacent_angle_shear(crystal);
+            let (site_cols, legend) = perceptual_colorbar(&site, "Angle change |Δθ| between adjacent bonds (rad, √)");
+            let (bond_cols, _bmax) = heat_bonds(&bond);
             Some(CrystalOverlayData {
                 site_rgba: Some(site_cols),
                 bond_rgba: Some(bond_cols),

@@ -5,6 +5,7 @@ use papertilling_core::defect::{StoneWalesResult, stone_wales_flip};
 use papertilling_core::types::Cell2D;
 
 use super::{Host, make_host};
+use crate::defects_ui::growth::{DEFAULT_LAYERS, GrowthView, MAX_LAYERS, grow_stone_wales, show_readout};
 use crate::atlas_tab::hyperbolic_scene::empty_scene;
 use crate::canvas2d::Scene2D;
 
@@ -14,6 +15,8 @@ pub(crate) struct SwOut {
     pub(crate) host: Host,
     pub(crate) result: StoneWalesResult,
     pub(crate) edge: usize,
+    /// C1 WP-U7: the bond-rotated disk grown from the Dirichlet cell about the rotated bond (`None` before it ran).
+    pub(crate) growth: Option<Result<GrowthView, String>>,
 }
 
 fn midpoint(h: &Host, k: usize) -> [f64; 2] {
@@ -63,7 +66,7 @@ pub(crate) fn build(cell: &Cell2D, radius: f64, edge: Option<usize>, relax: bool
         let mut first_err = None;
         for k in interior_edges_by_centre(&host).into_iter().take(AUTO_TRIES) {
             match stone_wales_flip(&host.crystal, k, relax_cell) {
-                Ok(result) => return Ok(SwOut { host, result, edge: k }),
+                Ok(result) => return Ok(SwOut { host, result, edge: k, growth: None }),
                 Err(e) => {
                     first_err.get_or_insert(e);
                 }
@@ -79,20 +82,34 @@ pub(crate) fn build(cell: &Cell2D, radius: f64, edge: Option<usize>, relax: bool
         return Err(format!("bond {k} touches the rim of the disk: pick an interior bond"));
     }
     let result = stone_wales_flip(&host.crystal, k, relax_cell)?;
-    Ok(SwOut { host, result, edge: k })
+    Ok(SwOut { host, result, edge: k, growth: None })
+}
+
+/// [`build`], then the growth readout of the rotated disk (Q8 point defects; `grow_stone_wales`).
+pub(crate) fn build_grown(cell: &Cell2D, radius: f64, edge: Option<usize>, relax: bool, layers: u32) -> Result<SwOut, String> {
+    let mut o = build(cell, radius, edge, relax)?;
+    o.growth = Some(grow_stone_wales(&o.host.crystal, &o.result.crystal, o.edge, cell, layers));
+    Ok(o)
 }
 
 fn rings(r: &[usize; 4]) -> String {
     r.iter().map(ToString::to_string).collect::<Vec<_>>().join("-")
 }
 
-#[derive(Default)]
 pub(crate) struct SwState {
     /// `None` = the interior bond nearest the centre.
     pub(crate) edge: Option<usize>,
     pub(crate) relax: bool,
+    /// Growth layers read out in the inspector.
+    pub(crate) layers: u32,
     pub(crate) out: Option<SwOut>,
     note: String,
+}
+
+impl Default for SwState {
+    fn default() -> Self {
+        Self { edge: None, relax: false, layers: DEFAULT_LAYERS, out: None, note: String::new() }
+    }
 }
 
 impl SwState {
@@ -138,6 +155,10 @@ impl SwState {
             rebuild = true;
         }
         rebuild |= ui.checkbox(&mut self.relax, "Relax (GSV elastic, uses the cell)").changed();
+        ui.horizontal(|ui| {
+            ui.label("Layers");
+            rebuild |= ui.add(egui::Slider::new(&mut self.layers, 0..=MAX_LAYERS)).changed();
+        });
         if !self.note.is_empty() {
             ui.small(self.note.as_str());
         }
@@ -157,6 +178,13 @@ impl SwState {
         ui.small("Ring rule: (p1, p2, q1, q2) -> (p1-1, p2-1, q1+1, q2+1); no lattice cut, so the holonomy is trivial.");
         ui.label(format!("Holonomy {}, relaxation {}", r.holonomy_badge, r.relax_badge));
         ui.label(format!("Sites {}, bonds {} (unchanged by the rotation)", r.crystal.pos.len(), r.crystal.edges.len()));
+        match &o.growth {
+            Some(Ok(v)) => show_readout(ui, v, "sw_growth_tbl"),
+            Some(Err(why)) => {
+                ui.small(format!("Not grown: {why}"));
+            }
+            None => {}
+        }
     }
 
     pub(super) fn scene(&self) -> Scene2D {

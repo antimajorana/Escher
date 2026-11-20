@@ -97,7 +97,7 @@ pub(crate) fn make_host(cell: &Cell2D, radius: f64) -> Result<Host, String> {
 #[derive(Debug)]
 enum S2Job {
     Point { cell: Cell2D, radius: f64, ops: Vec<PointDefectOp> },
-    StoneWales { cell: Cell2D, radius: f64, edge: Option<usize>, relax: bool },
+    StoneWales { cell: Cell2D, radius: f64, edge: Option<usize>, relax: bool, layers: u32 },
     Boundary { group: String, cell: Cell2D, theta: f64, sigma: Option<u32>, radius: f64 },
     Table { item: Box<CatalogueItemUi>, cell: Cell2D, max_sigma: u32 },
     Solver { group: String, cell: Cell2D, nx: usize, ny: usize, shells: usize },
@@ -114,7 +114,7 @@ enum S2Out {
 fn run_job(job: S2Job) -> Result<S2Out, String> {
     Ok(match job {
         S2Job::Point { cell, radius, ops } => S2Out::Point(point::build(&cell, radius, ops)?),
-        S2Job::StoneWales { cell, radius, edge, relax } => S2Out::StoneWales(stone_wales::build(&cell, radius, edge, relax)?),
+        S2Job::StoneWales { cell, radius, edge, relax, layers } => S2Out::StoneWales(stone_wales::build_grown(&cell, radius, edge, relax, layers)?),
         S2Job::Boundary { group, cell, theta, sigma, radius } => S2Out::Boundary(boundary::build(&group, &cell, theta, sigma, radius)?),
         S2Job::Table { item, cell, max_sigma } => S2Out::Table(table::build(&item, &cell, max_sigma)),
         S2Job::Solver { group, cell, nx, ny, shells } => S2Out::Solver(Box::new(solver::build(&group, &cell, nx, ny, shells)?)),
@@ -201,7 +201,7 @@ impl Panel {
         let (cell, radius) = (cx.cell.clone(), self.radius(cx.cell));
         match self.sub {
             S2Sub::Point => S2Job::Point { cell, radius, ops: self.point.ops.clone() },
-            S2Sub::StoneWales => S2Job::StoneWales { cell, radius, edge: self.sw.edge, relax: self.sw.relax },
+            S2Sub::StoneWales => S2Job::StoneWales { cell, radius, edge: self.sw.edge, relax: self.sw.relax, layers: self.sw.layers },
             S2Sub::GrainBoundary => {
                 let (theta, sigma) = self.gb.params();
                 S2Job::Boundary { group: cx.item.group.clone(), cell, theta, sigma, radius }
@@ -354,6 +354,7 @@ impl WbPanel for Panel {
             "sub": format!("{:?}", self.sub),
             "radius_cells": self.radius_cells,
             "sw_relax": self.sw.relax,
+            "sw_layers": self.sw.layers,
             "gb": self.gb.save(),
             "table": self.table.save(),
             "solver": self.solver.save(),
@@ -376,6 +377,9 @@ impl WbPanel for Panel {
         }
         if let Some(b) = o.get("sw_relax").and_then(Value::as_bool) {
             self.sw.relax = b;
+        }
+        if let Some(n) = o.get("sw_layers").and_then(Value::as_u64) {
+            self.sw.layers = n.min(u64::from(crate::defects_ui::growth::MAX_LAYERS)) as u32;
         }
         if let Some(g) = o.get("gb") {
             self.gb.restore(g);

@@ -6,7 +6,7 @@ use papertilling_core::types::{Bond2D, BuiltCrystal, Cell2D, DirectedBondData, F
 
 use crate::canvas2d::gauge_overlay::CrystalOverlayMode;
 use crate::defects_inspectors::overlay_shown;
-use crate::live_ops_ao::build_ao_crystal_overlay;
+use crate::live_ops_ao::{adjacent_angle_shear, build_ao_crystal_overlay};
 
 /// An `n x n` patch of the unit square lattice (sites at integer points, bonds between nearest neighbours), with
 /// rest bond vectors of length 1 and its positions mapped by `f`.
@@ -87,22 +87,50 @@ fn bond_stretch_is_zero_under_a_rigid_rotation() {
     assert!(d.bond_strain.iter().all(|e| e.abs() < 1e-12), "{:?}", d.bond_strain);
 }
 
+/// Every site value and every bond value of the adjacent-bond angle shear on `c`.
+fn angle_shear_values(c: &BuiltCrystal) -> Vec<f64> {
+    let (site, bond) = adjacent_angle_shear(c);
+    assert_eq!((site.len(), bond.len()), (c.pos.len(), c.edges.len()));
+    site.into_iter().chain(bond).collect()
+}
+
 #[test]
-fn vertex_angle_shear_fails_the_uniform_stretch_test_so_it_is_hidden() {
-    // An angle shear must vanish under a uniform stretch (no angle changes). The overlay's site value sums
-    // 0.5 r^2 over every pair of bonds at the site, r = (d_v.d_w - c_bar) / (2 sqrt(l_v l_w)), c_bar the rest dot
-    // product. At an interior square site (4 bonds, 6 pairs) the 4 perpendicular pairs keep d_v.d_w = 0, but the 2
-    // opposite pairs go from -1 to -(1+eps)^2, so r = -(2 eps + eps^2)/2 and the site value is
-    // 2 * 0.5 * r^2 = (2 eps + eps^2)^2 / 4, not 0.
+fn vertex_angle_shear_is_zero_under_a_uniform_stretch_and_a_rotation() {
+    // C1 WP-U7 fix. A uniform stretch x -> (1+eps) x and a rotation keep every angle between bonds, so every
+    // adjacent-pair angle change is 0 and so is every site and bond mean (the old overlay gave
+    // (2 eps + eps^2)^2 / 4 at an interior site, because it also paired opposite bonds).
     let eps = 0.03;
     let c = square_patch(5, |p| [(1.0 + eps) * p[0], (1.0 + eps) * p[1]]);
-    let d = gsv_diagnostics_2d(&c, &c.pos).expect("diagnostics");
-    let centre = 2 * 5 + 2;
-    let want = (2.0 * eps + eps * eps).powi(2) / 4.0;
-    assert!((d.site_shear[centre] - want).abs() < 1e-12, "{} vs {want}", d.site_shear[centre]);
-    assert!(d.site_shear[centre] > 1e-4, "nonzero under a uniform stretch: not an angle shear");
-    assert!(!overlay_shown(CrystalOverlayMode::VertexAngleShear), "a failed known-answer test hides the overlay");
+    assert!(angle_shear_values(&c).iter().all(|v| v.abs() < 1e-12), "uniform stretch: {:?}", angle_shear_values(&c));
+    let (s, co) = 0.4_f64.sin_cos();
+    let r = square_patch(4, |p| [co * p[0] - s * p[1], s * p[0] + co * p[1]]);
+    assert!(angle_shear_values(&r).iter().all(|v| v.abs() < 1e-12), "rotation");
+    let ov = build_ao_crystal_overlay(&c, CrystalOverlayMode::VertexAngleShear, "p4m", &square_cell(), Frame2D::default());
+    assert!(ov.is_some_and(|o| o.site_rgba.is_some() && o.bond_rgba.is_some()), "the angle-shear overlay draws");
+    assert!(overlay_shown(CrystalOverlayMode::VertexAngleShear), "passing its known-answer tests shows it again");
     assert!(!overlay_shown(CrystalOverlayMode::GsvEnergyShear), "the GSV energy is part of the AO view");
+}
+
+#[test]
+fn vertex_angle_shear_matches_the_hand_derived_pure_and_simple_shear() {
+    // Pure shear F = [[1, h], [h, 1]], h = gamma/2: e1 -> (1, h) at angle atan h, e2 -> (h, 1) at angle pi/2 - atan h,
+    // -e1 and -e2 opposite. Every adjacent pair of a square site (rest angle 90 deg) opens or closes by 2 atan h:
+    // (e1, e2) closes to pi/2 - 2 atan h, (e2, -e1) opens to pi/2 + 2 atan h, and so on round the site. Rim and
+    // corner sites have only such 90 deg pairs (their 180 deg gaps are skipped), so EVERY site and bond reads
+    // 2 atan(gamma/2) ~ gamma.
+    let gamma = 0.1_f64;
+    let h = gamma / 2.0;
+    let want = 2.0 * h.atan();
+    let c = square_patch(5, |p| [p[0] + h * p[1], h * p[0] + p[1]]);
+    for v in angle_shear_values(&c) {
+        assert!((v - want).abs() < 1e-12, "pure shear: {v} vs 2 atan(gamma/2) = {want}");
+    }
+    // Simple shear x -> x + gamma y: e1 -> (1, 0), e2 -> (gamma, 1) at angle pi/2 - atan gamma, so every 90 deg pair
+    // changes by atan gamma.
+    let s = square_patch(5, |p| [p[0] + gamma * p[1], p[1]]);
+    for v in angle_shear_values(&s) {
+        assert!((v - gamma.atan()).abs() < 1e-12, "simple shear: {v} vs atan gamma = {}", gamma.atan());
+    }
 }
 
 #[test]
