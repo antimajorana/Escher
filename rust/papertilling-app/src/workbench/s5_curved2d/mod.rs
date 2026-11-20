@@ -20,12 +20,15 @@ use crate::theme::ThemeTokens;
 use crate::workbench::{WbCtx, WbPanel, WbScenes};
 
 mod draw;
+pub(crate) mod growth_table;
 mod large_h2;
 mod orbifolds;
 mod pq;
 mod surfaces;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_growth;
 mod wythoff;
 
 /// Largest p and q offered (the H² vertex-completion builder supports polygons up to 12 sides).
@@ -60,7 +63,7 @@ impl S5Sub {
     }
 }
 
-/// A finished build: the pictures plus the inspector content (key/value rows, stamped notes, an optional table).
+/// A finished build: the pictures plus the inspector content (key/value rows, prominent stop/closure banner, notes, tables).
 #[derive(Clone)]
 pub(crate) struct S5Out {
     pub(crate) scene2d: Scene2D,
@@ -68,7 +71,10 @@ pub(crate) struct S5Out {
     pub(crate) caption: String,
     pub(crate) rows: Vec<(String, String)>,
     pub(crate) notes: Vec<String>,
+    /// Prominent stop, cap, closure, or non-disk banner shown at the top of the inspector.
+    pub(crate) stopped: Option<String>,
     pub(crate) table: Option<(Vec<&'static str>, Vec<Vec<String>>)>,
+    pub(crate) extra_table: Option<(Vec<&'static str>, Vec<Vec<String>>)>,
     /// Papercraft net as SVG text (Surfaces sub-row).
     pub(crate) svg: Option<String>,
 }
@@ -172,6 +178,26 @@ pub(crate) struct Panel {
     errors: [Option<String>; 5],
 }
 
+fn render_grid_table(ui: &mut egui::Ui, id_salt: &str, head: &[&'static str], rows: &[Vec<String>]) {
+    ui.separator();
+    ui.push_id(id_salt, |ui| {
+        egui::ScrollArea::vertical().id_salt((id_salt, "scroll")).max_height(180.0).show(ui, |ui| {
+            egui::Grid::new((id_salt, "grid")).striped(true).spacing([8.0, 2.0]).show(ui, |ui| {
+                for h in head {
+                    ui.strong(*h);
+                }
+                ui.end_row();
+                for r in rows {
+                    for c in r {
+                        ui.label(c.as_str());
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+    });
+}
+
 impl Panel {
     fn job(&self) -> S5Job {
         match self.sub {
@@ -200,7 +226,7 @@ impl Panel {
         }
     }
 
-    fn show_out(&mut self, ui: &mut egui::Ui, cx: &WbCtx) {
+    fn show_out(&mut self, ui: &mut egui::Ui, cx: &WbCtx, tokens: &ThemeTokens) {
         let i = self.sub.idx();
         let Some(out) = &self.outs[i] else {
             if self.errors[i].is_none() {
@@ -208,6 +234,10 @@ impl Panel {
             }
             return;
         };
+        if let Some(stop) = &out.stopped {
+            let col = if stop.starts_with("Closed") { tokens.accent_primary } else { tokens.status_warn };
+            ui.colored_label(col, egui::RichText::new(stop).small().strong());
+        }
         egui::Grid::new("wb_s5_rows").striped(true).num_columns(2).show(ui, |ui| {
             for (k, v) in &out.rows {
                 ui.label(k.as_str());
@@ -219,23 +249,10 @@ impl Panel {
             ui.small(n.as_str());
         }
         if let Some((head, rows)) = &out.table {
-            ui.separator();
-            ui.push_id("wb_s5_table", |ui| {
-                egui::ScrollArea::vertical().id_salt("wb_s5_table_scroll").max_height(220.0).show(ui, |ui| {
-                    egui::Grid::new("wb_s5_table_grid").striped(true).show(ui, |ui| {
-                        for h in head {
-                            ui.strong(*h);
-                        }
-                        ui.end_row();
-                        for r in rows {
-                            for c in r {
-                                ui.label(c.as_str());
-                            }
-                            ui.end_row();
-                        }
-                    });
-                });
-            });
+            render_grid_table(ui, "wb_s5_table", head, rows);
+        }
+        if let Some((head, rows)) = &out.extra_table {
+            render_grid_table(ui, "wb_s5_extra_table", head, rows);
         }
         if self.sub == S5Sub::Surfaces {
             let svg = out.svg.clone();
@@ -296,12 +313,12 @@ impl WbPanel for Panel {
         rebuild
     }
 
-    fn show_inspector(&mut self, ui: &mut egui::Ui, cx: &WbCtx, _tokens: &ThemeTokens) {
+    fn show_inspector(&mut self, ui: &mut egui::Ui, cx: &WbCtx, tokens: &ThemeTokens) {
         if self.sub == S5Sub::Orbifolds {
             self.orb.show_cards(ui);
             ui.separator();
         }
-        self.show_out(ui, cx);
+        self.show_out(ui, cx, tokens);
     }
 
     fn submit(&mut self, _cx: &WbCtx, repaint: Option<&egui::Context>) {

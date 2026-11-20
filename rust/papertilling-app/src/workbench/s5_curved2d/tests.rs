@@ -13,32 +13,33 @@ use std::time::{Duration, Instant};
 
 use egui_kittest::kittest::Queryable;
 use papertilling_core::dsymbol::GeometryKind;
+use papertilling_core::growth::SeedKind;
 use papertilling_core::noneuclidean2d::build_unified_pq;
 
 use super::draw::{CLIP_R, s2_picture};
 use super::{S5Out, S5Sub, check_symbol, excess_fraction, large_h2, orbifolds, pq, surfaces, wythoff};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
-use crate::game_menu::test_util::goto_lattices_view;
 use crate::app::{LatticesView, NavTab, PapertillingApp};
 use crate::canvas2d::Scene2D;
+use crate::game_menu::test_util::goto_lattices_view;
 use crate::workbench::{WbPanel, WorkbenchView};
 
-fn row<'a>(o: &'a S5Out, k: &str) -> &'a str {
+pub(super) fn row<'a>(o: &'a S5Out, k: &str) -> &'a str {
     o.rows.iter().find(|(a, _)| a == k).map(|(_, b)| b.as_str()).unwrap_or_else(|| panic!("row {k:?} missing: {:?}", o.rows))
 }
 
-fn table_col(o: &S5Out, col: usize) -> Vec<String> {
+pub(super) fn table_col(o: &S5Out, col: usize) -> Vec<String> {
     o.table.as_ref().expect("table").1.iter().map(|r| r[col].clone()).collect()
 }
 
-fn refused<T>(r: Result<T, String>) -> String {
+pub(super) fn refused<T>(r: Result<T, String>) -> String {
     match r {
         Err(e) => e,
         Ok(_) => panic!("expected a refusal with a reason"),
     }
 }
 
-fn bbox_ok(s: &Scene2D) -> bool {
+pub(super) fn bbox_ok(s: &Scene2D) -> bool {
     let Scene2D::VectorScene { primitives: p } = s else { return false };
     let (lo, hi) = p.bbox;
     lo.iter().chain(hi.iter()).all(|v| v.is_finite() && v.abs() <= CLIP_R as f32 + 1e-3)
@@ -59,20 +60,20 @@ fn delta_badges_and_curvature_fractions_by_hand() {
 
 #[test]
 fn dodecahedron_and_73_patch_hand_counts() {
-    let o = pq::build(&pq::PqJob { p: 5, q: 3, layers: 2 }).unwrap();
+    let o = pq::build(&pq::PqJob { p: 5, q: 3, layers: 2, seed: SeedKind::Cell }).unwrap();
     assert_eq!(row(&o, "V / E / F"), "20 / 30 / 12");
     assert_eq!(row(&o, "χ = V − E + F (sphere)"), "2");
     assert_eq!(row(&o, "1/p + 1/q − 1/2 = δ/(2pq)"), "1/30");
     assert_eq!(o.mesh.face_count, 12);
     assert_eq!(o.mesh.faces.len(), 12 * 5 * 3, "12 pentagons x 5 fan triangles x 3 vertices");
     assert!(bbox_ok(&o.scene2d));
-    let h = pq::build(&pq::PqJob { p: 7, q: 3, layers: 2 }).unwrap();
+    let h = pq::build(&pq::PqJob { p: 7, q: 3, layers: 2, seed: SeedKind::Cell }).unwrap();
     assert!(row(&h, "V / E / F").ends_with("/ 29"), "{:?}", h.rows);
     assert_eq!(row(&h, "χ = V − E + F (finite patch)"), "1");
-    let e = pq::build(&pq::PqJob { p: 4, q: 4, layers: 1 }).unwrap();
+    let e = pq::build(&pq::PqJob { p: 4, q: 4, layers: 1, seed: SeedKind::Cell }).unwrap();
     assert_eq!(row(&e, "Geometry"), "E² (Euclidean)");
     assert!(row(&e, "V / E / F").ends_with("/ 9"), "{{4,4}} 1 layer: 3 x 3 squares");
-    assert!(refused(pq::build(&pq::PqJob { p: 4, q: 4, layers: 9 })).contains("allowed 1..=6"));
+    assert!(refused(pq::build(&pq::PqJob { p: 4, q: 4, layers: 13, seed: SeedKind::Cell })).contains("allowed 0..=12"));
 }
 
 #[test]
@@ -108,7 +109,8 @@ fn large_kernels_give_the_hand_shells_1_7_21() {
     for k in 0..large_h2::KERNELS.len() {
         let j = large_h2::LargeJob { p: 7, q: 3, target: 29, kernel: k, model: super::draw::DiskModel::Poincare };
         let o = large_h2::build(&j).unwrap();
-        assert_eq!(table_col(&o, 1), ["1", "7", "21"], "kernel {k}");
+        assert_eq!(table_col(&o, 1), ["1", "8", "29"], "kernel {k} cumulative Cells");
+        assert_eq!(table_col(&o, 2), ["1", "7", "21"], "kernel {k} per-layer New");
         assert_eq!(row(&o, "V − E + F"), "1");
         assert!(bbox_ok(&o.scene2d));
     }
@@ -124,11 +126,10 @@ fn large_kernels_give_the_hand_shells_1_7_21() {
 
 #[test]
 fn surfaces_refuse_non_hyperbolic_and_unfold_every_face() {
-    let flat = surfaces::SurfJob { p: 4, q: 4, layers: 2, surface: 0, twist: 0.2 };
+    let flat = surfaces::SurfJob { p: 4, q: 4, layers: 2, seed: SeedKind::Cell, surface: 0, twist: 0.2 };
     assert!(refused(surfaces::build(&flat)).contains("only H² tilings"));
     for s in 0..surfaces::SURFACES.len() {
-        let o = surfaces::build(&surfaces::SurfJob { p: 7, q: 3, layers: 2, surface: s, twist: 0.3 }).unwrap();
-        // Dini with twist ≠ 0: the central heptagon (the only face around the origin) cannot be placed.
+        let o = surfaces::build(&surfaces::SurfJob { p: 7, q: 3, layers: 2, seed: SeedKind::Cell, surface: s, twist: 0.3 }).unwrap();
         let (n, tree) = if s == 3 { ("28", "28 / 27 /") } else { ("29", "29 / 28 /") };
         assert_eq!(row(&o, "Faces placed"), n);
         let nets = row(&o, "Net pieces / glued edges / cut edges");
@@ -139,7 +140,7 @@ fn surfaces_refuse_non_hyperbolic_and_unfold_every_face() {
         assert_eq!(o.notes[0].starts_with("Isometric embedding"), s == 0, "only the hyperboloid bowl is called an isometry");
         assert!(o.notes.iter().all(|n| n.contains("[PROVED]") || n.contains("[COMPUTATIONAL EVIDENCE]")), "{:?}", o.notes);
     }
-    let untwisted = surfaces::build(&surfaces::SurfJob { p: 7, q: 3, layers: 2, surface: 3, twist: 0.0 }).unwrap();
+    let untwisted = surfaces::build(&surfaces::SurfJob { p: 7, q: 3, layers: 2, seed: SeedKind::Cell, surface: 3, twist: 0.0 }).unwrap();
     assert_eq!(row(&untwisted, "Faces placed"), "29", "twist 0: height has no b·u term, nothing to unwrap");
     let dir = std::env::temp_dir().join("wb_s5_net_test.svg");
     let msg = surfaces::export_to(&dir, "<svg/>").unwrap();
@@ -193,7 +194,7 @@ fn sweep_reachable_symbols_ok_or_reasoned_refusal() {
                 GeometryKind::Hyperbolic => 2,
                 _ => 1,
             };
-            match pq::build(&pq::PqJob { p, q, layers }) {
+            match pq::build(&pq::PqJob { p, q, layers, seed: SeedKind::Cell }) {
                 Ok(o) => {
                     assert!(bbox_ok(&o.scene2d), "{{{p},{q}}}");
                     assert!(!euler_consistent(&o, &format!("{{{p},{q}}}")), "regular {{{p},{q}}}: unexpected χ");
@@ -285,10 +286,12 @@ fn every_s5_subrow_default_builds_with_a_mesh() {
 fn s5_panel_state_survives_json_roundtrip() {
     let mut p = super::Panel { sub: S5Sub::LargeH2, ..Default::default() };
     p.pq.set(4, 4, 3);
+    p.pq.seed = SeedKind::Edge;
     p.wy.op = 8;
     p.large.target = 777;
     p.large.model = super::draw::DiskModel::UpperHalfPlane;
     p.surf.surface = 3;
+    p.surf.seed = SeedKind::Cell;
     p.orb.orb_text = String::from("22x");
     let v = p.save();
     let back: serde_json::Value = serde_json::from_str(&serde_json::to_string(&v).unwrap()).unwrap();
@@ -318,12 +321,12 @@ fn s5_subrows_quarantine_clean() {
     }
 }
 
-/// The deepest layer settings the UI allows, on corner symbols (E² 6, H² 4 for Regular; 3 for Wythoff).
+/// The deepest layer settings the UI allows, on corner symbols (E² 12, H² 8 for Regular; 6 for Wythoff).
 #[test]
 fn max_layer_corner_symbols_build_or_refuse_with_reason() {
     let t0 = Instant::now();
-    for (p, q, layers) in [(4, 4, 6), (3, 6, 6), (6, 3, 6), (7, 3, 4), (3, 7, 4), (12, 12, 4), (3, 12, 4), (12, 3, 4)] {
-        let o = pq::build(&pq::PqJob { p, q, layers }).unwrap_or_else(|e| panic!("{{{p},{q}}} x{layers}: {e}"));
+    for (p, q, layers) in [(4, 4, 12), (3, 6, 12), (6, 3, 12), (7, 3, 8), (3, 7, 8), (12, 12, 8), (3, 12, 8), (12, 3, 8)] {
+        let o = pq::build(&pq::PqJob { p, q, layers, seed: SeedKind::Cell }).unwrap_or_else(|e| panic!("{{{p},{q}}} x{layers}: {e}"));
         assert!(bbox_ok(&o.scene2d), "{{{p},{q}}} x{layers}");
         euler_consistent(&o, &format!("{{{p},{q}}} x{layers}"));
     }
@@ -336,7 +339,7 @@ fn max_layer_corner_symbols_build_or_refuse_with_reason() {
         }
     }
     for s in 0..surfaces::SURFACES.len() {
-        surfaces::build(&surfaces::SurfJob { p: 12, q: 12, layers: 4, surface: s, twist: 2.0 }).unwrap();
+        surfaces::build(&surfaces::SurfJob { p: 12, q: 12, layers: 8, seed: SeedKind::Cell, surface: s, twist: 2.0 }).unwrap();
     }
     eprintln!("# time max-layer corner symbols: {:.3}s", t0.elapsed().as_secs_f64());
 }
@@ -355,16 +358,13 @@ fn pilot_timing_heaviest_s5_jobs() {
         eprintln!("# time large {{7,3}} target {target} kernel {kernel}: build + scenes {built:.3}s, scene clone {:.3}s", t.elapsed().as_secs_f64());
     }
     let t = Instant::now();
-    surfaces::build(&surfaces::SurfJob { p: 3, q: 7, layers: 4, surface: 4, twist: 0.2 }).unwrap();
-    eprintln!("# time surfaces {{3,7}} 4 layers on Kuen + net: {:.3}s", t.elapsed().as_secs_f64());
+    surfaces::build(&surfaces::SurfJob { p: 3, q: 7, layers: 8, seed: SeedKind::Cell, surface: 4, twist: 0.2 }).unwrap();
+    eprintln!("# time surfaces {{3,7}} 8 layers on Kuen + net: {:.3}s", t.elapsed().as_secs_f64());
     let t = Instant::now();
-    wythoff::build(&wythoff::WyJob { p: 7, q: 3, op: 6, layers: 3 }).unwrap();
-    eprintln!("# time Wythoff omnitruncated {{7,3}} 3 layers: {:.3}s", t.elapsed().as_secs_f64());
+    wythoff::build(&wythoff::WyJob { p: 7, q: 3, op: 6, layers: 6 }).unwrap();
+    eprintln!("# time Wythoff omnitruncated {{7,3}} 6 layers: {:.3}s", t.elapsed().as_secs_f64());
 }
 
-/// Finding: Dini tear. Hand values: wrap(−3.0 − 3.0) = 2π − 6 ≈ 0.283, so θ = (3.0, −3.0, −2.9) unwraps to
-/// (3.0, 3.283, 3.383), mean ≈ 3.222 > π, shifted by −2π: branches (−1, 0, 0). θ = (0.1, 1.6, 3.1, −1.5) turns once
-/// around the origin (steps 1.5, 1.5, 1.683, 1.6 sum to 2π): no branch.
 #[test]
 fn dini_branch_unwrapping_by_hand() {
     assert_eq!(surfaces::unwrap_branches(&[3.0, -3.0, -2.9]), Some(vec![-1, 0, 0]));
@@ -372,7 +372,6 @@ fn dini_branch_unwrapping_by_hand() {
     assert_eq!(surfaces::unwrap_branches(&[0.1, 1.6, 3.1, -1.5]), None);
 }
 
-/// Finding: curvature row conventions. Bowl −1 for its Minkowski metric; hemisphere +1 for its Euclidean metric.
 #[test]
 fn curvature_row_names_its_metric() {
     let (l0, v0) = surfaces::curvature_row(0, -1.0);
@@ -381,8 +380,6 @@ fn curvature_row_names_its_metric() {
     assert!(l1.contains("Euclidean") && v1.starts_with("1 [PROVED]") && v1.contains("K = −1"), "{l1}: {v1}");
 }
 
-/// Finding: exact i128 overflow. 2 · 4294967291 · 4294967279 > 10^15 (both odd, coprime as distinct primes); and
-/// 1000000, 999999, 999997 are pairwise coprime (consecutive; 999997 is odd and not a multiple of 5), lcm ≈ 10^18.
 #[test]
 fn huge_orders_are_refused_before_exact_arithmetic() {
     let big = "4294967291,4294967279,4294967231,4294967197,4294967189";
@@ -393,15 +390,12 @@ fn huge_orders_are_refused_before_exact_arithmetic() {
     assert!(orbifolds::vertex_card("1000000.999999.999997").unwrap_err().contains("orders too large"));
     assert_eq!(orbifolds::orbifold_orders("*2(10)3 4,5"), vec![2, 10, 3, 4, 5]);
     assert_eq!(orbifolds::orbifold_orders("o632"), vec![6, 3, 2]);
-    // 30 cones of order 2: χ = 2 − 30 · 1/2 = −13.
     let many = orbifolds::orbifold_card(&"2".repeat(30)).unwrap();
     assert_eq!((many.chi_num, many.chi_den), (-13, 1));
     let h = orbifolds::orbifold_card("*237").unwrap();
     assert_eq!((h.chi_num, h.chi_den), (-1, 84));
 }
 
-/// Finding: chirality field. Snub cube 3.3.3.3.4 is a chiral tiling of S² (its vertex sequence is mirror-symmetric);
-/// 3.4.6.4 (rhombitrihexagonal) is not chiral.
 #[test]
 fn vertex_card_shows_tiling_chirality() {
     let snub = orbifolds::chirality_text(&orbifolds::vertex_card("3.3.3.3.4").unwrap());
@@ -410,10 +404,6 @@ fn vertex_card_shows_tiling_chirality() {
     assert!(rhombi.ends_with(": no"), "{rhombi}");
 }
 
-/// Findings: rim clamp and shell rows. A lifted point (0.5, 0) goes to (2·0.5, 1 + 0.25)/0.75 = (4/3, 0, 5/3); a face
-/// with a vertex beyond the radius is left out, and only the kept face's vertices are lifted. {7,3} at 2 layers draws
-/// S_0..S_2 whole (1 + 7 + 21 faces); {10,7}: |S_2| = 1951 > 1000, so S_1 only (51 faces); {5,5} at 3 layers: S_3
-/// is cut by the 0.998 radius cap (counts from the core's documented hand recurrences).
 #[test]
 fn h2_lift_is_exact_and_shells_are_reported() {
     let coords = [[0.0, 0.0], [0.5, 0.0], [0.0, 0.5], [0.97, 0.0]];
@@ -422,18 +412,18 @@ fn h2_lift_is_exact_and_shells_are_reported() {
     let a = l.arcs[0][0];
     assert!((a[0] - 4.0 / 3.0).abs() < 1e-12 && a[1].abs() < 1e-12 && (a[2] - 5.0 / 3.0).abs() < 1e-12, "{a:?}");
     assert_eq!(l.pts[0], [0.0, 0.0, 1.0]);
-    let h = pq::build(&pq::PqJob { p: 7, q: 3, layers: 2 }).unwrap();
+    let h = pq::build(&pq::PqJob { p: 7, q: 3, layers: 2, seed: SeedKind::Cell }).unwrap();
     assert_eq!(row(&h, "Complete through shell"), "2");
     assert!(row(&h, "3D model").contains("radius 0.95"));
     assert!(h.notes.iter().any(|n| n.starts_with("3D: exact lift")));
     assert!(h.notes.iter().all(|n| !n.contains("core: ")), "no forwarded blanket core stamp");
-    for layers in [2, 3, 4] {
-        let t = pq::build(&pq::PqJob { p: 10, q: 7, layers }).unwrap();
+    for layers in [2, 3, 4, 8] {
+        let t = pq::build(&pq::PqJob { p: 10, q: 7, layers, seed: SeedKind::Cell }).unwrap();
         assert_eq!(row(&t, "Complete through shell"), "1", "{{10,7}} layers {layers}");
-        assert_eq!(row(&t, "Layers requested (core range 1..=4)"), layers.to_string());
+        assert_eq!(row(&t, "Layers requested (0..=8)"), layers.to_string());
         assert!(row(&t, "V / E / F").ends_with("/ 51"));
     }
-    let f = pq::build(&pq::PqJob { p: 5, q: 5, layers: 3 }).unwrap();
+    let f = pq::build(&pq::PqJob { p: 5, q: 5, layers: 3, seed: SeedKind::Cell }).unwrap();
     assert_eq!(row(&f, "Complete through shell"), "2");
     assert!(f.notes.iter().any(|n| n.contains("truncated")));
 }

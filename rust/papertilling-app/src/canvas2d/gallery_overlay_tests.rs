@@ -151,6 +151,7 @@ fn toggling_overlays_is_view_only() {
         show_unit_cell: false,
     });
     let mut st = GalleryTabState::new(&backend, &mut canvas);
+    st.set_inflation_enabled(false, &mut canvas);
     let (rev, item) = (st.revision(), st.active_item().clone());
     st.set_overlays(BOTH, &mut canvas);
     assert!(canvas.gallery_overlay.is_some());

@@ -13,7 +13,8 @@
 
 use serde_json::{Value, json};
 
-use papertilling_core::honeycomb3d::{EuclideanKind, TpmsKind};
+use papertilling_core::growth::SeedKind;
+use papertilling_core::honeycomb3d::{EuclideanKind, GrowthRule, TpmsKind};
 
 use crate::atlas_tab::hyperbolic_scene::empty_scene;
 use crate::combine_worker::LatestWorker;
@@ -22,11 +23,14 @@ use crate::theme::ThemeTokens;
 use crate::workbench::{WbCtx, WbPanel, WbScenes};
 
 mod honeycomb;
+mod honeycomb_present;
 mod present;
 mod tpms;
 mod voronoi;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_growth;
 
 use present::Built;
 
@@ -57,10 +61,11 @@ impl S6Sub {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum S6Job {
-    Schlafli { p: u32, q: u32, r: u32, shells: u32, layers: u32 },
-    Euclid { kind: EuclideanKind, shells: u32 },
+    SchlafliGrowth { p: u32, q: u32, r: u32, seed: SeedKind, rule: GrowthRule, layers: u32 },
+    ParacompactBall { p: u32, q: u32, r: u32, radius_centi: u32 },
+    Euclid { kind: EuclideanKind, seed: SeedKind, rule: GrowthRule, layers: u32 },
     Net { kind: TpmsKind, labyrinths: u32, reps: u32 },
     Surface { kind: TpmsKind, mode: tpms::TpmsMode, n: usize, reps: u32 },
     LatticeCell { lattice: &'static str },
@@ -69,8 +74,11 @@ pub(crate) enum S6Job {
 
 pub(crate) fn run_job(job: S6Job) -> Result<Built, String> {
     match job {
-        S6Job::Schlafli { p, q, r, shells, layers } => honeycomb::build_schlafli(p, q, r, shells, layers),
-        S6Job::Euclid { kind, shells } => honeycomb::build_euclid(kind, shells),
+        S6Job::SchlafliGrowth { p, q, r, seed, rule, layers } => {
+            honeycomb::build_schlafli_growth(p, q, r, seed, rule, layers)
+        }
+        S6Job::ParacompactBall { p, q, r, radius_centi } => honeycomb::build_paracompact(p, q, r, radius_centi),
+        S6Job::Euclid { kind, seed, rule, layers } => honeycomb::build_euclid(kind, seed, rule, layers),
         S6Job::Net { kind, labyrinths, reps } => tpms::build_net(kind, labyrinths, reps),
         S6Job::Surface { kind, mode, n, reps } => tpms::build_surface(kind, mode, n, reps),
         S6Job::LatticeCell { lattice } => voronoi::build_lattice_cell(lattice),
@@ -103,11 +111,8 @@ impl Panel {
     /// The job the inputs of sub-row `sub` currently ask for.
     fn job_for(&self, sub: S6Sub) -> S6Job {
         match sub {
-            S6Sub::Schlafli => {
-                let (p, q, r, shells, layers) = self.schlafli.params();
-                S6Job::Schlafli { p, q, r, shells, layers }
-            }
-            S6Sub::Euclidean => S6Job::Euclid { kind: self.euclid.kind, shells: self.euclid.shells },
+            S6Sub::Schlafli => self.schlafli.job(),
+            S6Sub::Euclidean => self.euclid.job(),
             S6Sub::Tpms => {
                 let t = &self.tpms;
                 match t.mode {
@@ -243,9 +248,9 @@ impl WbPanel for Panel {
         rebuild
     }
 
-    fn show_inspector(&mut self, ui: &mut egui::Ui, _cx: &WbCtx, _tokens: &ThemeTokens) {
+    fn show_inspector(&mut self, ui: &mut egui::Ui, _cx: &WbCtx, tokens: &ThemeTokens) {
         match self.current() {
-            Some(b) => present::show_built(ui, b, "wb_s6_inspector_grid"),
+            Some(b) => present::show_built(ui, b, tokens, "wb_s6_inspector_grid"),
             None if self.errors[self.sub.idx()].is_some() => {
                 ui.label("Nothing is drawn for refused input: the 3D pane shows a placeholder.");
             }
@@ -320,7 +325,7 @@ impl WbPanel for Panel {
         }
     }
 
-    /// The smoke stage of this view: the cubic honeycomb {4,3,4}, one shell (32 V, 60 E, 36 F, 7 cells).
+    /// The smoke stage of this view: the cubic honeycomb {4,3,4}, Vertex + Touching, 1 layer (4×4×4 = 64 cells).
     fn smoke_defaults(&mut self) {
         self.sub = S6Sub::Schlafli;
         self.schlafli = honeycomb::SchlafliState::default();

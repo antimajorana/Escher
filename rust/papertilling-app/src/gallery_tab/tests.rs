@@ -311,6 +311,7 @@ fn stage1_rule_defaults_naming_alias_slugs_and_chirality_badge_update_live() {
 fn shell_inflation_toggle_kagome_produces_exact_shells_and_keeps_revision() {
     use papertilling_core::plane::inflation::{CentreSet, InflationRule, InflationSeed, PlaneTiling};
 
+    use super::inflation_ui::E2SeedChoice;
     use crate::scene2d::overlays::GalleryOverlayToggles;
 
     let backend = AppBackend::new();
@@ -318,8 +319,9 @@ fn shell_inflation_toggle_kagome_produces_exact_shells_and_keeps_revision() {
     let mut st = GalleryTabState::new(&backend, &mut cv);
     let ctx = egui::Context::default();
     select(&mut st, &backend, &mut cv, "named", "p6m", "kagome");
-    assert!(!st.inflation.enabled);
-    assert!(matches!(cv.scene(), Scene2D::PeriodicCell { .. }));
+    assert!(st.inflation.enabled);
+    assert_eq!(st.inflation.steps, 4);
+    assert!(matches!(cv.scene(), Scene2D::VectorScene { .. }));
     let rev = st.revision();
 
     // Hand counts for kagome cluster shells S_n (n = 0, 1, 2):
@@ -328,7 +330,7 @@ fn shell_inflation_toggle_kagome_produces_exact_shells_and_keeps_revision() {
     // and Euler's disk formula V - E + F = 1 gives V_2 = 162 + 1 - 73 = 90.
     st.set_show_unit_cell(false, &mut cv);
     st.inflation.rule = InflationRule::Auto;
-    st.inflation.seed = InflationSeed::Dirichlet;
+    st.inflation.seed_choice = E2SeedChoice::Dirichlet;
     st.inflation.steps = 2;
     st.set_inflation_enabled(true, &mut cv);
     assert_eq!(st.revision(), rev);
@@ -346,7 +348,7 @@ fn shell_inflation_toggle_kagome_produces_exact_shells_and_keeps_revision() {
     // Explicit Cluster rule + hexagon Face seed + unit cell + ITA/Voronoi overlays.
     let hex = PlaneTiling::new(st.cell()).unwrap().face_sizes().iter().position(|&k| k == 6).unwrap();
     st.inflation.rule = InflationRule::Cluster(CentreSet::MaxPolygon);
-    st.inflation.seed = InflationSeed::Face(hex);
+    st.inflation.seed_override = Some(InflationSeed::Face(hex));
     st.set_show_unit_cell(true, &mut cv);
     st.set_overlays(GalleryOverlayToggles { symmetry: true, voronoi: true }, &mut cv);
     assert_eq!(st.revision(), rev);
@@ -372,6 +374,8 @@ fn shell_inflation_toggle_kagome_produces_exact_shells_and_keeps_revision() {
 fn shell_inflation_error_falls_back_to_periodic_cell_without_panicking() {
     use papertilling_core::plane::inflation::InflationSeed;
 
+    use super::inflation_ui::E2SeedChoice;
+
     let backend = AppBackend::new();
     let mut cv = canvas();
     let mut st = GalleryTabState::new(&backend, &mut cv);
@@ -379,14 +383,15 @@ fn shell_inflation_error_falls_back_to_periodic_cell_without_panicking() {
     select(&mut st, &backend, &mut cv, "named", "p6m", "kagome");
     let rev = st.revision();
 
-    st.inflation.seed = InflationSeed::Face(999);
+    st.inflation.seed_override = Some(InflationSeed::Face(999));
     st.set_inflation_enabled(true, &mut cv);
     assert!(st.inflation.last_error.is_some());
     assert!(st.inflation.last_shells.is_empty());
     assert!(matches!(cv.scene(), Scene2D::PeriodicCell { .. }));
     frame(&ctx, &mut st, &backend, &mut cv);
 
-    st.inflation.seed = InflationSeed::Dirichlet;
+    st.inflation.seed_override = None;
+    st.inflation.seed_choice = E2SeedChoice::Dirichlet;
     st.inflation.steps = 999;
     st.sync_scene(&mut cv, true);
     assert!(st.inflation.last_error.is_some());

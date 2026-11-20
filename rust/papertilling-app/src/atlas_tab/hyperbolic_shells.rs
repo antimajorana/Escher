@@ -1,17 +1,21 @@
-//! BDF vertex-completion shell-count table and bounded cache for the H² inspector.
+//! Seeded BDF vertex-completion shell-count table, drawn-patch topological stats, and bounded cache for the H² inspector.
 
+use std::collections::HashMap;
+
+use papertilling_core::growth::{LayerStats, SeedKind};
 use papertilling_core::hyperbolic::HyperbolicStyle;
-use papertilling_core::hyperbolic::inflation::{
-    is_hyperbolic, lambda_plus, vertex_completion_counts_budget, vertex_completion_counts_combinatorial,
-};
+use papertilling_core::hyperbolic::boundary_counts::vertex_completion_counts_seeded;
+use papertilling_core::hyperbolic::inflation::{is_hyperbolic, lambda_plus};
+use papertilling_core::hyperbolic::inflation_seeds::{grow_vertex_completion_seeded, seed_label};
 
 use super::hyperbolic_ui::HyperbolicPanelState;
+use crate::theme::ThemeTokens;
 
 /// Shells of the inspector's shell table, and the face budget of its geometric fallback.
 const SHELL_TABLE_MAX_N: usize = 6;
 const SHELL_TABLE_FACE_BUDGET: usize = 20_000;
-/// Number of `{p, q}` shell tables kept in [`HyperbolicPanelState::shell_cache`].
-pub(super) const SHELL_CACHE_MAX: usize = 16;
+/// Number of `(p, q, seed)` shell tables kept in [`HyperbolicPanelState::shell_cache`].
+pub(super) const SHELL_CACHE_MAX: usize = 24;
 
 /// One row of the shell table: `n`, `|S_n|`, `a_n`, `a_n / a_{n-1}`.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,7 +26,7 @@ pub struct ShellRow {
     pub ratio: Option<f64>,
 }
 
-/// The inspector's shell table for one `{p, q}`.
+/// The inspector's shell table for one `{p, q}` and [`SeedKind`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShellTable {
     pub rows: Vec<ShellRow>,
@@ -34,10 +38,15 @@ pub struct ShellTable {
     pub stopped: Option<String>,
 }
 
-/// Exact counts from `vertex_completion_counts_combinatorial` (O(n q), microseconds); the geometric
-/// counter only if that returns `None` (u64 overflow or a non-convex step, neither of which occurs for
-/// p, q <= 12 to n = 6), labelled as such.
+/// Exact counts from one `p`-gon (`SeedKind::Cell`); see [`shell_table_seeded`].
+#[cfg(test)]
 pub fn shell_table(p: usize, q: usize) -> Result<ShellTable, String> {
+    shell_table_seeded(p, q, SeedKind::Cell)
+}
+
+/// Exact counts from `vertex_completion_counts_seeded` (O(n q), microseconds); falls back to the geometric
+/// counter `grow_vertex_completion_seeded` only if the exact counter returns `None`, labelled as such.
+pub fn shell_table_seeded(p: usize, q: usize, seed: SeedKind) -> Result<ShellTable, String> {
     if !is_hyperbolic(p, q) {
         return Err(format!("{{{p}, {q}}} is not hyperbolic (requires (p-2)(q-2) > 4)"));
     }
@@ -47,27 +56,138 @@ pub fn shell_table(p: usize, q: usize) -> Result<ShellTable, String> {
             .enumerate()
             .map(|(n, &s)| {
                 cumulative += s;
-                ShellRow { n, cumulative, shell: s, ratio: (n >= 1).then(|| s as f64 / a[n - 1] as f64) }
+                ShellRow { n, cumulative, shell: s, ratio: (n >= 1 && a[n - 1] > 0).then(|| s as f64 / a[n - 1] as f64) }
             })
             .collect()
     };
-    if let Some(a) = vertex_completion_counts_combinatorial(p, q, SHELL_TABLE_MAX_N) {
+    if let Some(a) = vertex_completion_counts_seeded(p, q, seed, SHELL_TABLE_MAX_N) {
         return Ok(ShellTable { rows: rows_from(&a), lambda_plus: lambda_plus(p, q), exact: true, stopped: None });
     }
-    let c = vertex_completion_counts_budget(p, q, SHELL_TABLE_MAX_N, SHELL_TABLE_FACE_BUDGET)?;
-    let a: Vec<u64> = c.shells.iter().map(|s| s.shell as u64).collect();
-    Ok(ShellTable { rows: rows_from(&a), lambda_plus: c.lambda_plus, exact: false, stopped: c.stopped })
+    let vc = grow_vertex_completion_seeded(p, q, seed, SHELL_TABLE_MAX_N, SHELL_TABLE_FACE_BUDGET)?;
+    let a: Vec<u64> = vc.shell_sizes.iter().map(|&s| s as u64).collect();
+    Ok(ShellTable { rows: rows_from(&a), lambda_plus: lambda_plus(p, q), exact: false, stopped: vc.stopped })
+}
+
+/// Incremental O(N) per-layer topological readout (`Cells`, `New`, `∂V`, `∂E`, `χ`) for the drawn H² patch
+/// across complete shells `0..=complete_through`.
+pub(super) fn drawn_patch_stats(faces: &[Vec<usize>], face_shell: &[usize], complete_through: usize) -> Vec<LayerStats> {
+    if faces.is_empty() {
+        return Vec::new();
+    }
+    let max_vid = faces.iter().flatten().copied().max().unwrap_or(0);
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); complete_through + 1];
+    for (fi, &s) in face_shell.iter().enumerate().take(faces.len()) {
+        if s <= complete_through {
+            buckets[s].push(fi);
+        }
+    }
+    let mut seen_v = vec![false; max_vid + 1];
+    let mut v_bnd_deg = vec![0u32; max_vid + 1];
+    let mut edge_deg: HashMap<u64, u8> = HashMap::new();
+    let (mut n_verts, mut n_faces, mut bnd_edges, mut bnd_verts) = (0usize, 0usize, 0usize, 0usize);
+    let mut out = Vec::with_capacity(complete_through + 1);
+    for bucket in &buckets {
+        if bucket.is_empty() && n_faces == 0 {
+            continue;
+        }
+        for &fi in bucket {
+            let f = &faces[fi];
+            if f.len() < 3 {
+                continue;
+            }
+            n_faces += 1;
+            for &v in f {
+                if !seen_v[v] {
+                    seen_v[v] = true;
+                    n_verts += 1;
+                }
+            }
+            for m in 0..f.len() {
+                let (u, w) = (f[m], f[(m + 1) % f.len()]);
+                if u == w {
+                    continue;
+                }
+                let (a, b) = (u.min(w), u.max(w));
+                let key = ((a as u64) << 32) | (b as u64);
+                let deg = edge_deg.entry(key).or_insert(0);
+                *deg = deg.saturating_add(1);
+                if *deg == 1 {
+                    bnd_edges += 1;
+                    for x in [a, b] {
+                        if v_bnd_deg[x] == 0 {
+                            bnd_verts += 1;
+                        }
+                        v_bnd_deg[x] += 1;
+                    }
+                } else if *deg == 2 {
+                    bnd_edges -= 1;
+                    for x in [a, b] {
+                        v_bnd_deg[x] -= 1;
+                        if v_bnd_deg[x] == 0 {
+                            bnd_verts -= 1;
+                        }
+                    }
+                }
+            }
+        }
+        let n_edges = edge_deg.len();
+        out.push(LayerStats {
+            cells: n_faces,
+            new_cells: bucket.len(),
+            boundary_vertices: bnd_verts,
+            boundary_edges: bnd_edges,
+            euler: n_verts as i64 - n_edges as i64 + n_faces as i64,
+        });
+    }
+    out
 }
 
 impl HyperbolicPanelState {
-    /// BDF vertex completion `S_{n+1} = S_n + U(S_n)` from one p-gon (arXiv:1805.02665, Sec. IV-V):
-    /// exact counts from the uncapped counter, not from the drawn (capped) patch.
+    pub(super) fn show_drawn_growth_table(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        let Some(cache) = &self.cache else { return };
+        if cache.drawn_stats.is_empty() {
+            return;
+        }
+        ui.separator();
+        ui.strong(format!("Drawn patch layers (0..={} complete)", cache.base.complete_through_shell));
+        for (k, s) in cache.drawn_stats.iter().enumerate() {
+            if s.euler != 1 {
+                ui.colored_label(
+                    tokens.status_warn,
+                    egui::RichText::new(format!("Layer {k} is not a disk (χ = {})", s.euler)).small(),
+                );
+            }
+        }
+        egui::Grid::new("hyp_drawn_layer_table").num_columns(6).spacing([8.0, 2.0]).striped(true).show(ui, |ui| {
+            for h in ["Layer", "Cells", "New", "∂V", "∂E", "χ"] {
+                ui.small(egui::RichText::new(h).strong());
+            }
+            ui.end_row();
+            for (k, s) in cache.drawn_stats.iter().enumerate() {
+                ui.small(k.to_string());
+                ui.small(s.cells.to_string());
+                ui.small(s.new_cells.to_string());
+                ui.small(s.boundary_vertices.to_string());
+                ui.small(s.boundary_edges.to_string());
+                ui.small(s.euler.to_string());
+                ui.end_row();
+            }
+        });
+    }
+
+    /// BDF vertex completion `S_{n+1} = S_n + U(S_n)` (arXiv:1805.02665, Sec. IV-V):
+    /// exact counts from the uncapped boundary-letter counter for the active seed.
     pub(super) fn show_shell_table(&self, ui: &mut egui::Ui) {
-        let Some(((p, q), res)) = self.shell_key.and_then(|k| self.shell_cache.iter().find(|(c, _)| *c == k)) else {
+        let eff_seed = self.effective_seed();
+        let Some(((p, q, _), res)) = self
+            .shell_key
+            .and_then(|(pe, qe)| self.shell_cache.iter().find(|(c, _)| *c == (pe, qe, eff_seed)))
+        else {
             return;
         };
+        let (p, q) = (*p, *q);
         ui.separator();
-        ui.strong(format!("Vertex completion shells, {{{p},{q}}}, one {p}-gon seed"));
+        ui.strong(format!("Vertex completion shells, {{{p},{q}}}, {}", seed_label(p, q, eff_seed)));
         let table = match res {
             Ok(t) => t,
             Err(e) => {
