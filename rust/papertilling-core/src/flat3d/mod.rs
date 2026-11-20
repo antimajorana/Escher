@@ -21,10 +21,8 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::space3d::motifs::{NetMotif, net_motif};
 use crate::space3d::nets3d::CanonicalNet3d;
-
-/// Lattice basis, motif `(fractional position, kind)` and bond cutoff of a canonical net.
-type NetSpec = ([[f64; 3]; 3], Vec<([f64; 3], u8)>, f64);
 
 pub use flakes::{SymmetricFlake, build_symmetric_flake, build_wigner_seitz_flake};
 pub use nanotubes_ribbons::{
@@ -183,95 +181,10 @@ impl Cell3D {
         Self { lattice, basis, bonds, space_group_num, site_kinds }
     }
 
-    /// Build a periodic `Cell3D` matching any of the 10 canonical nets in `space3d::nets3d`.
+    /// Build a periodic `Cell3D` matching any of the 10 canonical nets (motif table: `space3d::motifs`).
     #[must_use]
     pub fn from_canonical_net(net: CanonicalNet3d) -> Self {
-        let sc = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-        let hex = [[1.0, 0.0, 0.0], [-0.5, 0.75_f64.sqrt(), 0.0], [0.0, 0.0, 1.35]];
-        let (lat, motif, cutoff): NetSpec = match net {
-            CanonicalNet3d::SimpleCubic => (sc, vec![([0.0, 0.0, 0.0], 0)], 1.05),
-            CanonicalNet3d::BCC => (sc, vec![([0.0, 0.0, 0.0], 0), ([0.5, 0.5, 0.5], 1)], 0.92),
-            CanonicalNet3d::FCC => (
-                sc,
-                vec![
-                    ([0.0, 0.0, 0.0], 0),
-                    ([0.5, 0.5, 0.0], 0),
-                    ([0.5, 0.0, 0.5], 0),
-                    ([0.0, 0.5, 0.5], 0),
-                ],
-                0.76,
-            ),
-            CanonicalNet3d::Diamond => (
-                sc,
-                vec![
-                    ([0.0, 0.0, 0.0], 0),
-                    ([0.5, 0.5, 0.0], 0),
-                    ([0.5, 0.0, 0.5], 0),
-                    ([0.0, 0.5, 0.5], 0),
-                    ([0.25, 0.25, 0.25], 1),
-                    ([0.75, 0.75, 0.25], 1),
-                    ([0.75, 0.25, 0.75], 1),
-                    ([0.25, 0.75, 0.75], 1),
-                ],
-                0.48,
-            ),
-            CanonicalNet3d::HCP => (
-                hex,
-                vec![
-                    ([1.0 / 3.0, 2.0 / 3.0, 0.25], 0),
-                    ([2.0 / 3.0, 1.0 / 3.0, 0.75], 0),
-                ],
-                1.02,
-            ),
-            CanonicalNet3d::Tetragonal123 => (
-                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.15]],
-                vec![([0.0, 0.0, 0.0], 0), ([0.5, 0.5, 0.5], 1)],
-                0.96,
-            ),
-            CanonicalNet3d::Rutile136 => (
-                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.72]],
-                vec![
-                    ([0.0, 0.0, 0.0], 0),
-                    ([0.5, 0.5, 0.5], 0),
-                    ([0.3, 0.3, 0.0], 1),
-                    ([0.7, 0.7, 0.0], 1),
-                    ([0.8, 0.2, 0.5], 1),
-                    ([0.2, 0.8, 0.5], 1),
-                ],
-                0.48,
-            ),
-            CanonicalNet3d::Perovskite => (
-                sc,
-                vec![
-                    ([0.0, 0.0, 0.0], 0),
-                    ([0.5, 0.5, 0.5], 1),
-                    ([0.5, 0.0, 0.0], 2),
-                    ([0.0, 0.5, 0.0], 2),
-                    ([0.0, 0.0, 0.5], 2),
-                ],
-                0.55,
-            ),
-            CanonicalNet3d::Pyrochlore => (
-                sc,
-                vec![
-                    ([0.0, 0.0, 0.0], 0),
-                    ([0.25, 0.25, 0.0], 0),
-                    ([0.25, 0.0, 0.25], 0),
-                    ([0.0, 0.25, 0.25], 0),
-                    ([0.5, 0.5, 0.5], 1),
-                ],
-                0.42,
-            ),
-            CanonicalNet3d::BetaQuartz => (
-                hex,
-                vec![
-                    ([0.5, 0.0, 0.0], 0),
-                    ([0.0, 0.5, 1.0 / 3.0], 0),
-                    ([0.5, 0.5, 2.0 / 3.0], 0),
-                ],
-                0.72,
-            ),
-        };
+        let NetMotif { lattice: lat, sites: motif, bond_cutoff: cutoff } = net_motif(net);
         let c2 = cutoff * cutoff;
         let mut seen = BTreeSet::new();
         for (i, &(fi, _)) in motif.iter().enumerate() {
