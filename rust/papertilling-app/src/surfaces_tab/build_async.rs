@@ -40,7 +40,7 @@ pub(super) fn run_job(job: &SurfaceJob) -> Built {
         live_ops::build_surface_mesh(&job.item, job.target, &job.params)
     };
     built.map(|(mesh, rep)| {
-        let notes = BcNotes { picture_note: None, readout: bc::cone_note(&mesh, job.target).into_iter().collect() };
+        let notes = bc::notes_for_built(&mesh, job.target);
         (mesh, rep, notes)
     })
 }

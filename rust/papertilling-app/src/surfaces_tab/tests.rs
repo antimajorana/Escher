@@ -360,16 +360,16 @@ fn a_build_finishing_inside_a_newer_requests_debounce_is_never_shown() {
     st.target = SurfaceTargetUi::Torus;
     st.auto_size = false;
     st.params.h = 2;
-    st.params.k = 1;
+    st.params.k = 2;
     st.request_build(&kagome, &ctx);
     std::thread::sleep(super::build_async::DEBOUNCE + std::time::Duration::from_millis(10));
     assert!(!st.pump_build(&ctx, &mut cv, &mut view), "submitted, not finished yet");
     st.params.h = 3;
-    st.request_build(&kagome, &ctx); // queued behind the running 2 x 1 build
-    std::thread::sleep(std::time::Duration::from_millis(60)); // 2 x 1 torus is done, 3 x 1 still debouncing
+    st.request_build(&kagome, &ctx); // queued behind the running 2 x 2 build
+    std::thread::sleep(std::time::Duration::from_millis(60)); // 2 x 2 torus is done, 3 x 2 still debouncing
     assert!(!st.pump_build(&ctx, &mut cv, &mut view));
-    assert!(st.current_mesh.is_none(), "the superseded 2 x 1 torus is never applied");
+    assert!(st.current_mesh.is_none(), "the superseded 2 x 2 torus is never applied");
     assert!(st.wait_build(&ctx, &mut cv, &mut view));
-    // kagome 3 x 1 torus: 3 sites per cell x 3 cells
-    assert_eq!(st.current_mesh.as_ref().unwrap().sites.len(), 9);
+    // kagome 3 x 2 simple torus: 3 sites per cell x 6 cells = 18 sites (k=1 has multi-edges, refused by C1)
+    assert_eq!(st.current_mesh.as_ref().unwrap().sites.len(), 18);
 }

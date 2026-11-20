@@ -5,15 +5,19 @@
 //! `[h,0],[0,k]` torus, no fixed glide 0).
 
 use papertilling_core::plane::family::LatticeFamily;
+use papertilling_core::surface::report_bc::NOT_ISOMETRIC_NOTE;
 use papertilling_core::surface::{BoundaryCondition, build_boundary, check_surface, glide_search};
 use papertilling_core::types::{Cell2D, SurfaceCheckReport, SurfaceMesh};
 
 use crate::backend::{CatalogueItemUi, SurfaceTargetUi, VerdictKindUi};
 
-/// What a built boundary condition adds to the mesh: the 3D caption and the plain-words read-out.
+/// What a built boundary condition adds to the mesh: the exact-domain flag, the 3D caption and the plain-words read-out.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BcNotes {
-    /// Caption required on the 3D picture (`None` for the flat open patch and the isometric cylinder).
+    /// True when the 2D chart is the exact flat isometric domain (`true` for the six flat boundary conditions,
+    /// `false` for cone surfaces and when no surface is built).
+    pub exact_view: bool,
+    /// Caption required on the 3D picture (`None` for the flat open patch, the isometric cylinder and cone polyhedra).
     pub picture_note: Option<&'static str>,
     pub readout: Vec<String>,
 }
@@ -23,7 +27,7 @@ pub struct BcNotes {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BcControls {
     pub explicit: bool,
-    /// Growth layers of the open patch.
+    /// Growth layers of the open patch (0 = vertex-star seed S₀).
     pub layers: i32,
     /// Cylinder: circumference vector and rows, in cell vectors.
     pub wrap: [i32; 2],
@@ -80,7 +84,7 @@ impl BcControls {
         v(&mut self.wrap);
         v(&mut self.t1);
         v(&mut self.t2);
-        self.layers = self.layers.clamp(1, Self::MAX_LAYERS);
+        self.layers = self.layers.clamp(0, Self::MAX_LAYERS);
         self.rows = self.rows.clamp(1, 24);
         self.steps = self.steps.clamp(1, 25);
         self.width = self.width.clamp(1, 12);
@@ -91,7 +95,7 @@ impl BcControls {
     /// genus 2 and 3 use their own builders).
     pub fn boundary(&self, target: SurfaceTargetUi) -> Option<BoundaryCondition> {
         Some(match target {
-            SurfaceTargetUi::Open => BoundaryCondition::Open { layers: self.layers.clamp(1, Self::MAX_LAYERS) as usize },
+            SurfaceTargetUi::Open => BoundaryCondition::Open { layers: self.layers.clamp(0, Self::MAX_LAYERS) as usize },
             SurfaceTargetUi::Cylinder => BoundaryCondition::Cylinder { wrap: self.wrap, rows: self.rows },
             SurfaceTargetUi::Torus => BoundaryCondition::Torus { t1: self.t1, t2: self.t2 },
             SurfaceTargetUi::TorusHex => BoundaryCondition::TorusHex { t1: self.t1, t2: self.t2 },
@@ -127,8 +131,41 @@ pub fn plain_label(t: SurfaceTargetUi) -> &'static str {
         SurfaceTargetUi::KleinBottle => "Klein bottle",
         SurfaceTargetUi::Sphere => "Sphere (cone metric)",
         SurfaceTargetUi::ProjectivePlane => "Projective plane (cone metric)",
-        SurfaceTargetUi::Genus2 => "Genus 2 surface",
-        SurfaceTargetUi::Genus3 => "Genus 3 surface",
+        SurfaceTargetUi::Genus2 => "Genus 2 surface (cone metric)",
+        SurfaceTargetUi::Genus3 => "Genus 3 surface (cone metric)",
+    }
+}
+
+/// Caption required on the 3D picture of `target`: [`NOT_ISOMETRIC_NOTE`] on every torus, Möbius, Klein or
+/// higher-genus handlebody (`auto_size` and explicit options alike), `None` on isometric `Open | Cylinder` and
+/// polyhedral cone metrics.
+pub fn target_picture_note(target: SurfaceTargetUi) -> Option<&'static str> {
+    match target {
+        SurfaceTargetUi::Torus
+        | SurfaceTargetUi::TorusHex
+        | SurfaceTargetUi::MobiusBand
+        | SurfaceTargetUi::KleinBottle
+        | SurfaceTargetUi::Genus2
+        | SurfaceTargetUi::Genus3 => Some(NOT_ISOMETRIC_NOTE),
+        SurfaceTargetUi::Open
+        | SurfaceTargetUi::Cylinder
+        | SurfaceTargetUi::Sphere
+        | SurfaceTargetUi::ProjectivePlane => None,
+    }
+}
+
+/// Whether `target` is drawn on an exact flat 2D fundamental domain (`true` for the six flat boundary conditions,
+/// `false` for cone metrics).
+pub fn target_exact_view(target: SurfaceTargetUi) -> bool {
+    BC_TARGETS.contains(&target)
+}
+
+/// [`BcNotes`] for a surface built outside `build_boundary` (`auto_size` table sizes, cone polyhedra, genus covers).
+pub fn notes_for_built(mesh: &SurfaceMesh, target: SurfaceTargetUi) -> BcNotes {
+    BcNotes {
+        exact_view: target_exact_view(target),
+        picture_note: target_picture_note(target),
+        readout: cone_note(mesh, target).into_iter().collect(),
     }
 }
 
@@ -150,16 +187,23 @@ pub(crate) fn build_bc_on_cell(
     let bc = ctl.boundary(target).ok_or_else(|| format!("{} is not a boundary condition", target.label()))?;
     let built = build_boundary(cell, &bc).map_err(crate::live_ops::surface_error_message)?;
     let report = check_surface(&built.mesh);
-    let notes = BcNotes { picture_note: built.picture_note, readout: built.readout };
+    let notes = BcNotes {
+        exact_view: built.exact_view,
+        picture_note: built.picture_note,
+        readout: built.readout,
+    };
     Ok((built.mesh, report, notes))
 }
 
-/// Gauss-Bonnet read-out of a sphere or projective-plane cone metric: the disclination angles add up to
-/// `360° × χ` (+720° on the sphere, +360° on the projective plane). `None` for any other target.
+/// Gauss-Bonnet read-out of a sphere, projective-plane or higher-genus cone metric: the disclination / branch-cone
+/// angles add up to `360° × χ` (+720° on the sphere, +360° on the projective plane, −720° on genus 2, −1440° on
+/// genus 3). `None` for any flat boundary condition.
 pub fn cone_note(mesh: &SurfaceMesh, target: SurfaceTargetUi) -> Option<String> {
     let (expected, name) = match target {
         SurfaceTargetUi::Sphere => (720.0, "sphere"),
         SurfaceTargetUi::ProjectivePlane => (360.0, "projective plane"),
+        SurfaceTargetUi::Genus2 => (-720.0, "genus 2 surface"),
+        SurfaceTargetUi::Genus3 => (-1440.0, "genus 3 surface"),
         _ => return None,
     };
     let sum: f64 = mesh.cones.iter().map(|c| c.angle_deg).sum();
@@ -192,7 +236,7 @@ impl BcSummary {
     }
 }
 
-fn kind_of(msg: &str) -> VerdictKindUi {
+pub(crate) fn kind_of(msg: &str) -> VerdictKindUi {
     if msg.starts_with("IMPOSSIBLE") { VerdictKindUi::Impossible } else { VerdictKindUi::NotFound }
 }
 

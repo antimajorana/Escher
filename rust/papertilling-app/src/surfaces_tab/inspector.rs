@@ -54,8 +54,16 @@ impl SurfacesTabState {
             for line in &self.notes.readout {
                 ui.small(line);
             }
+            if self.notes.exact_view {
+                ui.small("Exact view: flat 2D fundamental domain with edge identifications");
+            }
             if let Some(note) = self.notes.picture_note {
-                ui.small(egui::RichText::new(format!("3D picture: {note} (the flat 2D net is the exact view)")).italics());
+                let msg = if self.notes.exact_view {
+                    format!("3D picture: {note} (the flat 2D net is the exact view)")
+                } else {
+                    format!("3D picture: {note}")
+                };
+                ui.small(egui::RichText::new(msg).italics());
             }
             ui.small(format!(
                 "loops:{}  double:{}  coord:{}  euler:{}  faces>=3:{}",

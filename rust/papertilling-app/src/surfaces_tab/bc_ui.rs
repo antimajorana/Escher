@@ -95,7 +95,7 @@ impl SurfacesTabState {
         let bc = &mut self.bc;
         match self.target {
             SurfaceTargetUi::Open => {
-                edited |= int(ui, "Layers:", &mut bc.layers, 1..=BcControls::MAX_LAYERS);
+                edited |= int(ui, "Layers:", &mut bc.layers, 0..=BcControls::MAX_LAYERS);
                 ui.small("Tiles grown around the most symmetric vertex; the edge stays open.");
             }
             SurfaceTargetUi::Cylinder => {

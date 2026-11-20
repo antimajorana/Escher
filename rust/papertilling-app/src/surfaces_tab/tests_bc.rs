@@ -221,11 +221,155 @@ fn options_map_from_h_k_again_once_explicit_is_cleared() {
     st.choose_target(SurfaceTargetUi::Torus);
     assert!(st.bc.explicit && !st.auto_size);
     // what `apply_surfaces` / a manual-size preset do: new (h, k) and the options map from them again
-    (st.params.h, st.params.k) = (2, 3);
+    // ({4,4} needs L >= 3 in each direction to avoid double edges; 3 x 4 = 12 cells, 1 site each)
+    (st.params.h, st.params.k) = (3, 4);
     st.bc.explicit = false;
     st.activate_and_sync(&sq, &backend, &mut canvas, &mut view);
-    assert_eq!(st.current_mesh.as_ref().unwrap().sites.len(), 6, "{{4,4}} torus (2,0),(0,3): 6 cells, 1 site each");
+    assert_eq!(st.current_mesh.as_ref().unwrap().sites.len(), 12, "{{4,4}} torus (3,0),(0,4): 12 cells, 1 site each");
     // the sphere goes back to the table sizes
     st.choose_target(SurfaceTargetUi::Sphere);
     assert!(st.auto_size);
+}
+
+#[test]
+fn auto_size_still_sets_not_isometric_picture_note_and_exact_view_flags() {
+    use papertilling_core::surface::report_bc::NOT_ISOMETRIC_NOTE;
+    let backend = AppBackend::new();
+    let sq = lattice(&backend, "square");
+    let (mut st, mut canvas, mut view) = (SurfacesTabState::new(), blank_canvas(), View3dState::default());
+    for (t, want_note, want_exact) in [
+        (SurfaceTargetUi::Open, None, true),
+        (SurfaceTargetUi::Cylinder, None, true),
+        (SurfaceTargetUi::Torus, Some(NOT_ISOMETRIC_NOTE), true),
+        (SurfaceTargetUi::TorusHex, Some(NOT_ISOMETRIC_NOTE), true),
+        (SurfaceTargetUi::MobiusBand, Some(NOT_ISOMETRIC_NOTE), true),
+        (SurfaceTargetUi::KleinBottle, Some(NOT_ISOMETRIC_NOTE), true),
+        (SurfaceTargetUi::Sphere, None, false),
+        (SurfaceTargetUi::ProjectivePlane, None, false),
+        (SurfaceTargetUi::Genus2, Some(NOT_ISOMETRIC_NOTE), false),
+        (SurfaceTargetUi::Genus3, Some(NOT_ISOMETRIC_NOTE), false),
+    ] {
+        st.target = t;
+        st.auto_size = true; // verdict-cell click, 17x8 matrix click, preset, smoke
+        st.activate_and_sync(&sq, &backend, &mut canvas, &mut view);
+        assert!(st.current_mesh.is_some(), "{t:?}: {:?}", st.refusal_msg);
+        assert_eq!(st.notes.picture_note, want_note, "{t:?} picture_note");
+        assert_eq!(st.notes.exact_view, want_exact, "{t:?} exact_view");
+        assert_eq!(view.caption().contains(NOT_ISOMETRIC_NOTE), want_note.is_some(), "{t:?} 3D caption");
+    }
+    // Gauss-Bonnet on genus >= 2 branched double covers: chi = 2 - 2g gives -720 deg (g=2) and -1440 deg (g=3)
+    for (t, expected, word) in [(SurfaceTargetUi::Genus2, -720.0, "-720"), (SurfaceTargetUi::Genus3, -1440.0, "-1440")] {
+        assert!(bc::plain_label(t).contains("(cone metric)"), "{t:?}: {}", bc::plain_label(t));
+        let (m, _) = build_surface_mesh_auto(&sq, t, CentreModeUi::Auto, 3).unwrap();
+        let sum: f64 = m.cones.iter().map(|c| c.angle_deg).sum();
+        assert!((sum - expected).abs() < 1e-6, "{t:?}: branch cones add up to {sum}");
+        let note = cone_note(&m, t).unwrap();
+        assert!(note.contains(word) && note.contains("Cone metric, not flat"), "{note}");
+    }
+}
+
+#[test]
+fn oblique_tuned_to_p4m_locus_allows_k_zero_on_sphere_via_size_controls_for() {
+    let backend = AppBackend::new();
+    let mut canvas = blank_canvas();
+    let oblique = lattice(&backend, "oblique");
+    // Off-locus p2 has max rotation order 2 -> pillow requires k >= 1.
+    assert_eq!(*size_controls_for(SurfaceTargetUi::Sphere, &oblique).k_range.start(), 1);
+
+    // Tuned to b = 1, gamma = 90 deg, the realized cell is p4m (order 4) while item.group stays "p2".
+    let mut gallery = crate::gallery_tab::GalleryTabState::new(&backend, &mut canvas);
+    let idx = backend.named_lattices().iter().position(|it| it.named_key.as_deref() == Some("oblique")).unwrap();
+    gallery.select_named(idx, &backend, &mut canvas);
+    gallery.set_param("b", 1.0, &mut canvas).unwrap();
+    gallery.set_param("gamma", 90.0, &mut canvas).unwrap();
+    let tuned = gallery.active_item().clone();
+    assert_eq!(tuned.group, "p2");
+    assert_eq!(*size_controls_for(SurfaceTargetUi::Sphere, &tuned).k_range.start(), 0);
+
+    // Cube sphere (h, k) = (2, 0) with face-centre corners: 6 faces x 4 sites = 24 V, 4*24/2 = 48 E, 2+48-24 = 26 F.
+    let (mut st, mut view) = (SurfacesTabState::new(), View3dState::default());
+    st.target = SurfaceTargetUi::Sphere;
+    st.auto_size = false;
+    (st.params.h, st.params.k) = (2, 0);
+    st.activate_and_sync(&tuned, &backend, &mut canvas, &mut view);
+    assert_eq!((st.params.h, st.params.k), (2, 0), "(2, 0) must not clamp to (2, 1)");
+    let m = st.current_mesh.as_ref().expect("sphere (2, 0) on tuned p4m locus");
+    assert_eq!((m.sites.len(), m.bonds.len(), m.faces.len(), m.cones.len()), (24, 48, 26, 8));
+}
+
+#[test]
+fn open_patch_at_layer_zero_gives_three_hexagon_vertex_star_on_honeycomb() {
+    // Hand count of S_0 (vertex star of {6,3}): 3 hexagons sharing 1 central degree-3 vertex and 3 spokes ->
+    // V = 1 + 3 + 9 = 13, E = 3 + 12 = 15, F = 3, chi = 1.
+    let backend = AppBackend::new();
+    let hc = lattice(&backend, "honeycomb");
+    let (mut st, mut canvas, mut view) = (SurfacesTabState::new(), blank_canvas(), View3dState::default());
+    st.bc.layers = 0;
+    st.bc.explicit = true;
+    st.clamp_params(&hc);
+    assert_eq!(st.bc.layers, 0, "layer 0 (S_0) must not clamp up to 1");
+    st.activate_and_sync(&hc, &backend, &mut canvas, &mut view);
+    let m = st.current_mesh.as_ref().expect("honeycomb S_0 built");
+    assert_eq!((m.sites.len(), m.bonds.len(), m.faces.len()), (13, 15, 3));
+    assert!(st.current_report.as_ref().unwrap().ok && euler(m) == 1 && !m.closed);
+}
+
+#[test]
+fn non_simple_quotient_returns_not_found_too_small_never_impossible() {
+    // {4,4} cylinder: wrap [1, 0] closes a1 into a self-loop; wrap [2, 0] maps +a1 and -a1 to a double bond.
+    let backend = AppBackend::new();
+    let sq = lattice(&backend, "square");
+    for wrap in [[1, 0], [2, 0]] {
+        let ctl = BcControls { explicit: true, wrap, ..BcControls::default() };
+        let err = build_bc(&sq, SurfaceTargetUi::Cylinder, &ctl).unwrap_err();
+        assert!(err.starts_with("NOT FOUND (too small)"), "{wrap:?}: {err}");
+        assert!(!err.contains("IMPOSSIBLE"), "{wrap:?}: {err}");
+        assert_eq!(bc::kind_of(&err), VerdictKindUi::NotFound, "{wrap:?}: {err}");
+    }
+    let (mut st, mut canvas, mut view) = (SurfacesTabState::new(), blank_canvas(), View3dState::default());
+    st.choose_target(SurfaceTargetUi::Cylinder);
+    st.bc.wrap = [1, 0];
+    st.activate_and_sync(&sq, &backend, &mut canvas, &mut view);
+    let msg = st.refusal_msg.as_deref().expect("refusal message");
+    assert!(msg.starts_with("NOT FOUND (too small)") && !msg.contains("IMPOSSIBLE"), "{msg}");
+    assert_eq!(bc::kind_of(msg), VerdictKindUi::NotFound);
+    assert!(st.current_mesh.is_none());
+}
+
+#[test]
+fn deck_open_and_torus_hex_stat_cards_and_viewport_headers_reflect_bc_verdicts_and_exact_view() {
+    use egui_kittest::kittest::Queryable;
+    use crate::analysis_mode::tests::harness;
+    use crate::game_menu::test_util::{equip_state, open_deck};
+    use crate::game_menu::{CardId, Realm};
+
+    let mut h = harness();
+    h.run_steps(2);
+    let cards = h.state_mut().deck_cards(Realm::Manifolds, 0, "");
+    open_deck(&mut h);
+    h.state_mut().deck_select_realm(Realm::Manifolds);
+    for t in [SurfaceTargetUi::Open, SurfaceTargetUi::TorusHex] {
+        let idx = cards.iter().position(|c| c.id == CardId::Surface(t)).unwrap_or_else(|| panic!("missing {t:?} card"));
+        assert_eq!(cards[idx].badge.map(|b| b.label()), Some("[PROVED OK]"), "{t:?}");
+        assert!(cards[idx].subtitle.starts_with("OK"), "{t:?}: {}", cards[idx].subtitle);
+        h.state_mut().deck.cursor[Realm::Manifolds.number() - 1] = idx;
+        h.run_steps(2);
+        assert!(h.query_all_by_label_contains("Status: [PROVED OK] explicit cell built").next().is_some(), "{t:?} stat card");
+        assert!(h.query_all_by_label_contains("No verdict for this lattice.").next().is_none(), "{t:?} stat card");
+    }
+
+    // Equip Open: exact 2D domain header + inspector line, no non-isometric 3D suffix.
+    equip_state(&mut h, CardId::Surface(SurfaceTargetUi::Open));
+    assert!(h.query_all_by_label_contains("(exact isometric domain)").next().is_some());
+    assert!(h.query_all_by_label_contains("Exact view: flat 2D fundamental domain with edge identifications").next().is_some());
+    assert!(h.query_all_by_label_contains("— topological picture, not isometric").next().is_none());
+
+    // Equip Torus: exact 2D domain header + non-isometric 3D suffix; Sphere: neither flat-domain nor non-isometric header.
+    equip_state(&mut h, CardId::Surface(SurfaceTargetUi::Torus));
+    assert!(h.query_all_by_label_contains("(exact isometric domain)").next().is_some());
+    assert!(h.query_all_by_label_contains("— topological picture, not isometric").next().is_some());
+    equip_state(&mut h, CardId::Surface(SurfaceTargetUi::Sphere));
+    assert!(h.query_all_by_label_contains("(exact isometric domain)").next().is_none());
+    assert!(h.query_all_by_label_contains("Exact view: flat 2D fundamental domain with edge identifications").next().is_none());
+    assert!(h.query_all_by_label_contains("— topological picture, not isometric").next().is_none());
 }

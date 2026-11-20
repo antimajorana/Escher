@@ -1,7 +1,6 @@
 use egui_extras::{Column, TableBuilder};
-use papertilling_core::surface::symmetry_facts;
 
-use super::{SurfacesTabState, size_controls, verdict_colour};
+use super::{SurfacesTabState, size_controls_for, verdict_colour};
 use crate::backend::{
     AppBackend, CatalogueItemUi, CentreModeUi, SurfaceCellVerdictUi, SurfaceTargetUi,
 };
@@ -157,7 +156,7 @@ impl SurfacesTabState {
                 dirty |= ui.radio_value(&mut self.auto_size, true, "as in the table").changed();
                 dirty |= ui.radio_value(&mut self.auto_size, false, "custom (h, k)").changed();
             });
-            let sc = size_controls(self.target, symmetry_facts(&item.group).max_rotation_order());
+            let sc = size_controls_for(self.target, item);
             ui.add_enabled_ui(!self.auto_size, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(format!("h: {}", sc.h_label));

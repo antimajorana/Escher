@@ -113,7 +113,10 @@ pub(crate) fn surface_error_message(e: SurfaceError) -> String {
             Some(sc) => format!("IMPOSSIBLE ({sc}): {e}"),
             None => format!("IMPOSSIBLE: {e}"),
         },
-        RefusalKind::NotFound { .. } => format!("NOT FOUND: {e}"),
+        RefusalKind::NotFound { .. } => {
+            let s = e.to_string();
+            if s.starts_with("NOT FOUND") { s } else { format!("NOT FOUND: {s}") }
+        }
         RefusalKind::InvalidArg => format!("invalid size: {e}"),
     }
 }

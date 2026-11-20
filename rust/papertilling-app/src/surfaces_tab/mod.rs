@@ -1,6 +1,7 @@
 use std::ops::RangeInclusive;
 
-use papertilling_core::surface::symmetry_facts;
+use papertilling_core::plane::family::LatticeFamily;
+use papertilling_core::surface::{symmetry_facts, symmetry_facts_of_cell};
 use papertilling_core::types::{Frame2D, Recipe, SurfaceCheckReport, SurfaceMesh};
 
 #[cfg(test)]
@@ -52,6 +53,16 @@ pub fn size_controls(target: SurfaceTargetUi, max_rot: u32) -> SizeControls {
         // C1: the open patch and the hexagonal torus are sized by the boundary options (`bc`), not by (h, k)
         SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => c("size h", "size k", 1..=12, 1..=12),
     }
+}
+
+/// Size controls of `target` for `item`'s realized cell (`symmetry_facts_of_cell`, falling back to `&item.group`
+/// only when `item.recipe` cannot build a cell).
+pub fn size_controls_for(target: SurfaceTargetUi, item: &CatalogueItemUi) -> SizeControls {
+    let max_rot = match LatticeFamily::from_recipe(&item.recipe, Some(item.frame)) {
+        Ok(fam) => symmetry_facts_of_cell(&item.group, &fam.cell()).max_rotation_order(),
+        Err(_) => symmetry_facts(&item.group).max_rotation_order(),
+    };
+    size_controls(target, max_rot)
 }
 
 /// An empty net: shown when the surface is refused, so the canvas never keeps the previous surface's net.
@@ -209,7 +220,7 @@ impl SurfacesTabState {
 
     /// Clamp `(h, k)` into the values the controls offer for the current target and lattice.
     pub fn clamp_params(&mut self, item: &CatalogueItemUi) {
-        let sc = size_controls(self.target, symmetry_facts(&item.group).max_rotation_order());
+        let sc = size_controls_for(self.target, item);
         self.params.h = self.params.h.clamp(*sc.h_range.start(), *sc.h_range.end());
         self.params.k = self.params.k.clamp(*sc.k_range.start(), *sc.k_range.end());
         self.bc.clamp();

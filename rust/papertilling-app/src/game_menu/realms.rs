@@ -182,16 +182,19 @@ impl PapertillingApp {
         (same && counts.iter().sum::<usize>() > 0).then_some(counts)
     }
 
-    /// Fill in subtitles (§1.1) and surface badges (§1.2). Badges come only from `lattice_verdicts` of the
-    /// selected lattice (synchronous and cached); when it has none, the surface cards carry no badge.
+    /// Fill in subtitles (§1.1) and surface badges (§1.2). Badges come from `lattice_verdicts` of the selected
+    /// lattice (8-column table) and `bc_summary` for `Open` / `TorusHex` (synchronous and cached).
     fn decorate_cards(&mut self, cards: &mut [Card]) {
-        let verdicts: Option<Vec<(Badge, String)>> = if cards.iter().any(|c| matches!(c.id, CardId::Surface(_))) {
+        let (verdicts, bc_summary) = if cards.iter().any(|c| matches!(c.id, CardId::Surface(_))) {
             let item = self.gallery.active_item().clone();
-            self.surfaces
+            let v8: Option<Vec<(Badge, String)>> = self
+                .surfaces
                 .lattice_verdicts(&item)
-                .map(|cells| cells.iter().map(|c| (Badge::from_verdict(c.verdict), c.scoped_badge())).collect())
+                .map(|cells| cells.iter().map(|c| (Badge::from_verdict(c.verdict), c.scoped_badge())).collect());
+            let bc = self.surfaces.bc_summary(&item).cloned();
+            (v8, bc)
         } else {
-            None
+            (None, None)
         };
         let counts = self.catalogue_counts();
         for card in cards.iter_mut() {
@@ -208,9 +211,15 @@ impl PapertillingApp {
                 },
                 CardId::Surface(t) => {
                     let k = SurfaceTargetUi::ALL.iter().position(|&x| x == t);
-                    let cell = verdicts.as_ref().zip(k).and_then(|(v, k)| v.get(k));
-                    card.badge = cell.map(|(b, _)| *b);
-                    cell.map_or_else(|| surface_card_subtitle(t).to_owned(), |(_, text)| text.clone())
+                    if let Some((b, text)) = verdicts.as_ref().zip(k).and_then(|(v, k)| v.get(k)) {
+                        card.badge = Some(*b);
+                        text.clone()
+                    } else if let Some(bv) = bc_summary.as_ref().and_then(|s| s.verdict(t)) {
+                        card.badge = Some(Badge::from_verdict(bv.kind));
+                        format!("{} · {}", bv.kind.badge(), surface_card_subtitle(t))
+                    } else {
+                        surface_card_subtitle(t).to_owned()
+                    }
                 }
                 CardId::Wb(v, _) => v.heading().to_owned(),
                 CardId::Lattice(r) => self.lattice_ref_item(r).map(lattice_subtitle).unwrap_or_default(),
