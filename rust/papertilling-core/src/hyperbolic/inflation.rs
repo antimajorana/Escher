@@ -307,7 +307,7 @@ pub struct VcPatch {
     pub faces: Vec<Mat3>,
     /// Shell index of each face (0 = seed).
     pub shell: Vec<usize>,
-    /// `a_n = |S_n| - |S_{n-1}|`, `a_0 = 1`; only fully built shells.
+    /// `a_n = |S_n| - |S_{n-1}|`, `a_0` = the seed size (1 for one tile); only fully built shells.
     pub shell_sizes: Vec<usize>,
     /// Measured dedup gap for face centres: largest merged / smallest kept-distinct distance.
     pub max_merged_centre: f64,
@@ -331,7 +331,7 @@ impl VcPatch {
     }
 }
 
-/// Grow `S_0 .. S_{n_max}` from one `p`-gon. Before each shell, growth stops if the cumulative count
+/// Grow `S_0 .. S_{n_max}` from one `p`-gon (other seeds: [`super::inflation_seeds`]). Before each shell, growth stops if the cumulative count
 /// plus an estimate of the next shell (`p (q - 2)` for shell 1, else `2 gamma a_n`) exceeds
 /// `face_budget`, or if a face centre passes the f64 precision limit, or if the centre or vertex
 /// dedup becomes ambiguous ([`HypPointSet::suspect`]; the vertices of every built face, the last
@@ -341,73 +341,7 @@ impl VcPatch {
 /// spacelike (module doc, "Precision"). The last shell's vertices are never expanded, so they enter
 /// the counts only by possibly triggering a stop; the counts are backed by the cross-checks there.
 pub fn grow_vertex_completion(p: usize, q: usize, n_max: usize, face_budget: usize) -> Result<VcPatch, String> {
-    let base = BaseFace::new(p, q)?;
-    let mut centres = HypPointSet::new(2.0 * base.inradius);
-    let mut verts = HypPointSet::new(base.edge_length());
-    // Vertex indices of every face (`p` per face, in `verts`), and `completed[v]`: vertex v's star
-    // has been added (v is a vertex of an expanded face).
-    let (mut face_verts, mut completed): (Vec<u32>, Vec<bool>) = (Vec::new(), Vec::new());
-    let add_vertices = |verts: &mut HypPointSet, face_verts: &mut Vec<u32>, completed: &mut Vec<bool>, g: &Mat3| {
-        for &v in &base.vertices {
-            let (vi, new) = verts.insert(mat_vec(g, v));
-            if new {
-                completed.push(false);
-            }
-            face_verts.push(vi as u32);
-        }
-    };
-    centres.insert([0.0, 0.0, 1.0]);
-    add_vertices(&mut verts, &mut face_verts, &mut completed, &IDENTITY);
-    let (mut faces, mut shell, mut shell_sizes, mut stopped) = (vec![IDENTITY], vec![0_usize], vec![1_usize], None);
-    let two_gamma = 2.0 * gamma_pq(p, q);
-    let star_centres: Vec<Vec<Vec3>> =
-        base.star.iter().map(|ring| ring.iter().map(|w| [w[0][2], w[1][2], w[2][2]]).collect()).collect();
-    for n in 0..n_max {
-        let a_n = shell_sizes[n];
-        let estimate = if n == 0 { p * (q - 2) } else { (two_gamma * a_n as f64).ceil() as usize };
-        if faces.len() + estimate > face_budget {
-            stopped = Some(format!("face budget {face_budget}: shell {} (~{estimate} faces) not built", n + 1));
-            break;
-        }
-        let (start, end) = (faces.len() - a_n, faces.len());
-        let mut precision_hit = None;
-        'shell: for fi in start..end {
-            let g = faces[fi];
-            for j in 0..p {
-                let vi = face_verts[fi * p + j] as usize;
-                if completed[vi] {
-                    continue; // vertex already completed (it belongs to an earlier expanded face)
-                }
-                completed[vi] = true;
-                for (m, &c0) in star_centres[j].iter().enumerate() {
-                    let c = mat_vec(&g, c0);
-                    // Written so that a NaN coordinate also stops.
-                    if !c.iter().all(|x| x.is_finite()) || c[2] > T_PRECISION_LIMIT {
-                        precision_hit = Some("f64 precision limit");
-                        break 'shell;
-                    }
-                    if centres.insert(c).1 {
-                        let h = mat_mul(&g, &base.star[j][m]);
-                        add_vertices(&mut verts, &mut face_verts, &mut completed, &h);
-                        faces.push(h);
-                        shell.push(n + 1);
-                    }
-                }
-            }
-        }
-        if precision_hit.is_none() && centres.suspect + verts.suspect > 0 {
-            precision_hit = Some("f64 precision: ambiguous dedup (a distance within [sep/4, 3 sep/4])");
-        }
-        if let Some(why) = precision_hit {
-            faces.truncate(end);
-            shell.truncate(end);
-            stopped = Some(format!("{why}: shell {} not built", n + 1));
-            break;
-        }
-        shell_sizes.push(faces.len() - end);
-    }
-    let (max_merged_centre, min_distinct_centre) = (centres.max_merged, centres.min_distinct);
-    Ok(VcPatch { base, faces, shell, shell_sizes, max_merged_centre, min_distinct_centre, stopped })
+    super::inflation_seeds::grow_vertex_completion_seeded(p, q, crate::growth::SeedKind::Cell, n_max, face_budget)
 }
 
 /// One row of the shell table.

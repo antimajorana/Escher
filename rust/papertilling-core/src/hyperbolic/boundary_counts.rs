@@ -29,29 +29,88 @@
 //! These conditions hold for every hyperbolic pair at every step: for `q > 3, p >= 4` the letters
 //! after step 1 are 1 and 2, so `o >= q - 2 >= 2`; for `p = 3` (then `q >= 7`) they are 2 and 3, so
 //! `o >= q - 3 >= 4`; for `q = 3` (then `p >= 7`) `c >= p - 3 >= 4`. The seed (all letters 1) meets
-//! them too. So the letter counter returns `None` only on `u64` overflow (or for non-hyperbolic pairs);
+//! them too, and so do the vertex and edge seeds of [`seed_letters`] (C1 WP-G3): their letters are 1 and 2, so
+//! `o >= q - 2`, which is `>= 2` for `q > 3` and `>= 5` for `p = 3` (`q >= 7`); for `q = 3` their letters 2 are
+//! separated by `p - 3 >= 4` (vertex) or `p - 2` (edge) letters 1, so no two are adjacent. So the letter counter returns `None` only on `u64` overflow (or for non-hyperbolic pairs);
 //! a failed condition also returns `None` (never a wrong count).
 
 use super::inflation::is_hyperbolic;
+use crate::growth::SeedKind;
 
 /// Exact integer shell sizes `[a_0, .., a_{n_max}]` (`a_0 = 1`) of vertex completion from one
 /// `p`-gon, from boundary letter counts (module doc). `None` for a non-hyperbolic pair, on `u64`
 /// overflow, or if a step leaves the convex regime of the derivation (which does not happen for
 /// hyperbolic pairs; see the module doc).
 pub fn vertex_completion_counts_combinatorial(p: usize, q: usize, n_max: usize) -> Option<Vec<u64>> {
+    vertex_completion_counts_seeded(p, q, SeedKind::Cell, n_max)
+}
+
+/// Boundary letters of the seed set `S_0` (C1 WP-G3): `(a_0, cnt)` with `cnt[k]` = number of boundary vertices
+/// lying in exactly `k` seed tiles. Hand derivation: one `p`-gon has `p` letters 1. The `q` tiles at a vertex `v`
+/// meet pairwise along the `q` edges at `v`; each tile has `v` (interior), two vertices shared with its neighbours
+/// (letter 2) and `p - 3` private vertices (letter 1): `q` letters 2 and `q (p - 3)` letters 1. Two tiles on an
+/// edge `uw`: `u` and `w` are letters 2 and each tile has `p - 2` private vertices: 2 letters 2, `2 (p - 2)`
+/// letters 1. `None` for the Dirichlet seed (E² only) or `p < 3`, `q < 3`.
+pub fn seed_letters(p: usize, q: usize, seed: SeedKind) -> Option<(u64, Vec<u64>)> {
+    if p < 3 || q < 3 {
+        return None;
+    }
+    let mut cnt = vec![0_u64; q + 2];
+    let a0 = match seed {
+        SeedKind::Cell | SeedKind::Face => {
+            cnt[1] = p as u64;
+            1
+        }
+        SeedKind::Vertex => {
+            cnt[2] = q as u64;
+            cnt[1] = (q * (p - 3)) as u64;
+            q as u64
+        }
+        SeedKind::Edge => {
+            cnt[2] = 2;
+            cnt[1] = 2 * (p - 2) as u64;
+            2
+        }
+        SeedKind::Dirichlet => return None,
+    };
+    Some((a0, cnt))
+}
+
+/// [`vertex_completion_counts_combinatorial`] from any seed of [`seed_letters`]: `[a_0, .., a_{n_max}]` with `a_0`
+/// the seed size. `None` for a non-hyperbolic pair, the Dirichlet seed, or on `u64` overflow.
+pub fn vertex_completion_counts_seeded(p: usize, q: usize, seed: SeedKind, n_max: usize) -> Option<Vec<u64>> {
     if !is_hyperbolic(p, q) {
         return None;
     }
-    // cnt[k] = number of boundary vertices lying in exactly k patch faces.
-    let mut cnt = vec![0_u64; q + 2];
-    cnt[1] = p as u64;
-    let mut out = vec![1_u64];
+    let (a0, cnt) = seed_letters(p, q, seed)?;
+    letter_counts_from(p, q, a0, cnt, n_max)
+}
+
+/// The letter recursion from explicit initial letters, without the hyperbolic gate. It is exact wherever the
+/// convexity conditions of the module doc hold at every step (it returns `None` when they fail); the tests use it
+/// on the Euclidean {4,4}, {3,6} and {6,3}, where the shell sizes are known in closed form.
+pub fn letter_counts_from(p: usize, q: usize, a0: u64, cnt: Vec<u64>, n_max: usize) -> Option<Vec<u64>> {
+    let (out, complete) = letter_counts_prefix(p, q, a0, cnt, n_max)?;
+    complete.then_some(out)
+}
+
+/// The shells of [`letter_counts_from`] up to the first step that fails (`u64` overflow or a failed condition):
+/// `(shells, complete)`, `complete` meaning all `n_max` steps were computed. `None` for `p < 3` or `q < 3`.
+/// The grower uses the prefix as its budget estimate, so a deep request that overflows far beyond any budget does
+/// not lose the exact estimates of the first layers.
+pub fn letter_counts_prefix(p: usize, q: usize, a0: u64, mut cnt: Vec<u64>, n_max: usize) -> Option<(Vec<u64>, bool)> {
+    if p < 3 || q < 3 {
+        return None;
+    }
+    cnt.resize(cnt.len().max(q + 2), 0);
+    let mut out = vec![a0];
     for _ in 0..n_max {
-        let (faces, next) = if q == 3 { step_q3(p, &cnt)? } else { step_q_gt3(p, q, &cnt)? };
+        let step = if q == 3 { step_q3(p, &cnt) } else { step_q_gt3(p, q, &cnt) };
+        let Some((faces, next)) = step else { return Some((out, false)) };
         out.push(faces);
         cnt = next;
     }
-    Some(out)
+    Some((out, true))
 }
 
 /// `a + b * c` with overflow check.
@@ -107,8 +166,29 @@ pub fn vertex_completion_counts_boundary_word(p: usize, q: usize, n_max: usize) 
     if !is_hyperbolic(p, q) {
         return None;
     }
-    let mut boundary: Vec<usize> = vec![1; p];
-    let mut out = vec![1_u64];
+    boundary_word_counts_from(p, q, 1, vec![1; p], n_max)
+}
+
+/// The cyclic boundary word of a seed (letters in boundary order; see [`seed_letters`] for the derivation).
+pub fn seed_word(p: usize, q: usize, seed: SeedKind) -> Option<(u64, Vec<usize>)> {
+    if p < 3 || q < 3 {
+        return None;
+    }
+    let block = |k: usize| std::iter::once(2).chain(std::iter::repeat_n(1, k));
+    match seed {
+        SeedKind::Cell | SeedKind::Face => Some((1, vec![1; p])),
+        SeedKind::Vertex => Some((q as u64, (0..q).flat_map(|_| block(p - 3)).collect())),
+        SeedKind::Edge => Some((2, (0..2).flat_map(|_| block(p - 2)).collect())),
+        SeedKind::Dirichlet => None,
+    }
+}
+
+/// [`vertex_completion_counts_boundary_word`] from an explicit initial word, without the hyperbolic gate.
+pub fn boundary_word_counts_from(p: usize, q: usize, a0: u64, mut boundary: Vec<usize>, n_max: usize) -> Option<Vec<u64>> {
+    if p < 3 || q < 3 || boundary.is_empty() {
+        return None;
+    }
+    let mut out = vec![a0];
     for _ in 0..n_max {
         let l = boundary.len();
         let o: Vec<usize> = boundary.iter().map(|&k| q.checked_sub(k).filter(|&x| x >= 1)).collect::<Option<_>>()?;

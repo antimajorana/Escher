@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 
-use super::{FaceId, Off, PlaneTiling, VertexId};
+use super::{FaceId, InflationSeed, Off, PlaneTiling, VertexId, add};
 use crate::types::FracOp2D;
 
 const SITE_TOL: f64 = 1e-5;
@@ -83,5 +83,40 @@ impl PlaneTiling {
     /// Number of coset representatives of the symmetry group modulo translations held by the tiling.
     pub fn symmetry_op_count(&self) -> usize {
         self.ops.len()
+    }
+
+    /// The most symmetric vertex orbit (plan Q3, the default seed): the basis site with the largest site-symmetry
+    /// order ([`PlaneTiling::site_symmetry_order`], symmetries modulo translations fixing the site modulo the
+    /// lattice), lowest site index on ties. Returns `(site, order)`.
+    pub fn most_symmetric_vertex(&self) -> (usize, usize) {
+        let mut best = (0, 0);
+        for (s, &p) in self.basis.iter().enumerate() {
+            let order = self.site_symmetry_order(p);
+            if order > best.1 {
+                best = (s, order);
+            }
+        }
+        best
+    }
+
+    /// The default seed of the touching rule (D19, Q3): the vertex star of [`PlaneTiling::most_symmetric_vertex`].
+    pub fn default_seed(&self) -> InflationSeed {
+        InflationSeed::VertexStar(self.most_symmetric_vertex().0)
+    }
+
+    /// The faces on the bond `u`-`w`: the face left of the dart `u -> w` and the face left of `w -> u` (one face
+    /// when both are the same, as on a dangling bond). Errs unless exactly one bond joins `u` and `w`.
+    pub(super) fn edge_faces(&self, u: VertexId, w: VertexId) -> Result<HashSet<FaceId>, String> {
+        let side = |a: VertexId, b: VertexId| -> Result<FaceId, String> {
+            let rot = self.rotation.get(a.0).ok_or_else(|| format!("site {} out of range ({} sites)", a.0, self.rotation.len()))?;
+            let hits: Vec<FaceId> =
+                rot.iter().filter(|c| (c.to_site, add(a.1, c.to_off)) == b).map(|c| (c.orbit, add(a.1, c.shift))).collect();
+            match hits.as_slice() {
+                [f] => Ok(*f),
+                [] => Err(format!("edge seed: vertices {u:?} and {w:?} are not joined by a bond")),
+                _ => Err(format!("edge seed: {} bonds join {u:?} and {w:?}; the edge is ambiguous", hits.len())),
+            }
+        };
+        Ok(HashSet::from([side(u, w)?, side(w, u)?]))
     }
 }

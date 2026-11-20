@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 
 use crate::dsymbol::GeometryKind;
 
-use super::unified_pq::UnifiedPqTiling;
+use super::unified_pq::{PqGrowth, UnifiedPqTiling};
 
 pub(crate) fn norm3(v: [f64; 3]) -> [f64; 3] {
     let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-15);
@@ -102,6 +102,7 @@ pub(crate) fn build_spherical_pq(
         edge_arcs_3d,
         faces,
         provenance: "[PROVED]".to_string(),
+        growth: PqGrowth::default(),
     })
 }
 
@@ -148,6 +149,7 @@ fn build_hosohedron(q: usize, layers: usize, delta: i64, kappa: f64) -> Result<U
         edge_arcs_3d,
         faces,
         provenance: "[PROVED]".to_string(),
+        growth: PqGrowth::default(),
     })
 }
 
@@ -199,6 +201,7 @@ fn build_dihedron(p: usize, layers: usize, delta: i64, kappa: f64) -> Result<Uni
         edge_arcs_3d,
         faces,
         provenance: "[PROVED]".to_string(),
+        growth: PqGrowth::default(),
     })
 }
 

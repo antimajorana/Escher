@@ -188,63 +188,11 @@ class VcPatch:
 
 
 def grow_vertex_completion(p: int, q: int, n_max: int, face_budget: int) -> VcPatch:
-    """Grow S_0 .. S_{n_max} from one p-gon, with the Rust engine's budget and precision stops."""
-    base = BaseFace(p, q)
-    centres = HypPointSet(2.0 * base.inradius)
-    verts = HypPointSet(base.edge_length())
-    face_verts: list[int] = []
-    completed: list[bool] = []
+    """Grow S_0 .. S_{n_max} from one p-gon, with the Rust engine's budget and precision stops
+    (other seeds: `_hyperbolic_seeds.grow_vertex_completion_seeded`)."""
+    from ._hyperbolic_seeds import grow_vertex_completion_seeded
 
-    def add_vertices(g):
-        for v in base.vertices:
-            vi, new = verts.insert(mat_vec(g, v))
-            if new:
-                completed.append(False)
-            face_verts.append(vi)
-
-    centres.insert(_ORIGIN)
-    add_vertices(_IDENTITY)
-    faces, shell, shell_sizes, stopped = [_IDENTITY], [0], [1], None
-    two_gamma = 2.0 * gamma_pq(p, q)
-    star_centres = [[(w[0][2], w[1][2], w[2][2]) for w in ring] for ring in base.star]
-    for n in range(n_max):
-        a_n = shell_sizes[n]
-        estimate = p * (q - 2) if n == 0 else math.ceil(two_gamma * a_n)
-        if len(faces) + estimate > face_budget:
-            stopped = f"face budget {face_budget}: shell {n + 1} (~{estimate} faces) not built"
-            break
-        start, end = len(faces) - a_n, len(faces)
-        precision_hit = None
-        for fi in range(start, end):
-            g = faces[fi]
-            for j in range(p):
-                vi = face_verts[fi * p + j]
-                if completed[vi]:
-                    continue
-                completed[vi] = True
-                for m, c0 in enumerate(star_centres[j]):
-                    c = mat_vec(g, c0)
-                    if not all(math.isfinite(x) for x in c) or c[2] > T_PRECISION_LIMIT:
-                        precision_hit = "f64 precision limit"
-                        break
-                    if centres.insert(c)[1]:
-                        h = mat_mul(g, base.star[j][m])
-                        add_vertices(h)
-                        faces.append(h)
-                        shell.append(n + 1)
-                if precision_hit:
-                    break
-            if precision_hit:
-                break
-        if precision_hit is None and centres.suspect + verts.suspect > 0:
-            precision_hit = "f64 precision: ambiguous dedup (a distance within [sep/4, 3 sep/4])"
-        if precision_hit is not None:
-            del faces[end:]
-            del shell[end:]
-            stopped = f"{precision_hit}: shell {n + 1} not built"
-            break
-        shell_sizes.append(len(faces) - end)
-    return VcPatch(base, faces, shell, shell_sizes, stopped)
+    return grow_vertex_completion_seeded(p, q, "cell", n_max, face_budget)
 
 
 # Wedge-disclination patch (wedge_delta != 0): port of rust/papertilling-core/src/hyperbolic/wedge.rs.

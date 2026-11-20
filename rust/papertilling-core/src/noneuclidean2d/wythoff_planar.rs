@@ -316,6 +316,7 @@ pub(super) fn assemble_wythoff_result(
         n_faces: n_f,
         euler_chi: n_v as i64 - n_e as i64 + n_f as i64,
         face_type_counts,
+        stopped: None,
         coords_3d,
         coords_2d,
         edges,

@@ -15,6 +15,8 @@ mod inflation_cluster_tests;
 #[cfg(test)]
 mod inflation_dirichlet_tests;
 #[cfg(test)]
+mod inflation_seed_tests;
+#[cfg(test)]
 mod inflation_tests;
 pub mod live_search;
 pub mod loci;

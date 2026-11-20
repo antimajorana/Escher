@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from . import _hyperbolic_seeds as seeds
 from . import hyperbolic as hyp_py
 from ._noneuclid_common import _dihedral_canon, _norm3, _rs_fn, _stereo_safe
 from ._noneuclid_models import poincare_to_hyperboloid
@@ -34,8 +35,17 @@ def _slerp(a, b, segs=12):
     return [_norm3(math.sin((1 - k / segs) * om) / so * np.array(a) + math.sin((k / segs) * om) / so * np.array(b)) for k in range(segs + 1)]
 
 
+# Mirrored from noneuclidean2d/unified_pq.rs: E2_MAX_LAYERS (0-based layers) and the empty growth readout.
+E2_MAX_LAYERS = 40
+WYTHOFF_TILE_BUDGET = 600
+
+
+def _no_growth() -> dict[str, Any]:
+    return {"seed": None, "face_layer": [], "layer_counts": [], "layer_euler": [], "stopped": None}
+
+
 def _build_e2_pq(p: int, q: int, layers: int, kappa: float) -> dict[str, Any]:
-    lay = max(1, min(6, int(layers)))
+    lay = max(0, min(E2_MAX_LAYERS, int(layers)))
     rad = 0.5 / math.sin(math.pi / p)
     bv = [rad * complex(math.cos(2 * math.pi * k / p + math.pi / p), math.sin(2 * math.pi * k / p + math.pi / p)) for k in range(p)]
     bm = [0.5 * (bv[k] + bv[(k + 1) % p]) for k in range(p)]
@@ -79,14 +89,24 @@ def _build_e2_pq(p: int, q: int, layers: int, kappa: float) -> dict[str, Any]:
     return {"p": p, "q": q, "layers": lay, "delta": 0, "geometry_kind": "Euclidean", "curvature_kappa": kappa,
             "euler_chi": len(c2) - len(edges) + len(faces), "n_vertices": len(c2), "n_edges": len(edges), "n_faces": len(faces),
             "coords_3d": c3, "coords_2d": c2, "edges": edges, "edge_arcs_2d": [[c2[u], c2[v]] for u, v in edges],
-            "edge_arcs_3d": [[c3[u], c3[v]] for u, v in edges], "faces": faces, "provenance": "[PROVED]"}
+            "edge_arcs_3d": [[c3[u], c3[v]] for u, v in edges], "faces": faces, "provenance": "[PROVED]",
+            "growth": _no_growth()}
 
 
-def build_unified_pq(p: int, q: int, layers: int = 2) -> dict[str, Any]:
-    if (fn := _rs_fn("unified_pq_tiling_json")) is not None:
+def build_unified_pq(p: int, q: int, layers: int = 2, seed: str = "cell") -> dict[str, Any]:
+    """{p,q} in S^2 / E^2 / H^2 grown from `seed` (0-based layers; see unified_pq.rs `build_unified_pq_seeded`)."""
+    seed = seeds.norm_seed(seed)
+    # An extension built before C1 WP-G3 has only the tile-seed function; other seeds then use the Python path.
+    if (fn := _rs_fn("unified_pq_seeded_json")) is not None:
+        return json.loads(fn(int(p), int(q), int(layers), seed))
+    if (fn := _rs_fn("unified_pq_tiling_json")) is not None and seed == "cell":
         return json.loads(fn(int(p), int(q), int(layers)))
     delta, kappa = delta_pq(p, q), delta_pq(p, q) / (2.0 * p * q)
+    growth = _no_growth()
     if delta == 0:
+        if not seeds.one_tile(seed):
+            raise ValueError(f"{seed.capitalize()} seed: the E² {{p,q}} preview grows from one face; vertex and edge seeds "
+                             "of E² lattices are built by the plane inflation (Gallery)")
         return _build_e2_pq(p, q, layers, kappa)
     if delta > 0:
         gk, out_lay = "Spherical", layers
@@ -106,14 +126,20 @@ def build_unified_pq(p: int, q: int, layers: int = 2) -> dict[str, Any]:
             c3, c2, edges, faces = w["coords_3d"], w["coords_2d"], w["edges"], w["faces"]
             e3 = [_slerp(c3[u], c3[v], 12) for u, v in edges]
             e2_a = [_stereo_safe(a) for a in e3]
+        growth = seeds.grow_s2(p, faces, seed, int(layers))
     else:
-        h = hyp_py.build_hyperbolic_tiling(p, q, "RegularPQ", max(1, min(4, int(layers))), 0)
+        h = hyp_py.build_hyperbolic_tiling(p, q, "RegularPQ", int(layers), 0, seed=seed)
         gk, out_lay, kappa = "Hyperbolic", h["layers"], h["curvature_kappa"]
+        cpl = h["complete_through_shell"]
+        growth = {"seed": h["seed"], "face_layer": list(h["face_shell"]),
+                  "layer_counts": [sum(1 for s in h["face_shell"] if s <= k) for k in range(cpl + 1)], "layer_euler": [],
+                  "stopped": h["growth_rule"] if cpl < h["layers"] else None}
         c3, c2, edges, faces, e2_a = h["hyperboloid_pts"], h["poincare_pts"], h["edges"], h["faces"], h["edge_arcs"]
         e3 = [[poincare_to_hyperboloid(z) for z in a] for a in e2_a]
     return {"p": p, "q": q, "layers": out_lay, "delta": delta, "geometry_kind": gk, "curvature_kappa": kappa,
             "euler_chi": len(c3) - len(edges) + len(faces), "n_vertices": len(c3), "n_edges": len(edges), "n_faces": len(faces),
-            "coords_3d": c3, "coords_2d": c2, "edges": edges, "edge_arcs_2d": e2_a, "edge_arcs_3d": e3, "faces": faces, "provenance": "[PROVED]"}
+            "coords_3d": c3, "coords_2d": c2, "edges": edges, "edge_arcs_2d": e2_a, "edge_arcs_3d": e3, "faces": faces, "provenance": "[PROVED]",
+            "growth": growth}
 
 
 _OPS = ("Regular", "Dual", "Rectified", "Truncated", "Bitruncated", "Cantellated", "Omnitruncated", "Snub")
@@ -141,7 +167,7 @@ def _assemble_wythoff(p, q, op, chir, gk, c3, c2, faces):
     for f in faces: ftc[len(f)] = ftc.get(len(f), 0) + 1
     return {"p": p, "q": q, "op_name": op, "chirality": chir if op == "Snub" else None, "vertex_symbol": ".".join(map(str, _dihedral_canon(sym_map[op])[0])),
             "geometry_kind": gk, "n_vertices": len(c3), "n_edges": len(edges), "n_faces": len(faces), "euler_chi": len(c3) - len(edges) + len(faces),
-            "face_type_counts": ftc, "coords_3d": c3, "coords_2d": c2, "edges": edges, "faces": faces,
+            "face_type_counts": ftc, "stopped": None, "coords_3d": c3, "coords_2d": c2, "edges": edges, "faces": faces,
             "provenance": ("[COMPUTATIONAL EVIDENCE] snub generating point from a Newton solve (residual < 1e-9)" if op == "Snub"
                            else "[PROVED] Wythoff construction (Coxeter, Longuet-Higgins & Miller 1954)")}
 
@@ -253,5 +279,9 @@ def build_wythoff(p: int, q: int, op: str = "Regular", chirality: str = "Left", 
         return _wythoff_s2(p, q, op, chirality)
     if op in ("Regular", "Dual"):
         u = build_unified_pq(p if op == "Regular" else q, q if op == "Regular" else p, layers)
-        return _assemble_wythoff(p, q, op, chirality, u["geometry_kind"], u["coords_3d"], u["coords_2d"], u["faces"])
+        res = _assemble_wythoff(p, q, op, chirality, u["geometry_kind"], u["coords_3d"], u["coords_2d"], u["faces"])
+        if delta < 0:  # the Rust H^2 Wythoff grows WYTHOFF_TILE_BUDGET tiles and reports its stop (wythoff_h2.rs)
+            lay = max(0, min(hyp_py.MAX_H2_LAYERS, int(layers)))
+            res["stopped"] = seeds.grow_vertex_completion_seeded(p, q, "cell", lay, WYTHOFF_TILE_BUDGET).stopped
+        return res
     raise ValueError(f"pure-Python Wythoff fallback supports Spherical/Regular/Dual; build papertilling_rs for {op} on {{{p},{q}}}")

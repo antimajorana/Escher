@@ -224,9 +224,13 @@ def test_wedge_kagome_rectifies_wedge_copies(fallback):
         assert kag["poincare_pts"] != reg["poincare_pts"]
 
 
-def test_layers_clamped_and_non_hyperbolic_rejected(fallback):
-    assert fallback(7, 3, layers=0)["layers"] == 1
-    assert fallback(7, 3, layers=9)["layers"] == 4
+def test_layers_zero_based_and_non_hyperbolic_rejected(fallback):
+    # C1 WP-G3: layers are 0-based (layer 0 = the seed tile) and no longer clamped to 1..4; the face cap sets the
+    # drawn depth and the readout says which shell it omitted.
+    zero = fallback(7, 3, layers=0)
+    assert (zero["layers"], len(zero["faces"]), zero["complete_through_shell"]) == (0, 1, 0)
+    deep = fallback(7, 3, layers=9)
+    assert deep["layers"] == 9 and deep["complete_through_shell"] < 9 and "omitted" in deep["growth_rule"]
     for p, q in [(4, 4), (6, 3), (3, 6), (5, 3)]:
         with pytest.raises(ValueError):
             fallback(p, q)
@@ -261,6 +265,8 @@ def _extension_with_face_shell():
     probe = json.loads(rs.hyperbolic_tiling_json(7, 3, "RectifiedKagome", 1, 0))
     if "face_shell" not in probe or "cluster rule" not in probe.get("growth_rule", ""):
         pytest.skip("installed papertilling_rs predates Phase 2 hyperbolic cluster/wedge updates; rebuild it")
+    if "seed" not in probe:
+        pytest.skip("installed papertilling_rs predates C1 WP-G3 (seeded layers); rebuild it")
     return rs
 
 
