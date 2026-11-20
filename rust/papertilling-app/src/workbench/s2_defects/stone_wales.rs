@@ -1,13 +1,16 @@
 //! Stone-Wales bond rotation on the host disk: the bond nearest the centre by default, or one picked by clicking near
 //! its midpoint. On the honeycomb four hexagons become the 5-7-7-5 core.
 
+use papertilling_core::defect::core_graph::LatticeCoreInfo;
+use papertilling_core::defect::defect_growth::{DEFECT_MAX_CELLS, grow_with_rebuild, start_radius};
 use papertilling_core::defect::{StoneWalesResult, stone_wales_flip};
 use papertilling_core::types::Cell2D;
 
 use super::{Host, make_host};
-use crate::defects_ui::growth::{DEFAULT_LAYERS, GrowthView, MAX_LAYERS, grow_stone_wales, show_readout};
 use crate::atlas_tab::hyperbolic_scene::empty_scene;
 use crate::canvas2d::Scene2D;
+use crate::canvas2d::gauge_overlay::CrystalOverlayData;
+use crate::defects_ui::growth::{DEFAULT_LAYERS, GrowthView, MAX_LAYERS, show_readout, stone_wales_seed_line};
 
 pub(super) const SCENE_TITLE: &str = "S2 bond-rotation patch";
 
@@ -15,7 +18,7 @@ pub(crate) struct SwOut {
     pub(crate) host: Host,
     pub(crate) result: StoneWalesResult,
     pub(crate) edge: usize,
-    /// C1 WP-U7: the bond-rotated disk grown from the Dirichlet cell about the rotated bond (`None` before it ran).
+    /// C1 WP-U7: the bond-rotated disk grown from the Dirichlet cell about the rotated bond (`None` when `grow_on` is off).
     pub(crate) growth: Option<Result<GrowthView, String>>,
 }
 
@@ -85,11 +88,92 @@ pub(crate) fn build(cell: &Cell2D, radius: f64, edge: Option<usize>, relax: bool
     Ok(SwOut { host, result, edge: k, growth: None })
 }
 
-/// [`build`], then the growth readout of the rotated disk (Q8 point defects; `grow_stone_wales`).
-pub(crate) fn build_grown(cell: &Cell2D, radius: f64, edge: Option<usize>, relax: bool, layers: u32) -> Result<SwOut, String> {
-    let mut o = build(cell, radius, edge, relax)?;
-    o.growth = Some(grow_stone_wales(&o.host.crystal, &o.result.crystal, o.edge, cell, layers));
-    Ok(o)
+/// Size and rebuild the host disk via [`grow_with_rebuild`] (which calls `grow_crystal` on each rebuilt disk) from
+/// `r0 = radius.max(start_radius(&info.lat, target_w, layers)?)`, resolving the target bond by world midpoint
+/// `target_w` and relaxing once at the end when `relax` is true.
+pub(crate) fn build_grown(
+    cell: &Cell2D,
+    radius: f64,
+    edge: Option<usize>,
+    target_w: Option<[f64; 2]>,
+    relax: bool,
+    layers: u32,
+) -> Result<SwOut, String> {
+    let target_w = match target_w {
+        Some(w) => w,
+        None => {
+            let init = build(cell, radius, edge, false)?;
+            midpoint(&init.host, init.edge)
+        }
+    };
+    let info = LatticeCoreInfo::new(cell);
+    let r0 = radius.max(start_radius(&info.lat, target_w, layers)? + target_w[0].hypot(target_w[1]));
+    let mut last: Option<(Host, usize, StoneWalesResult)> = None;
+    let out = grow_with_rebuild(
+        |r| {
+            let host_r = make_host(cell, r)?;
+            let k_r = nearest_interior_edge(&host_r, target_w)
+                .ok_or_else(|| String::from("the host disk has no interior bond near the target"))?;
+            let m = midpoint(&host_r, k_r);
+            if (m[0] - target_w[0]).hypot(m[1] - target_w[1]) > 1e-4 {
+                return Err(String::from("the target bond was not found in the rebuilt host disk"));
+            }
+            let sw = stone_wales_flip(&host_r.crystal, k_r, None)?;
+            let crystal = sw.crystal.clone();
+            last = Some((host_r, k_r, sw));
+            Ok(crystal)
+        },
+        r0,
+        &info.lat,
+        target_w,
+        layers,
+        DEFECT_MAX_CELLS,
+    )?;
+    let (final_host, final_k, mut final_sw) = last.ok_or("Stone-Wales growth produced no host")?;
+    let mut note = out.note;
+    if relax {
+        final_sw = stone_wales_flip(&final_host.crystal, final_k, Some(cell))?;
+        let msg = format!("positions from a radius-{:.2} relaxation", out.radius);
+        note = if note.is_empty() { msg } else { format!("{note}; {msg}") };
+    }
+    let line = stone_wales_seed_line(out.result.seed.cells.len());
+    let view = GrowthView::from_growth(
+        &final_sw.crystal,
+        &out.result.complex,
+        &out.result.growth,
+        layers,
+        out.radius,
+        line,
+        note,
+    );
+    Ok(SwOut { host: final_host, result: final_sw, edge: final_k, growth: Some(Ok(view)) })
+}
+
+pub(crate) fn run(
+    cell: &Cell2D,
+    radius: f64,
+    edge: Option<usize>,
+    target_w: Option<[f64; 2]>,
+    relax: bool,
+    grow_on: bool,
+    layers: u32,
+) -> Result<SwOut, String> {
+    if grow_on {
+        return build_grown(cell, radius, edge, target_w, relax, layers);
+    }
+    if let Some(tw) = target_w {
+        let host = make_host(cell, radius)?;
+        let k = nearest_interior_edge(&host, tw)
+            .filter(|&k| {
+                let m = midpoint(&host, k);
+                (m[0] - tw[0]).hypot(m[1] - tw[1]) <= 1e-4
+            })
+            .ok_or_else(|| {
+                String::from("the picked bond lies outside the host disk: increase the radius or use the centre bond")
+            })?;
+        return build(cell, radius, Some(k), relax);
+    }
+    build(cell, radius, edge, relax)
 }
 
 fn rings(r: &[usize; 4]) -> String {
@@ -99,8 +183,11 @@ fn rings(r: &[usize; 4]) -> String {
 pub(crate) struct SwState {
     /// `None` = the interior bond nearest the centre.
     pub(crate) edge: Option<usize>,
+    /// World midpoint of a user-picked bond, so switching `grow_on` resolves the same bond across host radii.
+    pub(crate) target_w: Option<[f64; 2]>,
     pub(crate) relax: bool,
-    /// Growth layers read out in the inspector.
+    pub(crate) grow_on: bool,
+    /// Growth layers read out in the inspector when `grow_on` is ticked.
     pub(crate) layers: u32,
     pub(crate) out: Option<SwOut>,
     note: String,
@@ -108,13 +195,22 @@ pub(crate) struct SwState {
 
 impl Default for SwState {
     fn default() -> Self {
-        Self { edge: None, relax: false, layers: DEFAULT_LAYERS, out: None, note: String::new() }
+        Self {
+            edge: None,
+            target_w: None,
+            relax: false,
+            grow_on: false,
+            layers: DEFAULT_LAYERS,
+            out: None,
+            note: String::new(),
+        }
     }
 }
 
 impl SwState {
     pub(super) fn clear_for_new_host(&mut self) {
         self.edge = None;
+        self.target_w = None;
         self.out = None;
         self.note.clear();
     }
@@ -125,6 +221,7 @@ impl SwState {
         match nearest_interior_edge(&o.host, w) {
             Some(k) if Some(k) != self.edge && k != o.edge => {
                 self.edge = Some(k);
+                self.target_w = Some(midpoint(&o.host, k));
                 self.note.clear();
                 true
             }
@@ -146,18 +243,21 @@ impl SwState {
                 ui.label("Bond index:");
                 if ui.add(egui::DragValue::new(&mut k).range(0..=n.saturating_sub(1))).changed() {
                     self.edge = Some(k);
+                    self.target_w = o.host.crystal.edges.get(k).map(|_| midpoint(&o.host, k));
                     rebuild = true;
                 }
             });
         }
         if self.edge.is_some() && ui.button("Use the bond nearest the centre").clicked() {
             self.edge = None;
+            self.target_w = None;
             rebuild = true;
         }
         rebuild |= ui.checkbox(&mut self.relax, "Relax (GSV elastic, uses the cell)").changed();
         ui.horizontal(|ui| {
-            ui.label("Layers");
-            rebuild |= ui.add(egui::Slider::new(&mut self.layers, 0..=MAX_LAYERS)).changed();
+            rebuild |= ui.checkbox(&mut self.grow_on, "Layers").changed();
+            let slider = egui::Slider::new(&mut self.layers, 0..=MAX_LAYERS);
+            rebuild |= ui.add_enabled(self.grow_on, slider).changed() && self.grow_on;
         });
         if !self.note.is_empty() {
             ui.small(self.note.as_str());
@@ -178,12 +278,14 @@ impl SwState {
         ui.small("Ring rule: (p1, p2, q1, q2) -> (p1-1, p2-1, q1+1, q2+1); no lattice cut, so the holonomy is trivial.");
         ui.label(format!("Holonomy {}, relaxation {}", r.holonomy_badge, r.relax_badge));
         ui.label(format!("Sites {}, bonds {} (unchanged by the rotation)", r.crystal.pos.len(), r.crystal.edges.len()));
-        match &o.growth {
-            Some(Ok(v)) => show_readout(ui, v, "sw_growth_tbl"),
-            Some(Err(why)) => {
-                ui.small(format!("Not grown: {why}"));
+        if self.grow_on {
+            match &o.growth {
+                Some(Ok(v)) => show_readout(ui, v, "sw_growth_tbl"),
+                Some(Err(why)) => {
+                    ui.small(format!("Not grown: {why}"));
+                }
+                None => {}
             }
-            None => {}
         }
     }
 
@@ -196,5 +298,12 @@ impl SwState {
             },
             None => empty_scene(SCENE_TITLE, "building ..."),
         }
+    }
+
+    pub(crate) fn overlay(&self) -> Option<CrystalOverlayData> {
+        if !self.grow_on {
+            return None;
+        }
+        self.out.as_ref()?.growth.as_ref()?.as_ref().ok().map(GrowthView::overlay)
     }
 }

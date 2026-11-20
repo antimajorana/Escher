@@ -4,7 +4,7 @@
 //! - **Default view:** one "Layers" control (off until ticked, 4 layers) and the readout table. The seed choice sits in
 //!   a collapsed "More" section.
 //! - **Scope (Q8):** point defects (dislocations and disclinations here; Stone–Wales in the S2 bond-rotation panel,
-//!   through [`grow_stone_wales`]). Walls and half-walls are refused with the reason.
+//!   through `workbench::s2_defects::stone_wales::build_grown`). Walls and half-walls are refused with the reason.
 //! - **Picture:** the crystal [`grow_point_defects`] built (rebuilt at a larger radius until the asked layers are
 //!   complete, at most 3 times), at its relaxed positions when the drawing is relaxed. Sites and bonds are coloured
 //!   by the first layer whose faces contain them; the rest of the crystal is grey. The layer count shown is the core's
@@ -12,13 +12,22 @@
 
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+use papertilling_core::defect::charge::infer_patch_disk;
 use papertilling_core::defect::charge::total_charge;
+#[cfg(test)]
 use papertilling_core::defect::core_graph::LatticeCoreInfo;
-use papertilling_core::defect::defect_growth::{DEFECT_MAX_CELLS, defect_core, grow_crystal, grow_point_defects};
+#[cfg(test)]
+use papertilling_core::defect::defect_growth::grow_crystal;
+use papertilling_core::defect::defect_growth::{
+    DEFECT_MAX_CELLS, defect_core_in_cell, grow_point_defects,
+};
 use papertilling_core::defect::surgery::DefectSpec;
 use papertilling_core::growth::face_graph::CrystalComplex;
 use papertilling_core::growth::{CellComplex, Growth, GrowthCaps, LayerStats, Stopped, grow};
-use papertilling_core::types::{BuiltCrystal, Cell2D};
+use papertilling_core::types::BuiltCrystal;
+#[cfg(test)]
+use papertilling_core::types::Cell2D;
 
 use crate::backend::{CatalogueItemUi, DefectReadoutUi, DefectSelectionUi};
 use crate::canvas2d::gauge_overlay::{CrystalOverlayData, OverlayColorbar};
@@ -68,6 +77,8 @@ pub(crate) struct GrowthView {
     pub(crate) asked: u32,
     /// Complete layers: S_0..S_{complete-1} are shown.
     pub(crate) complete: usize,
+    /// Host crystal radius that the layers live on.
+    pub(crate) radius: f64,
     pub(crate) stats: Vec<LayerStats>,
     pub(crate) seed_line: String,
     pub(crate) note: String,
@@ -124,7 +135,15 @@ pub(crate) fn complete_label(v: &GrowthView) -> String {
 }
 
 impl GrowthView {
-    fn from_growth(crystal: &BuiltCrystal, cc: &CrystalComplex, g: &Growth<u32>, asked: u32, seed_line: String, note: String) -> Self {
+    pub(crate) fn from_growth(
+        crystal: &BuiltCrystal,
+        cc: &CrystalComplex,
+        g: &Growth<u32>,
+        asked: u32,
+        radius: f64,
+        seed_line: String,
+        note: String,
+    ) -> Self {
         let edge_id: HashMap<(usize, usize), usize> =
             crystal.edges.iter().enumerate().map(|(i, &(a, b))| ((a.min(b), a.max(b)), i)).collect();
         let mut site_layer = vec![None; crystal.pos.len()];
@@ -141,7 +160,7 @@ impl GrowthView {
                 }
             }
         }
-        Self { asked, complete: g.layers.len(), stats: g.stats.clone(), seed_line, note, site_layer, bond_layer }
+        Self { asked, complete: g.layers.len(), radius, stats: g.stats.clone(), seed_line, note, site_layer, bond_layer }
     }
 
     fn legend(&self) -> OverlayColorbar {
@@ -240,26 +259,51 @@ pub(crate) fn build_grown(
     let (specs, title) = specs_for(item, sel)?;
     let ctx = defect_context(item)?;
     let relax = draw_mode != Defect2dMode::Raw;
-    let out = grow_point_defects(&ctx.cell, &specs, req.layers, None, relax, DEFECT_MAX_CELLS)?;
+    let sizing_layers = match req.seed {
+        SeedChoice::DirichletCore => req.layers,
+        SeedChoice::NearestSites => req.layers.saturating_add(1),
+    };
+    let out = grow_point_defects(&ctx.cell, &specs, sizing_layers, None, relax, DEFECT_MAX_CELLS)?;
     let r = &out.result;
     let view = match req.seed {
         SeedChoice::DirichletCore => {
             let s = &r.seed;
-            let mut line = format!("Seed: {} face(s) = Dirichlet cell about the core ({} perfect face(s)", s.cells.len(), s.perfect_faces);
+            let mut line = format!(
+                "Seed: {} face(s) = Dirichlet cell about the core ({} perfect face(s)",
+                s.cells.len(),
+                s.perfect_faces
+            );
             if s.missing > 0 {
                 line.push_str(&format!(", {} cut by the surgery and replaced by {} core face(s)", s.missing, s.core_faces));
             }
             line.push(')');
-            GrowthView::from_growth(&out.crystal, &r.complex, &r.growth, req.layers, line, out.note.clone())
+            GrowthView::from_growth(&out.crystal, &r.complex, &r.growth, req.layers, out.radius, line, out.note.clone())
         }
         SeedChoice::NearestSites => {
-            let core = defect_core(&specs, [0.0, 0.0])?;
+            let core = defect_core_in_cell(&ctx.cell, &specs)?;
             let mut cc = r.complex.clone();
             let seed = nearest_site_seed(&out.crystal, &cc, core);
             let line = format!("Seed: {} face(s) at the site(s) nearest the core", seed.len());
             let g = grow_complete(&mut cc, seed, req.layers);
-            let note = format!("crystal sized for the Dirichlet seed at radius {:.2}; {}", out.radius, out.note);
-            GrowthView::from_growth(&out.crystal, &cc, &g, req.layers, line, note)
+            let rim_msg = match g.stopped {
+                Some(Stopped::Rim { layer }) if layer <= req.layers => {
+                    let shown = if layer == 0 {
+                        String::from("no complete layer")
+                    } else {
+                        format!("showing layers 0..{}", layer - 1)
+                    };
+                    format!(
+                        "layer {layer} reaches the crystal's rim at radius {:.2} after {} rebuild(s); {shown}",
+                        out.radius, out.rebuilds
+                    )
+                }
+                _ => String::new(),
+            };
+            let sizing_msg = format!("crystal sized at radius {:.2}", out.radius);
+            let mut parts = vec![rim_msg.as_str(), sizing_msg.as_str()];
+            parts.extend(out.note.split("; ").filter(|p| !p.is_empty() && !p.starts_with("layer ")));
+            let note = parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("; ");
+            GrowthView::from_growth(&out.crystal, &cc, &g, req.layers, out.radius, line, note)
         }
     };
     let (charge_summary, holonomy_detail) = charge_lines(&out.crystal);
@@ -273,19 +317,32 @@ pub(crate) fn build_grown(
     Ok((out.crystal, readout, view))
 }
 
-/// Stone–Wales growth (Q8): the bond-rotated crystal grown from the Dirichlet cell about the rotated bond's midpoint
-/// (the rotation is about that point, so it stays put). `edge` indexes `host.edges`, the perfect disk before the flip.
-pub(crate) fn grow_stone_wales(host: &BuiltCrystal, flipped: &BuiltCrystal, edge: usize, cell: &Cell2D, layers: u32) -> Result<GrowthView, String> {
+pub(crate) fn stone_wales_seed_line(n_seed: usize) -> String {
+    format!("Seed: {n_seed} face(s) about the rotated bond (the 5-7-7-5 core on the honeycomb)")
+}
+
+/// Stone–Wales growth on an already-sized host disk (used by unit tests; the S2 panel sizes via `grow_with_rebuild`).
+#[cfg(test)]
+pub(crate) fn grow_stone_wales(
+    host: &BuiltCrystal,
+    flipped: &BuiltCrystal,
+    edge: usize,
+    cell: &Cell2D,
+    layers: u32,
+) -> Result<GrowthView, String> {
     let &(u, v) = host.edges.get(edge).ok_or("the rotated bond is not in the host disk")?;
     let core = [0.5 * (host.ref_pos[u][0] + host.ref_pos[v][0]), 0.5 * (host.ref_pos[u][1] + host.ref_pos[v][1])];
     let info = LatticeCoreInfo::new(cell);
     let cg = grow_crystal(flipped, &info.lat, core, layers, DEFECT_MAX_CELLS)?;
-    let line = format!("Seed: {} face(s) about the rotated bond (the 5-7-7-5 core on the honeycomb)", cg.seed.cells.len());
+    let line = stone_wales_seed_line(cg.seed.cells.len());
+    let (_, radius) = infer_patch_disk(host);
     let note = match cg.growth.stopped {
-        Some(Stopped::Rim { layer }) if layer <= layers => format!("layer {layer} reaches the rim of the disk: raise the radius"),
+        Some(Stopped::Rim { layer }) if layer <= layers => {
+            format!("layer {layer} reaches the rim of the disk: raise the radius")
+        }
         _ => String::new(),
     };
-    Ok(GrowthView::from_growth(flipped, &cg.complex, &cg.growth, layers, line, note))
+    Ok(GrowthView::from_growth(flipped, &cg.complex, &cg.growth, layers, radius, line, note))
 }
 
 /// The per-layer readout table.
@@ -293,7 +350,7 @@ pub(crate) fn show_readout(ui: &mut egui::Ui, v: &GrowthView, id: &str) {
     ui.label(complete_label(v));
     ui.small(&v.seed_line);
     egui::Grid::new(id).striped(true).show(ui, |ui| {
-        for h in ["Layer", "Faces", "New", "χ"] {
+        for h in ["Layer", "Faces", "New", "∂V", "∂E", "χ"] {
             ui.strong(h);
         }
         ui.end_row();
@@ -301,10 +358,15 @@ pub(crate) fn show_readout(ui: &mut egui::Ui, v: &GrowthView, id: &str) {
             ui.label(k.to_string());
             ui.label(s.cells.to_string());
             ui.label(s.new_cells.to_string());
+            ui.label(s.boundary_vertices.to_string());
+            ui.label(s.boundary_edges.to_string());
             ui.label(s.euler.to_string());
             ui.end_row();
         }
     });
+    for (k, s) in v.stats.iter().enumerate().filter(|(_, s)| s.euler != 1) {
+        ui.small(format!("layer {k} is not a disk (χ = {})", s.euler));
+    }
     if !v.note.is_empty() {
         ui.small(&v.note);
     }

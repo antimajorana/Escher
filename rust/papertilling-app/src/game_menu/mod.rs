@@ -40,8 +40,11 @@ pub(crate) use realms::{CardId, LatticeRef};
 /// `id_salt` of the deck's filter TextEdit (its real `Id` is recorded in [`DeckState::filter_id`]).
 pub(crate) const DECK_FILTER_ID: &str = "deck_filter";
 
-/// Status note when a session saved in the postponed Analysis mode, tab or realm is restored (C1).
+/// Status note when a session saved in the postponed Analysis mode or tab is restored (C1).
 pub(crate) const ANALYSIS_POSTPONED_NOTE: &str = "Analysis is postponed; restored to Lattices";
+
+/// Status note when a session in a shown mode had its Command Deck left on the postponed Analysis Lab realm.
+pub(crate) const ANALYSIS_LAB_POSTPONED_NOTE: &str = "Analysis Lab is postponed; deck reset to current view";
 
 /// The seven realms of the Command Deck, in tab order (keys 1-7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -229,7 +232,7 @@ impl DeckState {
         match parse_named(&Realm::ALL, name) {
             Some(r) if !r.is_shown() => {
                 if !notes.iter().any(|n| n == ANALYSIS_POSTPONED_NOTE) {
-                    notes.push(String::from(ANALYSIS_POSTPONED_NOTE));
+                    notes.push(String::from(ANALYSIS_LAB_POSTPONED_NOTE));
                 }
                 self.realm = r.shown_or_default();
                 false

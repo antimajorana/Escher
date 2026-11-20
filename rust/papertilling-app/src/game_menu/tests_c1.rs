@@ -7,8 +7,8 @@ use egui_kittest::kittest::Queryable;
 
 use super::test_util::{open_deck, press};
 use super::tests_nav::start;
-use super::{ANALYSIS_POSTPONED_NOTE, Realm};
-use crate::app::{AppMode, LatticesView, NavTab, PapertillingApp};
+use super::{ANALYSIS_LAB_POSTPONED_NOTE, ANALYSIS_POSTPONED_NOTE, Realm};
+use crate::app::{AppMode, DefectsView, LatticesView, NavTab, PapertillingApp};
 use crate::session;
 
 #[test]
@@ -57,6 +57,16 @@ fn sessions_saved_in_analysis_restore_to_lattices_with_a_note() {
         assert_eq!(a.deck.realm, Realm::Tilings, "{raw}");
         assert!(!a.deck.open && !a.deck.resume_saved_realm, "{raw}");
     }
+
+    // Regression (WP-A0 gap): a v3 session in Defects with deck.realm = "AnalysisLab" stays in Defects and resets the deck to Forge.
+    let def_raw = r#"{"schema_version": 3, "active_mode": "Defects", "defects_view": "Catalogue2D", "active_tab": "Defects", "deck": {"realm": "AnalysisLab"}}"#;
+    let def_st = session::parse_session(def_raw).unwrap().0;
+    let mut d = PapertillingApp::new(false, String::from("test"), String::from("test"));
+    let def_notes = d.apply_session(&def_st, None);
+    assert_eq!(def_notes, vec![String::from(ANALYSIS_LAB_POSTPONED_NOTE)]);
+    assert_eq!((d.active_mode, d.defects_view, d.active_tab), (AppMode::Defects, DefectsView::Catalogue2D, NavTab::Defects));
+    assert_eq!(d.deck.realm, Realm::Forge);
+    assert!(!d.deck.open && !d.deck.resume_saved_realm);
 }
 
 #[test]

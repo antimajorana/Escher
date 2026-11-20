@@ -80,15 +80,22 @@ fn square_disclination_at_a_face_centre_grows_as_the_cone_formula() {
 fn nearest_site_seed_is_offered_under_more() {
     // A −90° apex at the face centre 1b: the sites nearest the core are the 5 corners of the core pentagon, and the
     // faces containing them are the pentagon and the 5 + 5 faces sharing an edge or a corner with it: 11 = |S_1| of
-    // the face seed. So the nearest-site seed grows S'_n = S_{n+1}: 11, 31, 61 (cone formula above, k = 5).
+    // the face seed. Sizing at layers + 1 grows all 3 layers S'_0..S'_2 = S_1..S_3: 11, 31, 61 (cone formula, k = 5).
     let backend = AppBackend::new();
     let sq = named(&backend, "square");
     let i = square_1b(&sq, -90.0);
     let req = GrowthRequest { layers: 2, seed: SeedChoice::NearestSites };
     let (_, _, v) = build_grown(&sq, &DefectSelectionUi::Disclination(i), req, Defect2dMode::Raw).unwrap();
     let got: Vec<usize> = v.stats.iter().map(|s| s.cells).collect();
-    assert_eq!(got, [11, 31, 61][..v.complete].to_vec());
-    assert!(v.complete >= 2, "{got:?} {}", v.note);
+    assert_eq!(v.complete, 3, "{got:?} {}", v.note);
+    assert_eq!(got, vec![11, 31, 61]);
+    assert!(!v.note.ends_with("; ") && !v.note.is_empty(), "clean Raw note: {:?}", v.note);
+
+    // Asking past the 3-rebuild limit surfaces Stopped::Rim in view.note for NearestSites too.
+    let far = GrowthRequest { layers: 35, seed: SeedChoice::NearestSites };
+    let (_, _, vf) = build_grown(&sq, &DefectSelectionUi::Disclination(i), far, Defect2dMode::Raw).unwrap();
+    assert!(vf.complete < 36 && vf.note.contains("reaches the crystal's rim"), "{}", vf.note);
+    assert!(!vf.note.ends_with("; "), "{:?}", vf.note);
 }
 
 #[test]
@@ -123,12 +130,64 @@ fn stone_wales_on_the_honeycomb_grows_like_the_bond_star() {
 }
 
 #[test]
+fn stone_wales_state_grows_five_complete_layers_at_default_radius_with_overlay_and_relax_note() {
+    // At default radius_cells = 3.0 on honeycomb, a plain 3-cell disk is far too small for 4 Stone-Wales layers;
+    // SwState with grow_on = true sizes and rebuilds the host disk via grow_with_rebuild so all 5 layers 0..=4
+    // ((3n + 4)(n + 1) = 4, 14, 30, 52, 80) complete without hitting the rim, pushes the shell-colour overlay onto
+    // the workbench canvas, and records the final relaxation radius in the note.
+    use crate::app::PapertillingApp;
+    use crate::workbench::WorkbenchView;
+    use std::time::{Duration, Instant};
+
+    let ctx = egui::Context::default();
+    let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
+    assert_eq!(app.gallery.active_item().named_key.as_deref(), Some("honeycomb"));
+    assert_eq!(app.workbench.s2.radius_cells, 3.0);
+    app.workbench.s2.sw.grow_on = true;
+    app.workbench.s2.sw.layers = 4;
+    app.workbench.s2.sw.relax = true;
+    app.enter_workbench(WorkbenchView::S2Defects, Some(1));
+
+    let t0 = Instant::now();
+    loop {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let _ = app.frame_ui(ui);
+        });
+        if !app.workbench_busy() && !app.workbench.dirty {
+            break;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(60), "Stone-Wales growth timed out");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let sw = &app.workbench.s2.sw;
+    let out = sw.out.as_ref().expect("Stone-Wales output");
+    let v = out.growth.as_ref().expect("growth ran").as_ref().expect("growth succeeded");
+    assert_eq!(v.complete, 5, "all 5 layers 0..=4 complete without hitting rim: {}", v.note);
+    let got: Vec<usize> = v.stats.iter().map(|s| s.cells).collect();
+    assert_eq!(got, vec![4, 14, 30, 52, 80]);
+    assert!(v.stats.iter().all(|s| s.euler == 1), "χ = 1 on every layer");
+    assert!(!v.note.contains("rim"), "did not stop at rim: {}", v.note);
+    assert!(
+        v.note.contains("positions from a radius-") && v.note.contains("relaxation"),
+        "relaxation note present: {}",
+        v.note
+    );
+    let ov = sw.overlay().expect("SwState shell-colour overlay");
+    assert_eq!(ov.site_rgba.as_ref().map(Vec::len), Some(out.result.crystal.pos.len()));
+    assert_eq!(ov.bond_rgba.as_ref().map(Vec::len), Some(out.result.crystal.edges.len()));
+    let canvas_ov = app.canvas2d.gauge_overlay().expect("workbench synced overlay to Canvas2D");
+    assert_eq!(canvas_ov.legend.as_ref().map(|l| l.max_val), Some(4.0));
+}
+
+#[test]
 fn defects_tab_shows_the_core_count_and_colours_by_layer() {
     // End to end through the tab's worker: ticking Layers on a dislocation builds the grown crystal, the readout
-    // count equals the core's own count, and the canvas carries the layer colouring.
+    // count equals the core's own count, the 3D flat baseline uses the grown radius, and the canvas carries the layer colouring.
     let backend = AppBackend::new();
     let hc = named(&backend, "honeycomb");
     let mut st = DefectsTabState::new(&hc, &backend);
+    let base_flat_sites = st.flat_crystal.pos.len();
     let mut canvas = Canvas2D::new(Scene2D::CrystalPatch { crystal: st.last_crystal.clone(), title: String::new(), note: String::new() });
     st.growth.on = true;
     st.growth.layers = 3;
@@ -140,6 +199,8 @@ fn defects_tab_shows_the_core_count_and_colours_by_layer() {
     let spec = [DefectSpec::Dislocation { b: e.b, at: Some(e.at), cut: None }];
     let core = grow_point_defects(&ctx.cell, &spec, 3, None, true, DEFECT_MAX_CELLS).unwrap();
     assert_eq!(v.complete, core.result.complete_layers());
+    assert!((v.radius - core.radius).abs() < 1e-12 && v.radius > st.radius);
+    assert!(st.flat_crystal.pos.len() > base_flat_sites, "3D flat baseline matches the grown radius");
     assert!(v.stats.iter().all(|s| s.euler == 1), "χ = 1");
     assert_eq!(st.last_crystal.pos.len(), core.crystal.pos.len(), "the picture is the grown crystal");
     let ov = canvas.gauge_overlay().expect("layer colouring on the canvas");

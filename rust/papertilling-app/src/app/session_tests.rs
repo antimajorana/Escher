@@ -328,13 +328,13 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
 fn recent_lattices_are_restored_most_recent_first() {
     let backend = AppBackend::new();
     let keys: Vec<LatticeAliasKey> =
-        ["square", "oblique", "kagome"].iter().map(|k| backend.find_named(k).unwrap().alias_key.clone()).collect();
+        ["square", "oblique", "honeycomb"].iter().map(|k| backend.find_named(k).unwrap().alias_key.clone()).collect();
     let mut st = app().capture_session();
     st.recent = keys.clone();
     let mut b = app();
     assert!(b.apply_session(&st, None).is_empty());
     let got: Vec<LatticeAliasKey> = b.switcher.recent.iter().map(|r| r.alias_key.clone()).collect();
-    // kagome (the restored lattice) was already selected, so the stored order stays as written
+    // honeycomb (the restored lattice) was already selected, so the stored order stays as written
     assert_eq!(got, keys);
 }
 

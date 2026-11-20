@@ -121,15 +121,18 @@ impl DefectsTabState {
             stale: false,
             initializing: false,
             worker: LatestWorker::spawn("defects-build", (), |_: &mut (), job: BuildJob| {
-                let (catalogue, crystal, readout, grown) = match job.reuse_crystal {
-                    Some((cat, c, r)) => (cat, c, r, None),
+                let (catalogue, crystal, readout, grown, eff_radius) = match job.reuse_crystal {
+                    Some((cat, c, r)) => (cat, c, r, None, job.radius),
                     None => {
                         let cat = crate::live_ops::catalogue_for_lattice(&job.item);
                         let grown = job.grow.map(|req| {
                             crate::defects_ui::growth::build_grown(&job.item, &job.selection, req, job.draw_mode)
                         });
                         match grown {
-                            Some(Ok((c, r, v))) => (cat, c, r, Some(GrowthOutcome::Shown(v))),
+                            Some(Ok((c, r, v))) => {
+                                let rad = v.radius;
+                                (cat, c, r, Some(GrowthOutcome::Shown(v)), rad)
+                            }
                             other => {
                                 let (c, mut r) = crate::live_ops::build_defect_patch_mode(
                                     &job.item,
@@ -150,7 +153,7 @@ impl DefectsTabState {
                                     }
                                     _ => GrowthOutcome::Off,
                                 };
-                                (cat, c, r, Some(outcome))
+                                (cat, c, r, Some(outcome), job.radius)
                             }
                         }
                     }
@@ -158,7 +161,7 @@ impl DefectsTabState {
                 let (sheet, flat_c, flat_s) = crate::live_ops::build_defect_sheets_3d(
                     &job.item,
                     &crystal,
-                    job.radius,
+                    eff_radius,
                     job.kappa_b,
                 );
                 (catalogue, crystal, readout, sheet, flat_c, flat_s, grown)
@@ -253,15 +256,20 @@ impl DefectsTabState {
         let reuse = (!self.is_busy() && !self.initializing && !self.last_crystal.pos.is_empty()).then(|| {
             (self.catalogue.clone(), self.last_crystal.clone(), self.readout.clone())
         });
+        let grow_req = self.growth.request(self.sub_tab);
+        let eff_radius = match (&reuse, &self.growth.outcome) {
+            (Some(_), GrowthOutcome::Shown(v)) if grow_req.is_some() => v.radius,
+            _ => self.radius,
+        };
         self.relaxed = self.draw_mode != Defect2dMode::Raw;
         self.worker.submit(BuildJob {
             item: item.clone(),
             selection: self.current_selection(),
-            radius: self.radius,
+            radius: eff_radius,
             draw_mode: self.draw_mode,
             wall_half: self.wall_half,
             kappa_b: self.sheet_opts.kappa_b,
-            grow: None,
+            grow: if reuse.is_some() { None } else { grow_req },
             reuse_crystal: reuse,
         });
         self.error = None;

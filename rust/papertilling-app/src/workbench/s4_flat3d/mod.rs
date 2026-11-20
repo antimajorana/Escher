@@ -402,7 +402,7 @@ impl WbPanel for Panel {
             S4Sub::TorsionFree => None,
         };
         let (scene2d, mesh, caption) = got.unwrap_or_else(|| no_result_scenes(self.sub, self.error()));
-        WbScenes { scene2d, mesh, caption }
+        WbScenes { scene2d, mesh, caption, overlay: None }
     }
 
     fn is_busy(&self) -> bool {
