@@ -148,7 +148,7 @@ pub fn build_layer(num: u8) -> Result<LayerSlab, String> {
     let zs = positions.iter().map(|p| p[2]);
     let thickness = zs.clone().fold(f64::MIN, f64::max) - zs.fold(f64::MAX, f64::min);
     let symmetry_note = if exact {
-        format!("exact layer group {} (spglib layer check)", e.symbol)
+        format!("exact layer group {} (spglib layer check) [COMPUTATIONAL EVIDENCE]", e.symbol)
     } else {
         format!("symmetry at least {}", e.symbol)
     };
@@ -254,13 +254,13 @@ pub fn stack(lay: &LayerSlab, spec: &StackSpec) -> Result<Stack, String> {
     }
     if spec.layers > 1 && spec.spacing <= lay.thickness {
         return Err(format!(
-            "spacing {} <= slab thickness {:.4}: layers would interpenetrate",
+            "[PROVED] spacing {} <= slab thickness {:.4}: layers would interpenetrate",
             spec.spacing, lay.thickness
         ));
     }
     if !offset_keeps_group(lay.number, spec.offset, spec.layers)? {
         return Err(format!(
-            "offset {:?} with {} layers breaks {}: some operation of the group is not an operation of the stack              (the type may survive in another setting)",
+            "[PROVED] offset {:?} with {} layers breaks {}: some operation of the group is not an operation of the stack (the type may survive in another setting)",
             spec.offset, spec.layers, lay.symbol
         ));
     }

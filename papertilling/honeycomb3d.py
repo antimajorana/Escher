@@ -29,7 +29,7 @@ from . import _rust
 __all__ = [
     "classify_schlafli", "build_honeycomb", "build_euclidean_honeycomb", "voronoi_cell_3d",
     "lattice_voronoi_cell", "dirichlet_manifold", "tpms_net", "petrie_coxeter_surface",
-    "nodal_surface_mesh", "nodal", "counts", "euler",
+    "nodal_surface_mesh", "nodal", "counts", "euler", "grow_honeycomb", "paracompact_ball",
 ]
 
 SPHERICAL = {(3, 3, 3): "5-cell {3,3,3}", (4, 3, 3): "8-cell (tesseract) {4,3,3}", (3, 3, 4): "16-cell {3,3,4}",
@@ -282,11 +282,15 @@ def _push_vertex(out, cox, x, ideal):
         out["is_ideal"].append(False)
 
 
-def build_honeycomb(p: int, q: int, r: int, shells: int = 1, patch_layers: int = 1) -> dict[str, Any]:
+def build_honeycomb(p: int, q: int, r: int, shells: int = 1, patch_layers: int = 1, seed: str | None = None,
+                    layers: int | None = None) -> dict[str, Any]:
     """Polychoron (S³, whole), cubic patch (E³) or H³ patch of {p,q,r}; ValueError with the [PROVED] reason otherwise.
 
     `shells` (0..=2 in H³) face-adjacency shells of cells; infinite `{4,4}`/`{6,3}` cells keep the faces
-    within `patch_layers` (1..=2) edge-adjacency rings of their seed face."""
+    within `patch_layers` (1..=2) edge-adjacency rings of their seed face. With `seed` (vertex, edge, face,
+    cell) the result is instead the last layer of touching-rule growth (`layers`, default 2; C1 WP-G2)."""
+    if seed is not None:
+        return grow_honeycomb(f"{{{p},{q},{r}}}", seed, 2 if layers is None else layers)["complex"]
     rs = _rust.get()
     if rs is not None and hasattr(rs, "honeycomb3d_build_json"):
         return json.loads(rs.honeycomb3d_build_json(p, q, r, shells, patch_layers))
@@ -471,3 +475,5 @@ def build_euclidean_honeycomb(kind: str = "cubic", shells: int = 1) -> dict[str,
 
 
 from ._honeycomb3d_extra import dirichlet_manifold, nodal, nodal_surface_mesh, petrie_coxeter_surface, tpms_net  # noqa: E402
+from ._honeycomb3d_ball import paracompact_ball  # noqa: E402
+from ._honeycomb3d_growth import grow_honeycomb  # noqa: E402
