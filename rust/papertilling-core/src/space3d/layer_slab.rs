@@ -30,8 +30,8 @@ pub mod shells;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +44,9 @@ use shells::{shell_bonds, Bond, SHELL_RTOL};
 const SITES_JSON: &str = include_str!("../../../../papertilling/data/layer_sites_80.json");
 const DEDUPE_TOL: f64 = 1e-6;
 const SQ3_2: f64 = 0.866_025_403_784_438_6;
+
+type SharedSlabNet = Arc<Mutex<PeriodicNet>>;
+type SlabNetCache = Mutex<HashMap<u8, SharedSlabNet>>;
 
 #[derive(Deserialize)]
 struct SitesEntry {
@@ -59,6 +62,16 @@ struct SitesFile {
 
 static SITES: LazyLock<Vec<SitesEntry>> =
     LazyLock::new(|| serde_json::from_str::<SitesFile>(SITES_JSON).expect("valid layer_sites_80.json").groups);
+static SLAB_NETS: LazyLock<SlabNetCache> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn cached_slab_net(num: u8, lattice: &[[f64; 3]; 2], positions: &[[f64; 3]]) -> Result<SharedSlabNet, String> {
+    if let Some(net) = SLAB_NETS.lock().unwrap_or_else(|p| p.into_inner()).get(&num).cloned() {
+        return Ok(net);
+    }
+    let built = Arc::new(Mutex::new(PeriodicNet::new(lattice, positions)?));
+    let mut cache = SLAB_NETS.lock().unwrap_or_else(|p| p.into_inner());
+    Ok(cache.entry(num).or_insert_with(|| built).clone())
+}
 
 /// In-plane lattice vectors (rows, z = 0) of a crystal system, a = 1.
 pub fn metric(system: &str) -> [[f64; 3]; 2] {
@@ -310,11 +323,15 @@ pub fn grow_layer_slab(num: u8, seed: SeedKind, layers: u32, spec: &StackSpec, m
     let lay = build_layer(num)?;
     let st = stack(&lay, spec)?;
     let lattice = [lay.lattice[0], lay.lattice[1]];
-    let mut net = PeriodicNet::new(&lattice, &lay.positions)?;
-    let s0 = net.seed_cells(seed)?;
-    let g = grow(&mut net, s0, GrowthCaps { max_layers: layers, max_cells });
+    let net_arc = cached_slab_net(num, &lattice, &lay.positions)?;
+    let (mode, euler_defined, g) = {
+        let mut net = net_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let s0 = net.seed_cells(seed)?;
+        let g = grow(&mut *net, s0, GrowthCaps { max_layers: layers, max_cells });
+        (net.mode(), net.euler_defined(), g)
+    };
     let cells: Vec<NetCell> = g.layers.iter().flatten().copied().collect();
-    let index: std::collections::HashMap<NetCell, usize> = cells.iter().enumerate().map(|(k, c)| (*c, k)).collect();
+    let index: HashMap<NetCell, usize> = cells.iter().enumerate().map(|(k, c)| (*c, k)).collect();
     let n = cells.len();
     let at = |c: &NetCell, k: u32| -> [f64; 3] {
         let p = lay.positions[c.0 as usize];
@@ -370,8 +387,8 @@ pub fn grow_layer_slab(num: u8, seed: SeedKind, layers: u32, spec: &StackSpec, m
     };
     Ok(SlabGrowth {
         patch,
-        mode: net.mode(),
-        euler_defined: net.euler_defined(),
+        mode,
+        euler_defined,
         stats: g.stats,
         stopped: g.stopped,
         exact: lay.exact,

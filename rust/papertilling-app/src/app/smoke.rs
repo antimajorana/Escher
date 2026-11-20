@@ -178,6 +178,7 @@ impl PapertillingApp {
                 }
                 7 => {
                     self.surfaces.target = SurfaceTargetUi::Sphere;
+                    self.surfaces.auto_size = true; // table sizes, as the stage was written for
                     self.surfaces.show_cover = false;
                     self.surfaces.elastic.shape_mode = crate::surfaces_elastic::SurfaceShapeMode::ElasticFvK;
                     self.switch_tab(NavTab::Surfaces);
@@ -212,6 +213,7 @@ impl PapertillingApp {
                     }
                     // the stage's new mesh: the cylinder, the one surface target stages 0-4 and 7 do not cover
                     self.surfaces.target = SurfaceTargetUi::Cylinder;
+                    self.surfaces.auto_size = true;
                     self.surfaces.show_cover = false;
                     self.switch_tab(NavTab::Surfaces);
                 }
@@ -223,6 +225,7 @@ impl PapertillingApp {
                         _ => (SurfaceTargetUi::Genus2, false),
                     };
                     self.surfaces.target = target;
+                    self.surfaces.auto_size = true;
                     self.surfaces.show_cover = cover;
                     self.surfaces.activate_and_sync(
                         self.gallery.active_item(), &self.backend, &mut self.canvas2d, &mut self.view3d,

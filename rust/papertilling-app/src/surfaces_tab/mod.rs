@@ -1,6 +1,7 @@
 use std::ops::RangeInclusive;
 
-use papertilling_core::surface::symmetry_facts;
+use papertilling_core::plane::family::LatticeFamily;
+use papertilling_core::surface::{symmetry_facts, symmetry_facts_of_cell};
 use papertilling_core::types::{Frame2D, Recipe, SurfaceCheckReport, SurfaceMesh};
 
 #[cfg(test)]
@@ -17,11 +18,15 @@ use crate::surfaces_elastic::{SurfaceElasticState, SurfaceShapeMode};
 use crate::theme::ThemeTokens;
 use crate::view3d::View3dState;
 
+pub(crate) mod bc;
+mod bc_ui;
 pub(crate) mod build_async;
 mod inspector;
 mod left;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_bc;
 
 /// What the two size controls mean for a target, and the values offered (every value is used as shown).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,9 +50,19 @@ pub fn size_controls(target: SurfaceTargetUi, max_rot: u32) -> SizeControls {
             c("size h", "size k", 1..=8, if max_rot == 2 { 1..=8 } else { 0..=8 })
         }
         SurfaceTargetUi::Genus2 | SurfaceTargetUi::Genus3 => c("torus (h, 0)", "torus (0, k)", 1..=12, 1..=12),
-        // C1 pending targets (every build refuses); placeholder controls until WP-U3 wires them
+        // C1: the open patch and the hexagonal torus are sized by the boundary options (`bc`), not by (h, k)
         SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => c("size h", "size k", 1..=12, 1..=12),
     }
+}
+
+/// Size controls of `target` for `item`'s realized cell (`symmetry_facts_of_cell`, falling back to `&item.group`
+/// only when `item.recipe` cannot build a cell).
+pub fn size_controls_for(target: SurfaceTargetUi, item: &CatalogueItemUi) -> SizeControls {
+    let max_rot = match LatticeFamily::from_recipe(&item.recipe, Some(item.frame)) {
+        Ok(fam) => symmetry_facts_of_cell(&item.group, &fam.cell()).max_rotation_order(),
+        Err(_) => symmetry_facts(&item.group).max_rotation_order(),
+    };
+    size_controls(target, max_rot)
 }
 
 /// An empty net: shown when the surface is refused, so the canvas never keeps the previous surface's net.
@@ -84,6 +99,11 @@ pub(super) fn verdict_colour(v: VerdictKindUi, tokens: &ThemeTokens) -> egui::Co
 pub struct SurfacesTabState {
     pub target: SurfaceTargetUi,
     pub params: SurfaceBuildParamsUi,
+    /// The boundary options (layers, wrap, supercell, glide class...), used by the six boundary-condition targets.
+    pub bc: bc::BcControls,
+    /// Caption and read-out of the surface on screen.
+    pub(crate) notes: bc::BcNotes,
+    bc_summary: Option<(VerdictKey, Option<bc::BcSummary>)>,
     pub show_cover: bool,
     /// Sizes as in `surface_table` (the surface behind the verdict cell) instead of the (h, k) controls.
     pub auto_size: bool,
@@ -106,10 +126,13 @@ type VerdictKey = (String, Recipe, Frame2D);
 impl SurfacesTabState {
     pub fn new() -> Self {
         Self {
-            target: SurfaceTargetUi::Sphere,
+            target: SurfaceTargetUi::Open,
             params: SurfaceBuildParamsUi::default(),
+            bc: bc::BcControls::default(),
+            notes: bc::BcNotes::default(),
+            bc_summary: None,
             show_cover: false,
-            auto_size: true,
+            auto_size: false,
             elastic: SurfaceElasticState::new(),
             active_disp: String::new(),
             active_lattice_key: None,
@@ -141,15 +164,17 @@ impl SurfacesTabState {
         let built = build_async::run_job(&job);
         self.elastic.clear_for_switch();
         match built {
-            Ok((mesh, report)) => {
+            Ok((mesh, report, notes)) => {
                 if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK {
                     self.elastic.request_relax(mesh.clone(), None);
                 }
+                self.notes = notes;
                 self.current_mesh = Some(mesh);
                 self.current_report = Some(report);
                 self.refusal_msg = None;
             }
             Err(reason) => {
+                self.notes = bc::BcNotes::default();
                 self.current_mesh = None;
                 self.current_report = None;
                 self.refusal_msg = Some(reason);
@@ -157,11 +182,48 @@ impl SurfacesTabState {
         }
     }
 
+    /// The boundary options this build uses: always for the open patch and the hexagonal torus; for the other four
+    /// boundary conditions unless the table sizes are asked for, from the options once the user has edited them and
+    /// from the legacy `(h, k)` sizes before.
+    fn bc_for_build(&self) -> Option<bc::BcControls> {
+        match self.target {
+            SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => Some(self.bc.clone()),
+            SurfaceTargetUi::Torus | SurfaceTargetUi::Cylinder | SurfaceTargetUi::MobiusBand | SurfaceTargetUi::KleinBottle
+                if !self.auto_size =>
+            {
+                Some(if self.bc.explicit { self.bc.clone() } else { bc::BcControls::from_hk(self.params.h, self.params.k) })
+            }
+            _ => None,
+        }
+    }
+
+    /// Select `t` from the Boundary selector, a deck card or "More": a boundary condition is sized by its options,
+    /// the cone metrics and genus surfaces by the table sizes (custom `(h, k)` stays one click away under "More").
+    pub(crate) fn choose_target(&mut self, t: SurfaceTargetUi) {
+        self.target = t;
+        if bc::BC_TARGETS.contains(&t) {
+            self.auto_size = false;
+            self.bc.explicit = true;
+        } else {
+            self.auto_size = true;
+        }
+    }
+
+    /// The six boundary verdicts and glide classes of `item` (cached per lattice, failures included).
+    pub(crate) fn bc_summary(&mut self, item: &CatalogueItemUi) -> Option<&bc::BcSummary> {
+        let key = (item.group.clone(), item.recipe.clone(), item.frame);
+        if self.bc_summary.as_ref().is_none_or(|(k, _)| *k != key) {
+            self.bc_summary = Some((key, bc::summarize(item)));
+        }
+        self.bc_summary.as_ref().and_then(|(_, s)| s.as_ref())
+    }
+
     /// Clamp `(h, k)` into the values the controls offer for the current target and lattice.
     pub fn clamp_params(&mut self, item: &CatalogueItemUi) {
-        let sc = size_controls(self.target, symmetry_facts(&item.group).max_rotation_order());
+        let sc = size_controls_for(self.target, item);
         self.params.h = self.params.h.clamp(*sc.h_range.start(), *sc.h_range.end());
         self.params.k = self.params.k.clamp(*sc.k_range.start(), *sc.k_range.end());
+        self.bc.clamp();
         match self.target {
             SurfaceTargetUi::Genus2 => self.params.genus_g = 2,
             SurfaceTargetUi::Genus3 => self.params.genus_g = 3,
@@ -189,7 +251,13 @@ impl SurfacesTabState {
         self.clamp_params(item);
         self.active_lattice_key = Some((item.group.clone(), item.recipe.clone(), item.frame));
         self.active_disp = item.display_with_orig();
-        build_async::SurfaceJob { item: item.clone(), target: self.target, params: self.params.clone(), auto_size: self.auto_size }
+        build_async::SurfaceJob {
+            item: item.clone(),
+            target: self.target,
+            params: self.params.clone(),
+            auto_size: self.auto_size,
+            bc: self.bc_for_build(),
+        }
     }
 
     /// Show a built surface (net, 3D, elastic follow-up) or its refusal.
@@ -197,7 +265,8 @@ impl SurfacesTabState {
         // results (and running jobs) of the previous mesh must never be drawn or exported with the new one
         self.elastic.clear_for_switch();
         match built {
-            Ok((mesh, report)) => {
+            Ok((mesh, report, notes)) => {
+                self.notes = notes;
                 let net_title = format!("{} ({}) — {} — 2D net", self.active_disp, group, mesh.name);
                 canvas.set_scene_with_title(Scene2D::SurfaceNet { mesh: mesh.clone() }, Some(net_title), true);
                 if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK {
@@ -211,6 +280,7 @@ impl SurfacesTabState {
             Err(reason) => {
                 view3d.set_mesh(GpuMeshData::default(), format!("{} on {}: {reason}", self.active_disp, self.target.label()));
                 canvas.set_scene(Scene2D::SurfaceNet { mesh: empty_net(self.target.label()) }, true);
+                self.notes = bc::BcNotes::default();
                 self.current_mesh = None;
                 self.current_report = None;
                 self.refusal_msg = Some(reason);
@@ -224,7 +294,7 @@ impl SurfacesTabState {
         let (gpu, fvk_note) = self.elastic.build_gpu_mesh(mesh, self.show_cover, None);
         let disp = if self.active_disp.is_empty() { mesh.name.as_str() } else { self.active_disp.as_str() };
         let caption = format!(
-            "{} on {}{} | V={} E={} F={} χ={} (R={:.2}, c=[{:.1},{:.1},{:.1}]){fvk_note}",
+            "{} on {}{} | V={} E={} F={} χ={} (R={:.2}, c=[{:.1},{:.1},{:.1}]){fvk_note}{}",
             disp,
             mesh.name,
             if use_cov { " [S² double cover]" } else { "" },
@@ -236,6 +306,7 @@ impl SurfacesTabState {
             gpu.center[0],
             gpu.center[1],
             gpu.center[2],
+            self.notes.picture_note.map(|n| format!(" | {n}")).unwrap_or_default(),
         );
         view3d.set_mesh(gpu, caption);
         view3d.set_legend(self.elastic.color_legend(None));

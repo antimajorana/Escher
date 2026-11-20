@@ -534,12 +534,13 @@ fn net_frame_matches_all_canonical_nets_and_defect_block_origin() {
             CanonicalNet3d::Perovskite => check_motif(net, &[
                 [0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 0.5],
             ]),
-            CanonicalNet3d::Pyrochlore => check_motif(net, &[
-                [0.0, 0.0, 0.0], [0.25, 0.25, 0.0], [0.25, 0.0, 0.25], [0.0, 0.25, 0.25], [0.5, 0.5, 0.5],
-            ]),
+            // Fd-3m 16c (origin choice 2, ITA): 4 sites in eighths plus the F-centring, 16 sites (hand)
+            CanonicalNet3d::Pyrochlore => check_motif(net, &[[1, 1, 1], [1, 7, 7], [7, 1, 7], [7, 7, 1]].iter()
+                .flat_map(|b| [[0, 0, 0], [0, 4, 4], [4, 0, 4], [4, 4, 0]].map(|c| core::array::from_fn(|k| f64::from((b[k] + c[k]) % 8) / 8.0)))
+                .collect::<Vec<[f64; 3]>>()),
             CanonicalNet3d::BetaQuartz => {
                 assert!((net_frame(net, LineDefect3d::None).lat[2][2] - 1.35).abs() < 1e-12);
-                check_motif(net, &[[0.5, 0.0, 0.0], [0.0, 0.5, 1.0 / 3.0], [0.5, 0.5, 2.0 / 3.0]]);
+                check_motif(net, &[[0.5, 0.0, 0.0], [0.0, 0.5, 2.0 / 3.0], [0.5, 0.5, 1.0 / 3.0]]); // P6_222 3c
             }
         }
     }

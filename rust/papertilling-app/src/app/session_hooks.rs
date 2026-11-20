@@ -328,7 +328,7 @@ impl PapertillingApp {
 
     fn apply_surfaces(&mut self, s: &session::SurfacesSession, notes: &mut Vec<String>) {
         let st = &mut self.surfaces;
-        match parse_named(&SurfaceTargetUi::ALL, s.target.as_deref()) {
+        match parse_named(&SurfaceTargetUi::EVERY, s.target.as_deref()) {
             Some(t) => st.target = t,
             None if s.target.is_some() => notes.push(String::from("unknown surface target (kept current)")),
             None => {}
@@ -338,6 +338,10 @@ impl PapertillingApp {
         }
         if let Some(k) = s.k {
             st.params.k = k;
+        }
+        if s.h.is_some() || s.k.is_some() {
+            // the session stores (h, k): the boundary options map from them again (WP-U3, `BcControls::from_hk`)
+            st.bc.explicit = false;
         }
         if let Some(g) = s.genus_g {
             st.params.genus_g = g.clamp(2, 3);

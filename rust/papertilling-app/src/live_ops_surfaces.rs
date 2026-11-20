@@ -78,15 +78,10 @@ pub fn surface_table_name(target: SurfaceTargetUi) -> &'static str {
         SurfaceTargetUi::ProjectivePlane => "projective plane",
         SurfaceTargetUi::Genus2 => "genus 2",
         SurfaceTargetUi::Genus3 => "genus 3",
-        // not in Python's SURFACES (C1 pending targets; every build refuses before using the name)
+        // not in Python's SURFACES (C1 boundary conditions of the Surfaces tab; they never ask for this name)
         SurfaceTargetUi::Open => "open patch",
         SurfaceTargetUi::TorusHex => "torus (hexagonal domain)",
     }
-}
-
-/// The refusal of a C1 pending target (never approximated by another surface).
-fn pending_refusal(target: SurfaceTargetUi) -> String {
-    format!("NOT FOUND: {} is not yet available (C1 boundary conditions, not built yet)", target.label())
 }
 
 fn centre_filter(mode: CentreModeUi) -> Option<&'static str> {
@@ -112,13 +107,16 @@ fn verdict_message(msg: String) -> String {
     }
 }
 
-fn surface_error_message(e: SurfaceError) -> String {
+pub(crate) fn surface_error_message(e: SurfaceError) -> String {
     match e.kind {
         RefusalKind::Impossible => match e.scope {
             Some(sc) => format!("IMPOSSIBLE ({sc}): {e}"),
             None => format!("IMPOSSIBLE: {e}"),
         },
-        RefusalKind::NotFound { .. } => format!("NOT FOUND: {e}"),
+        RefusalKind::NotFound { .. } => {
+            let s = e.to_string();
+            if s.starts_with("NOT FOUND") { s } else { format!("NOT FOUND: {s}") }
+        }
         RefusalKind::InvalidArg => format!("invalid size: {e}"),
     }
 }
@@ -129,8 +127,8 @@ pub fn build_surface_mesh(
     target: SurfaceTargetUi,
     params: &SurfaceBuildParamsUi,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
-    if target.is_pending() {
-        return Err(pending_refusal(target));
+    if matches!(target, SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex) {
+        return open_or_hex(item, target);
     }
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
     let facts = symmetry_facts_of_cell(&item.group, &cell);
@@ -162,7 +160,7 @@ pub fn build_surface_mesh(
             let g = if target == SurfaceTargetUi::Genus2 { 2 } else { params.genus_g.max(3) as usize };
             genus_surface_with_options(&cell, g, [h.max(1), 0], [0, k.max(1)], None)
         }
-        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => return Err(pending_refusal(target)),
+        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => unreachable!("routed to open_or_hex above"),
     }
     .map_err(verdict_message)?;
     let report = check_surface(&mesh);
@@ -177,8 +175,8 @@ pub fn build_surface_mesh_auto(
     centre_mode: CentreModeUi,
     genus_g: u32,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
-    if target.is_pending() {
-        return Err(pending_refusal(target));
+    if matches!(target, SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex) {
+        return open_or_hex(item, target);
     }
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
     let facts = symmetry_facts_of_cell(&item.group, &cell);
@@ -211,9 +209,15 @@ pub fn build_surface_mesh_auto(
         }
         SurfaceTargetUi::Genus2 => default_genus_surface(&cell, 2),
         SurfaceTargetUi::Genus3 => default_genus_surface(&cell, genus_g.max(3) as usize),
-        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => return Err(pending_refusal(target)),
+        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => unreachable!("routed to open_or_hex above"),
     }
     .map_err(verdict_message)?;
     let report = check_surface(&mesh);
     Ok((mesh, report))
+}
+
+/// The open patch or the hexagonal torus at the default options of the Surfaces tab (the tab itself builds them
+/// from its own options, see `surfaces_tab::bc`).
+fn open_or_hex(item: &CatalogueItemUi, target: SurfaceTargetUi) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
+    crate::surfaces_tab::bc::build_bc(item, target, &Default::default()).map(|(m, r, _)| (m, r))
 }
