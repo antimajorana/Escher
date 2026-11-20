@@ -51,6 +51,12 @@ impl SurfacesTabState {
                 mesh.chi
             ));
             ui.small(format!("Cones: {}", summarize_cones(mesh)));
+            for line in &self.notes.readout {
+                ui.small(line);
+            }
+            if let Some(note) = self.notes.picture_note {
+                ui.small(egui::RichText::new(format!("3D picture: {note} (the flat 2D net is the exact view)")).italics());
+            }
             ui.small(format!(
                 "loops:{}  double:{}  coord:{}  euler:{}  faces>=3:{}",
                 ok_sym(rep.no_loops),

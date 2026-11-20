@@ -130,6 +130,15 @@ pub(crate) fn card_realm(id: CardId) -> Realm {
     }
 }
 
+/// Subtitle of a surface card whose verdict is not in the 8-column table (the two C1 boundary conditions).
+fn surface_card_subtitle(t: SurfaceTargetUi) -> &'static str {
+    match t {
+        SurfaceTargetUi::Open => "no gluing, grown layers",
+        SurfaceTargetUi::TorusHex => "3 pairs of sides",
+        _ => "surface",
+    }
+}
+
 /// `label()` with its first letter uppercased (`torus` -> `Torus`).
 fn capitalised(s: &str) -> String {
     let mut c = s.chars();
@@ -197,12 +206,11 @@ impl PapertillingApp {
                     Some(n) => format!("{} entries", n[s as usize]),
                     None => "catalogue of the selected lattice".to_owned(),
                 },
-                CardId::Surface(t) if t.is_pending() => "not yet available".to_owned(),
                 CardId::Surface(t) => {
                     let k = SurfaceTargetUi::ALL.iter().position(|&x| x == t);
                     let cell = verdicts.as_ref().zip(k).and_then(|(v, k)| v.get(k));
                     card.badge = cell.map(|(b, _)| *b);
-                    cell.map_or_else(|| "surface".to_owned(), |(_, text)| text.clone())
+                    cell.map_or_else(|| surface_card_subtitle(t).to_owned(), |(_, text)| text.clone())
                 }
                 CardId::Wb(v, _) => v.heading().to_owned(),
                 CardId::Lattice(r) => self.lattice_ref_item(r).map(lattice_subtitle).unwrap_or_default(),
@@ -277,7 +285,7 @@ impl PapertillingApp {
             Realm::Tilings => out = self.tiling_cards(pill),
             Realm::Manifolds => {
                 if pill != 2 {
-                    for t in SurfaceTargetUi::ALL.into_iter().chain(SurfaceTargetUi::PENDING) {
+                    for t in SurfaceTargetUi::EVERY {
                         out.push(Card::new(CardId::Surface(t), capitalised(t.label())));
                     }
                     out.extend(self.wb_cards(WorkbenchView::S5Curved2d, 3..=4));

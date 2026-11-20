@@ -22,7 +22,7 @@ impl SurfacesTabState {
         self.poll_background(ui.ctx(), canvas, view3d);
         ui.strong(format!("Active lattice: {} ({})", active_item.display_with_orig(), active_item.group));
         ui.add_space(3.0);
-        if self.show_controls(ui, active_item) {
+        if self.show_boundary(ui, active_item, tokens) {
             self.request_build(active_item, ui.ctx());
         }
         if self.is_building() {
@@ -32,84 +32,90 @@ impl SurfacesTabState {
             });
         }
 
-        ui.separator();
-        ui.strong("This lattice: surface_table verdicts (click)");
         let mut clicked_target: Option<SurfaceTargetUi> = None;
-        if let Some(cells) = self.lattice_verdicts(active_item).cloned() {
-            ui.horizontal_wrapped(|ui| {
-                for (c_idx, cell) in cells.iter().enumerate() {
-                    let t = SurfaceTargetUi::ALL[c_idx];
-                    let txt = egui::RichText::new(format!("{} {}", t.short_header(), cell.verdict.short()))
-                        .size(10.5)
-                        .color(verdict_colour(cell.verdict, tokens));
-                    let resp = ui.selectable_label(self.target == t, txt).on_hover_text(cell_tooltip(t, cell));
-                    if resp.clicked() {
-                        clicked_target = Some(t);
-                    }
-                }
-            });
-        }
-
-        ui.separator();
-        ui.strong("17 x 8 verdicts, first Delaunay (points) lattice of each group (click)");
-        let matrix = backend.surface_verdict_matrix_ready().unwrap_or_else(|| {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.small("Computing the reference table…");
-            });
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
-            &[]
-        });
         let mut clicked_cell: Option<(String, SurfaceTargetUi)> = None;
-        ui.push_id("verdict_17x8_tbl", |ui| {
-            let mut tb = TableBuilder::new(ui)
-                .striped(true)
-                .max_scroll_height(195.0)
-                .column(Column::exact(36.0));
-            for _ in 0..8 {
-                tb = tb.column(Column::exact(31.0));
+        ui.separator();
+        egui::CollapsingHeader::new("More").id_salt("surfaces_more").show(ui, |ui| {
+            if self.show_more_controls(ui, active_item) {
+                self.request_build(active_item, ui.ctx());
             }
-            tb.header(17.0, |mut h| {
-                h.col(|ui| {
-                    ui.small("Grp");
+            ui.separator();
+            ui.strong("This lattice: surface_table verdicts (click)");
+            if let Some(cells) = self.lattice_verdicts(active_item).cloned() {
+                ui.horizontal_wrapped(|ui| {
+                    for (c_idx, cell) in cells.iter().enumerate() {
+                        let t = SurfaceTargetUi::ALL[c_idx];
+                        let txt = egui::RichText::new(format!("{} {}", t.short_header(), cell.verdict.short()))
+                            .size(10.5)
+                            .color(verdict_colour(cell.verdict, tokens));
+                        let resp = ui.selectable_label(self.target == t, txt).on_hover_text(cell_tooltip(t, cell));
+                        if resp.clicked() {
+                            clicked_target = Some(t);
+                        }
+                    }
                 });
-                for t in SurfaceTargetUi::ALL {
-                    h.col(|ui| {
-                        ui.small(t.short_header());
-                    });
+            }
+
+            ui.separator();
+            ui.strong("17 x 8 verdicts, first Delaunay (points) lattice of each group (click)");
+            let matrix = backend.surface_verdict_matrix_ready().unwrap_or_else(|| {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.small("Computing the reference table…");
+                });
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                &[]
+            });
+            ui.push_id("verdict_17x8_tbl", |ui| {
+                let mut tb = TableBuilder::new(ui)
+                    .striped(true)
+                    .max_scroll_height(195.0)
+                    .column(Column::exact(36.0));
+                for _ in 0..8 {
+                    tb = tb.column(Column::exact(31.0));
                 }
-            })
-            .body(|mut body| {
-                for row_data in matrix {
-                    body.row(17.0, |mut row| {
-                        let is_cur_grp = row_data.group == active_item.group;
-                        row.col(|ui| {
-                            if is_cur_grp {
-                                ui.strong(&row_data.group);
-                            } else {
-                                ui.small(&row_data.group);
-                            }
+                tb.header(17.0, |mut h| {
+                    h.col(|ui| {
+                        ui.small("Grp");
+                    });
+                    for t in SurfaceTargetUi::ALL {
+                        h.col(|ui| {
+                            ui.small(t.short_header());
                         });
-                        for (c_idx, cell) in row_data.cells.iter().enumerate() {
-                            let surf_t = SurfaceTargetUi::ALL[c_idx];
-                            let selected = is_cur_grp && self.target == surf_t;
+                    }
+                })
+                .body(|mut body| {
+                    for row_data in matrix {
+                        body.row(17.0, |mut row| {
+                            let is_cur_grp = row_data.group == active_item.group;
                             row.col(|ui| {
-                                let txt = egui::RichText::new(cell.verdict.short())
-                                    .size(10.0)
-                                    .color(verdict_colour(cell.verdict, tokens));
-                                let tip = format!(
-                                    "{} ({})\n{}",
-                                    row_data.lattice_name,
-                                    row_data.group,
-                                    cell_tooltip(surf_t, cell)
-                                );
-                                if ui.selectable_label(selected, txt).on_hover_text(tip).clicked() {
-                                    clicked_cell = Some((row_data.group.clone(), surf_t));
+                                if is_cur_grp {
+                                    ui.strong(&row_data.group);
+                                } else {
+                                    ui.small(&row_data.group);
                                 }
                             });
-                        }
-                    });
-                }
+                            for (c_idx, cell) in row_data.cells.iter().enumerate() {
+                                let surf_t = SurfaceTargetUi::ALL[c_idx];
+                                let selected = is_cur_grp && self.target == surf_t;
+                                row.col(|ui| {
+                                    let txt = egui::RichText::new(cell.verdict.short())
+                                        .size(10.0)
+                                        .color(verdict_colour(cell.verdict, tokens));
+                                    let tip = format!(
+                                        "{} ({})\n{}",
+                                        row_data.lattice_name,
+                                        row_data.group,
+                                        cell_tooltip(surf_t, cell)
+                                    );
+                                    if ui.selectable_label(selected, txt).on_hover_text(tip).clicked() {
+                                        clicked_cell = Some((row_data.group.clone(), surf_t));
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
             });
         });
 
@@ -129,38 +135,40 @@ impl SurfacesTabState {
         requested_group
     }
 
-    fn show_controls(&mut self, ui: &mut egui::Ui, item: &CatalogueItemUi) -> bool {
+    /// Under "More": the genus surfaces, the table sizes, the sphere / projective-plane corner centre and the cover.
+    fn show_more_controls(&mut self, ui: &mut egui::Ui, item: &CatalogueItemUi) -> bool {
         let mut dirty = false;
-        ui.label("Target surface (8):");
-        egui::Grid::new("surf_target_grid").num_columns(2).spacing([6.0, 4.0]).show(ui, |ui| {
-            for (i, t) in SurfaceTargetUi::ALL.iter().copied().enumerate() {
-                if ui.selectable_label(self.target == t, t.label()).clicked() && self.target != t {
-                    self.target = t;
+        ui.label("Other surfaces:");
+        ui.horizontal(|ui| {
+            for t in [SurfaceTargetUi::Genus2, SurfaceTargetUi::Genus3] {
+                if ui.selectable_label(self.target == t, super::bc::plain_label(t)).clicked() && self.target != t {
+                    self.choose_target(t);
                     dirty = true;
-                }
-                if i % 2 == 1 {
-                    ui.end_row();
                 }
             }
         });
-        ui.separator();
-        ui.strong("Construction Controls");
-        ui.horizontal(|ui| {
-            ui.label("Size:");
-            dirty |= ui.radio_value(&mut self.auto_size, true, "as in the table").changed();
-            dirty |= ui.radio_value(&mut self.auto_size, false, "custom (h, k)").changed();
-        });
-        let sc = size_controls(self.target, symmetry_facts(&item.group).max_rotation_order());
-        ui.add_enabled_ui(!self.auto_size, |ui| {
+        let uses_size = matches!(
+            self.target,
+            SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane | SurfaceTargetUi::Genus2 | SurfaceTargetUi::Genus3
+        );
+        if uses_size {
+            ui.strong("Size");
             ui.horizontal(|ui| {
-                ui.label(format!("h: {}", sc.h_label));
-                dirty |= ui.add(egui::Slider::new(&mut self.params.h, sc.h_range.clone())).changed();
+                dirty |= ui.radio_value(&mut self.auto_size, true, "as in the table").changed();
+                dirty |= ui.radio_value(&mut self.auto_size, false, "custom (h, k)").changed();
             });
-            ui.horizontal(|ui| {
-                ui.label(format!("k: {}", sc.k_label));
-                dirty |= ui.add(egui::Slider::new(&mut self.params.k, sc.k_range.clone())).changed();
+            let sc = size_controls(self.target, symmetry_facts(&item.group).max_rotation_order());
+            ui.add_enabled_ui(!self.auto_size, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("h: {}", sc.h_label));
+                    dirty |= ui.add(egui::Slider::new(&mut self.params.h, sc.h_range.clone())).changed();
+                });
+                ui.horizontal(|ui| {
+                    ui.label(format!("k: {}", sc.k_label));
+                    dirty |= ui.add(egui::Slider::new(&mut self.params.k, sc.k_range.clone())).changed();
+                });
             });
-        });
+        }
         if matches!(self.target, SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane) {
             ui.horizontal(|ui| {
                 ui.label("Corner centre:");
