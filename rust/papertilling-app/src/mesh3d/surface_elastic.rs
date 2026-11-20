@@ -23,24 +23,6 @@ pub enum SurfaceColor3d {
     SpectralCharge,
 }
 
-impl SurfaceColor3d {
-    pub const NON_SPECTRAL: [Self; 3] = [
-        Self::FaceRingSize,
-        Self::BondStrain,
-        Self::RadialBuckling,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::FaceRingSize => "Face ring size",
-            Self::BondStrain => "Bond strain",
-            Self::RadialBuckling => "Radial buckling r - R_mean",
-            Self::SpectralLdos => "LDOS |ψ|² (multiplet)",
-            Self::SpectralCharge => "Spectral charge δρ(μ)",
-        }
-    }
-}
-
 /// Build `GpuMeshData` from `surf` using relaxed FvK coordinates `el_res` and coloring `color_mode`.
 pub fn elastic_surface_gpu_mesh(
     surf: &SurfaceMesh,

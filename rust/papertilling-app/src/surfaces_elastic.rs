@@ -5,7 +5,6 @@ use papertilling_core::types::SurfaceMesh;
 
 use crate::combine_worker::LatestWorker;
 use crate::mesh3d::{GpuMeshData, SurfaceColor3d, elastic_surface_gpu_mesh, mesh_from_surface};
-use crate::theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SurfaceShapeMode {
@@ -128,76 +127,5 @@ impl SurfaceElasticState {
     pub fn color_legend(&self, spectral_scalar: Option<(&[f64], bool)>) -> Option<crate::view3d::ColorLegend3d> {
         let use_el = if self.shape_mode == SurfaceShapeMode::ElasticFvK { self.last_result.as_ref() } else { None };
         crate::mesh3d::color_scales::surface_color_legend(use_el, self.color_mode, spectral_scalar)
-    }
-
-    /// Render the `3D Shape`, `kappa_b`, colouring, and FvK readout controls inside `Surfaces`.
-    /// Returns `(need_solve, need_resync_view3d)`.
-    pub fn show_controls(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) -> (bool, bool) {
-        let mut need_solve = false;
-        let mut need_resync = false;
-
-        ui.separator();
-        ui.strong("3D Elastic Relaxation (Föppl–von Kármán)");
-        ui.horizontal_wrapped(|ui| {
-            ui.label("3D Shape:");
-            if ui.selectable_label(self.shape_mode == SurfaceShapeMode::AnalyticRadial, SurfaceShapeMode::AnalyticRadial.label()).clicked()
-                && self.shape_mode != SurfaceShapeMode::AnalyticRadial
-            {
-                self.shape_mode = SurfaceShapeMode::AnalyticRadial;
-                need_resync = true;
-            }
-            if ui.selectable_label(self.shape_mode == SurfaceShapeMode::ElasticFvK, SurfaceShapeMode::ElasticFvK.label()).clicked()
-                && self.shape_mode != SurfaceShapeMode::ElasticFvK
-            {
-                self.shape_mode = SurfaceShapeMode::ElasticFvK;
-                need_solve = true;
-                need_resync = true;
-            }
-        });
-
-        ui.add_enabled_ui(self.shape_mode == SurfaceShapeMode::ElasticFvK, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("κ_b:");
-                if ui.add(egui::Slider::new(&mut self.kappa_b, 1e-4..=1.0).logarithmic(true).custom_formatter(|v, _| format!("{v:.4}"))).changed() {
-                    self.stale = true;
-                    need_solve = true;
-                    need_resync = true;
-                }
-            });
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("3D Colour:");
-            egui::ComboBox::from_id_salt("surf_3d_color").selected_text(self.color_mode.label()).show_ui(ui, |ui| {
-                for cm in SurfaceColor3d::NON_SPECTRAL {
-                    if ui.selectable_value(&mut self.color_mode, cm, cm.label()).changed() {
-                        need_resync = true;
-                    }
-                }
-            });
-        });
-
-        if self.shape_mode == SurfaceShapeMode::ElasticFvK {
-            if self.is_busy() || self.stale {
-                ui.horizontal(|ui| {
-                    if self.is_busy() { ui.spinner(); }
-                    ui.small("previous result — stale");
-                });
-            }
-            if let Some(res) = &self.last_result {
-                ui.small(format!(
-                    "FvK γ = {:.2} | asphericity = {:.2e} | iter = {}",
-                    res.fvk_gamma, res.asphericity, res.n_iter
-                ));
-                ui.small(format!(
-                    "E_stretch = {:.5}, E_bend = {:.5} (conv={})",
-                    res.stretch_energy, res.bend_energy, res.converged
-                ));
-            }
-            if let Some(err) = &self.last_error {
-                ui.colored_label(tokens.status_err, format!("FvK error: {err}"));
-            }
-        }
-        (need_solve, need_resync)
     }
 }

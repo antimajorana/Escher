@@ -19,7 +19,11 @@ impl SurfacesTabState {
         tokens: &ThemeTokens,
     ) -> Option<String> {
         self.poll_background(ui.ctx(), canvas, view3d);
-        ui.strong(format!("Active lattice: {} ({})", active_item.display_with_orig(), active_item.group));
+        ui.strong(format!(
+            "Active lattice: {} · {}",
+            active_item.display_with_orig(),
+            crate::gallery_tab::filter::group_with_orbifold(&active_item.group)
+        ));
         ui.add_space(3.0);
         if self.show_boundary(ui, active_item, tokens) {
             self.request_build(active_item, ui.ctx());
@@ -39,7 +43,7 @@ impl SurfacesTabState {
                 self.request_build(active_item, ui.ctx());
             }
             ui.separator();
-            ui.strong("This lattice: surface_table verdicts (click)");
+            ui.strong("All surfaces on this lattice (click)");
             if let Some(cells) = self.lattice_verdicts(active_item).cloned() {
                 ui.horizontal_wrapped(|ui| {
                     for (c_idx, cell) in cells.iter().enumerate() {
@@ -56,7 +60,7 @@ impl SurfacesTabState {
             }
 
             ui.separator();
-            ui.strong("17 x 8 verdicts, first Delaunay (points) lattice of each group (click)");
+            ui.strong("17 groups × 8 surfaces reference table (click)");
             let matrix = backend.surface_verdict_matrix_ready().unwrap_or_else(|| {
                 ui.horizontal(|ui| {
                     ui.spinner();

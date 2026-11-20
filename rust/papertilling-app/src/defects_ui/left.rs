@@ -23,7 +23,11 @@ impl DefectsTabState {
         let mut dirty = false;
         let mut reset_view = false;
 
-        ui.strong(format!("Active lattice: {} ({})", active_item.display_with_orig(), active_item.group));
+        ui.strong(format!(
+            "Active lattice: {} · {}",
+            active_item.display_with_orig(),
+            crate::gallery_tab::filter::group_with_orbifold(&active_item.group)
+        ));
         if self.initializing {
             ui.spinner();
             ui.label("Preparing the defect catalogue and picture in the background…");
@@ -85,7 +89,7 @@ impl DefectsTabState {
         }
 
         ui.separator();
-        ui.strong("Patch & 2D Drawing Controls");
+        ui.strong("Patch & Drawing");
         let grow_active = self.growth.request(self.sub_tab).is_some();
         ui.horizontal(|ui| {
             ui.label("Radius R:");
@@ -101,7 +105,12 @@ impl DefectsTabState {
         ui.horizontal_wrapped(|ui| {
             ui.label("2D Drawing:");
             for dm in Defect2dMode::ALL {
-                if ui.selectable_label(self.draw_mode == dm, dm.label()).clicked() && self.draw_mode != dm {
+                let plain = match dm {
+                    Defect2dMode::Raw => "Unrelaxed cut",
+                    Defect2dMode::RelaxedDrawing => "Relaxed",
+                    Defect2dMode::ElasticAoMetric => dm.label(),
+                };
+                if ui.selectable_label(self.draw_mode == dm, plain).clicked() && self.draw_mode != dm {
                     self.draw_mode = dm;
                     self.relaxed = dm != Defect2dMode::Raw;
                     dirty = true;

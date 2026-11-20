@@ -124,9 +124,20 @@ impl CombineTabState {
             self.submit_compare(gallery_item);
         }
         if let Some(res) = self.comparer.poll() {
-            let (rep, ms, stats) = res.unwrap_or_else(|err| (Err(err), 0.0, self.cache_stats));
-            self.compare_result = Some(rep);
-            (self.compare_ms, self.cache_stats, self.compare_stale) = (ms, stats, false);
+            match res {
+                Ok((rep, ms, _stats)) => {
+                    self.compare_result = Some(rep);
+                    (self.compare_ms, self.compare_stale) = (ms, false);
+                    #[cfg(test)]
+                    {
+                        self.cache_stats = _stats;
+                    }
+                }
+                Err(err) => {
+                    self.compare_result = Some(Err(err));
+                    (self.compare_ms, self.compare_stale) = (0.0, false);
+                }
+            }
         }
         if self.canvas_dirty
             && let Some(canvas) = canvas

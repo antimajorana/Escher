@@ -139,7 +139,7 @@ pub fn show_core_panel(
     tokens: &ThemeTokens,
 ) {
     ui.horizontal_wrapped(|ui| {
-        ui.strong("Side-by-Side Core Gallery");
+        ui.strong("Core comparison");
         if ui.small_button(if state.collapsed { "Expand ▲" } else { "Collapse ▼" }).clicked() {
             state.collapsed = !state.collapsed;
         }

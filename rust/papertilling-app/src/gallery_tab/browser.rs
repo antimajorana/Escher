@@ -3,7 +3,7 @@
 
 use egui_extras::{Column, TableBuilder};
 
-use super::filter::{BrowseFilter, ChiralFacet, SystemFacet, system_of};
+use super::filter::{BrowseFilter, ChiralFacet, SystemFacet, group_with_orbifold, system_of};
 use super::thumb_cache::LatticeThumbCache;
 use super::{BrowseMode, GalleryTabState};
 use crate::aliases::LatticeAliasKey;
@@ -34,6 +34,14 @@ pub(crate) fn rule_tag(key: &LatticeAliasKey) -> &'static str {
         .into_iter()
         .find(|r| r.slug() == key.rule)
         .map_or(if key.rule == "named" { "Named" } else { "Custom" }, CatalogueRuleUi::short_label)
+}
+
+fn plain_rule_label(r: CatalogueRuleUi) -> &'static str {
+    match r {
+        CatalogueRuleUi::Bonds => "Bond nets",
+        CatalogueRuleUi::Sheet => "Planar tilings",
+        CatalogueRuleUi::Points => "Point Delaunay",
+    }
 }
 
 impl GalleryTabState {
@@ -70,14 +78,15 @@ impl GalleryTabState {
         self.activate_item(item, backend, canvas, true);
     }
 
-    /// Search box, facet pickers and the Cards / Table toggle.
-    pub(super) fn filter_bar(&mut self, ui: &mut egui::Ui) {
+    /// Search box, Cards / Table toggle, and collapsed `"More filters"` drawer (catalogue rule + facets).
+    pub(super) fn filter_bar(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
+        let mut changed = false;
         // Search box alone on its row at the rail width: a wider row would widen the scroll area and clip the cards.
         ui.horizontal(|ui| {
             let clear_w = if self.filter.query.is_empty() { 0.0 } else { 24.0 };
             ui.add(
                 egui::TextEdit::singleline(&mut self.filter.query)
-                    .hint_text("Search name, alias, ITA no. or symbol")
+                    .hint_text("Filter lattices…")
                     .desired_width((ui.available_width() - clear_w).max(60.0)),
             );
             if !self.filter.query.is_empty() && ui.small_button("✕").on_hover_text("Clear search").clicked() {
@@ -87,28 +96,59 @@ impl GalleryTabState {
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.view, BrowserView::Cards, "Cards");
             ui.selectable_value(&mut self.view, BrowserView::Table, "Table");
-            ui.separator();
-            egui::ComboBox::from_id_salt("facet_system")
-                .width(96.0)
-                .selected_text(self.filter.system.map_or("All systems", SystemFacet::label))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.filter.system, None, "All systems");
-                    for s in SystemFacet::ALL {
-                        ui.selectable_value(&mut self.filter.system, Some(s), s.label());
-                    }
-                });
-            egui::ComboBox::from_id_salt("facet_chiral")
-                .width(78.0)
-                .selected_text(self.filter.chirality.label())
-                .show_ui(ui, |ui| {
-                    for c in ChiralFacet::ALL {
-                        ui.selectable_value(&mut self.filter.chirality, c, c.label());
-                    }
-                });
             if !self.filter.is_default() && ui.small_button("Reset filters").clicked() {
                 self.filter = BrowseFilter::default();
             }
         });
+        egui::CollapsingHeader::new("More filters")
+            .id_salt("gallery_left_more")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Catalogue rule:");
+                    for r in CatalogueRuleUi::ALL {
+                        let desc = match r {
+                            CatalogueRuleUi::Bonds => {
+                                "Standard lattice: minimal site and bond orbits; bonds may lower point symmetry"
+                            }
+                            CatalogueRuleUi::Sheet => {
+                                "Atomic crystals: bare site positions alone already have exact group G"
+                            }
+                            CatalogueRuleUi::Points => {
+                                "Delaunay lattice: bare site positions have exact group G; bonds are Voronoi-neighbour dual edges"
+                            }
+                        };
+                        if ui
+                            .selectable_label(self.rule == r, plain_rule_label(r))
+                            .on_hover_text(format!("{} — {desc}", r.label()))
+                            .clicked()
+                        {
+                            self.select_rule(r, backend, canvas);
+                            changed = true;
+                        }
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    egui::ComboBox::from_id_salt("facet_system")
+                        .width(104.0)
+                        .selected_text(self.filter.system.map_or("All systems", SystemFacet::label))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.filter.system, None, "All systems");
+                            for s in SystemFacet::ALL {
+                                ui.selectable_value(&mut self.filter.system, Some(s), s.label());
+                            }
+                        });
+                    egui::ComboBox::from_id_salt("facet_chiral")
+                        .width(86.0)
+                        .selected_text(self.filter.chirality.label())
+                        .show_ui(ui, |ui| {
+                            for c in ChiralFacet::ALL {
+                                ui.selectable_value(&mut self.filter.chirality, c, c.label());
+                            }
+                        });
+                });
+            });
+        changed
     }
 
     /// The lattice list of the current mode (filtered), as cards or table. Returns true when a lattice was picked.
@@ -137,7 +177,7 @@ impl GalleryTabState {
         } else if cross {
             format!("{} across 17 groups: {} match", self.rule.label(), items.len())
         } else {
-            format!("Lattices in {cur_group} ({}, {} entries)", self.rule.label(), items.len())
+            format!("Lattices in {} ({}, {} entries)", group_with_orbifold(cur_group), self.rule.label(), items.len())
         };
         ui.strong(heading);
         if items.is_empty() {
@@ -211,7 +251,7 @@ fn card_tooltip(it: &CatalogueItemUi) -> String {
     format!(
         "{}\n{} — {} | coordination {} | D-symbol {}{chir}",
         it.display_with_orig(),
-        it.group,
+        group_with_orbifold(&it.group),
         rule_tag(&it.alias_key),
         it.coordination,
         it.dsymbol_key

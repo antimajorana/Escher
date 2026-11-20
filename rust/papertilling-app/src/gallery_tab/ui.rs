@@ -3,7 +3,7 @@
 use egui_extras::{Column, TableBuilder};
 
 use super::{BrowseMode, GalleryTabState};
-use crate::backend::{AppBackend, CatalogueRuleUi};
+use crate::backend::AppBackend;
 use crate::canvas2d::Canvas2D;
 
 impl GalleryTabState {
@@ -111,7 +111,7 @@ impl GalleryTabState {
         ui: &mut egui::Ui,
         backend: &AppBackend,
         canvas: &mut Canvas2D,
-        #[allow(unused_variables)] advanced: bool,
+        advanced: bool,
     ) -> bool {
         let mut lattice_changed = false;
         ui.horizontal_wrapped(|ui| {
@@ -133,17 +133,21 @@ impl GalleryTabState {
 
         match self.mode {
             BrowseMode::ByGroup => {
-                self.filter_bar(ui);
+                lattice_changed |= self.filter_bar(ui, backend, canvas);
                 ui.add_space(3.0);
                 lattice_changed |= self.group_tables(ui, backend, canvas);
                 ui.separator();
                 lattice_changed |= self.lattice_list(ui, backend, canvas);
-                ui.separator();
-                let grp = backend.groups()[self.selected_group_idx].symbol;
-                lattice_changed |= self.live_search_section(ui, backend, canvas, grp);
+                if advanced {
+                    ui.separator();
+                    let grp = backend.groups()[self.selected_group_idx].symbol;
+                    lattice_changed |= self.live_search_section(ui, backend, canvas, grp);
+                } else {
+                    self.poll_live_search(ui, backend, canvas);
+                }
             }
             BrowseMode::Named21 => {
-                self.filter_bar(ui);
+                lattice_changed |= self.filter_bar(ui, backend, canvas);
                 ui.add_space(3.0);
                 lattice_changed |= self.lattice_list(ui, backend, canvas);
             }
@@ -156,26 +160,6 @@ impl GalleryTabState {
 
     fn group_tables(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
         let mut changed = false;
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Rule:");
-            for r in CatalogueRuleUi::ALL {
-                let desc = match r {
-                    CatalogueRuleUi::Bonds => "Standard lattice: minimal site and bond orbits; bonds may lower point symmetry",
-                    CatalogueRuleUi::Sheet => "Atomic crystals: bare site positions alone already have exact group G",
-                    CatalogueRuleUi::Points => "Delaunay lattice: bare site positions have exact group G; bonds are Voronoi-neighbour dual edges",
-                };
-                if ui
-                    .selectable_label(self.rule == r, r.short_label())
-                    .on_hover_text(format!("{} — {desc}", r.label()))
-                    .clicked()
-                {
-                    self.select_rule(r, backend, canvas);
-                    changed = true;
-                }
-            }
-        });
-        ui.add_space(3.0);
-
         let groups = backend.groups();
         let rows: Vec<usize> = (0..groups.len()).filter(|&i| self.filter.group_visible(&groups[i])).collect();
         let mut picked_grp: Option<usize> = None;
@@ -183,10 +167,10 @@ impl GalleryTabState {
             TableBuilder::new(ui)
                 .striped(true)
                 .max_scroll_height(135.0)
-                .column(Column::exact(46.0))
-                .column(Column::exact(28.0))
                 .column(Column::exact(84.0))
-                .column(Column::exact(34.0))
+                .column(Column::exact(26.0))
+                .column(Column::exact(76.0))
+                .column(Column::exact(28.0))
                 .column(Column::remainder())
                 .header(18.0, |mut h| {
                     for t in ["Grp", "ITA", "System", "|P|", "List N"] {
@@ -198,16 +182,16 @@ impl GalleryTabState {
                 .body(|mut body| {
                     for &idx in &rows {
                         let g = &groups[idx];
+                        let disp = super::filter::group_with_orbifold(g.symbol);
                         body.row(18.0, |mut row| {
                             row.col(|ui| {
                                 let tip = format!(
-                                    "{} ({}) — max {}-fold, {}",
-                                    g.symbol,
+                                    "{disp} ({}) — max {}-fold, {}",
                                     g.crystal_system,
                                     g.max_rotation,
                                     if g.has_reflection_or_glide { "achiral" } else { "chiral" }
                                 );
-                                if ui.selectable_label(self.selected_group_idx == idx, g.symbol).on_hover_text(tip).clicked() {
+                                if ui.selectable_label(self.selected_group_idx == idx, &disp).on_hover_text(tip).clicked() {
                                     picked_grp = Some(idx);
                                 }
                             });

@@ -84,6 +84,7 @@ pub struct CombineTabState {
     /// `compare_result` belongs to an earlier configuration (a newer comparison is pending or due).
     pub(crate) compare_stale: bool,
     pub(crate) compare_ms: f64,
+    #[cfg(test)]
     pub(crate) cache_stats: (usize, usize),
     pub(super) compare_after_build: bool,
     pub(super) reset_view_on_build: bool,
@@ -151,6 +152,7 @@ impl CombineTabState {
             compare_result: None,
             compare_stale: false,
             compare_ms: 0.0,
+            #[cfg(test)]
             cache_stats: (0, 0),
             compare_after_build: false,
             reset_view_on_build: true,

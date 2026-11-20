@@ -12,7 +12,7 @@ impl CombineTabState {
         backend: &AppBackend,
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
-        #[allow(unused_variables)] advanced: bool,
+        advanced: bool,
     ) -> bool {
         self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
         if self.is_initializing() {
@@ -25,28 +25,34 @@ impl CombineTabState {
             if ui.button("Retry loading lattice").clicked() {
                 self.reload_for_item(gallery_item, backend, canvas, true);
             }
-            ui.small("You can also import a Notebook 3 configuration via Export -> Import .json... in the top bar.");
+            if advanced {
+                ui.small("You can also import a Notebook 3 configuration via Save figure / Export -> Import .json… in the top bar.");
+            }
             return false;
         }
         let (mut dirty, mut reset_view, mut trigger_compare) = (false, false, false);
         ui.horizontal_wrapped(|ui| {
             let item = self.effective_item(gallery_item);
-            ui.strong(format!("Lattice: {} ({})", item.display_with_orig(), item.group));
+            ui.strong(format!(
+                "Lattice: {} · {}",
+                item.display_with_orig(),
+                crate::gallery_tab::filter::group_with_orbifold(&item.group)
+            ));
             if self.override_item.is_some() && ui.small_button("Use Gallery").clicked() {
                 self.reload_for_item(gallery_item, backend, canvas, true);
             }
         });
         ui.separator();
-        ui.strong("Tool Palette (Click / Drag)");
-        ui.radio_value(&mut self.tool_mode, ToolMode::PanAndDrag, "Pan / Select & Drag Defects");
+        ui.strong("Place & Move");
+        ui.radio_value(&mut self.tool_mode, ToolMode::PanAndDrag, "Select & drag defects");
         let has_centres = !self.info.centres.is_empty();
         ui.add_enabled_ui(has_centres, |ui| {
-            ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDisclination, "Click to Place Disclination");
+            ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDisclination, "Place disclination");
         });
-        ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDislocation, "Click to Place Dislocation");
+        ui.radio_value(&mut self.tool_mode, ToolMode::PlaceDislocation, "Place dislocation");
         let has_half_walls = !self.half_wall.choices.is_empty();
         ui.add_enabled_ui(has_half_walls, |ui| {
-            ui.radio_value(&mut self.tool_mode, ToolMode::PlaceHalfWall, "Click to Place Half-Wall (terminated)");
+            ui.radio_value(&mut self.tool_mode, ToolMode::PlaceHalfWall, "Place terminated wall");
         });
 
         if self.tool_mode == ToolMode::PlaceDisclination && has_centres {
@@ -73,21 +79,21 @@ impl CombineTabState {
         });
 
         ui.separator();
-        ui.strong("Motion Physics (ΔN = 0)");
+        ui.strong("Motion Mode");
         let prev_mode = self.motion_mode;
         ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.motion_mode, MotionMode::Conserved, "Conserved (ΔN=0)")
+            ui.selectable_value(&mut self.motion_mode, MotionMode::Conserved, "Conserved glide (ΔN = 0)")
                 .on_hover_text("Dislocations glide only along b; disclinations are locked unless Shift+dragged");
-            ui.selectable_value(&mut self.motion_mode, MotionMode::StepDisclinationEmit, "Step D (emit b)")
+            ui.selectable_value(&mut self.motion_mode, MotionMode::StepDisclinationEmit, "Move disclination (emit b)")
                 .on_hover_text("Dragging a disclination steps it by emitting a ΔN = 0 dislocation");
-            ui.selectable_value(&mut self.motion_mode, MotionMode::FreeSetup, "Free Setup")
+            ui.selectable_value(&mut self.motion_mode, MotionMode::FreeSetup, "Free placement")
                 .on_hover_text("Unconstrained repositioning / climb for preparing initial defects");
         });
         if self.motion_mode != prev_mode {
             self.sync_to_canvas(gallery_item, canvas, false);
         }
         ui.horizontal(|ui| {
-            if ui.checkbox(&mut self.show_glide_lines, "Show glide rails").changed() {
+            if ui.checkbox(&mut self.show_glide_lines, "Show glide lines").changed() {
                 self.sync_to_canvas(gallery_item, canvas, false);
             }
             let busy_drag = self.dragging || self.cut_dragging;
@@ -121,36 +127,21 @@ impl CombineTabState {
         }
 
         ui.separator();
-        ui.strong("Patch & Scan Controls");
+        ui.strong("Picture & Overlays");
         ui.horizontal_wrapped(|ui| {
-            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::FastRelaxed, "Fast Relaxed").clicked() {
+            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::FastRelaxed, "Relaxed").clicked() {
                 self.opts.draw_mode = CombineDrawMode::FastRelaxed;
                 dirty = true;
             }
-            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::Raw, "Raw Surgery").clicked() {
+            if ui.selectable_label(self.opts.draw_mode == CombineDrawMode::Raw, "Unrelaxed cut").clicked() {
                 self.opts.draw_mode = CombineDrawMode::Raw;
                 dirty = true;
             }
             // C1: the "Elastic (AO metric)" choice left the UI (see `live_ops_ao::Defect2dMode::ALL`)
         });
-        if self.opts.draw_mode == CombineDrawMode::FastRelaxed
-            && ui.checkbox(&mut self.opts.full_planar_repair, "Full Planar Repair").changed()
-        {
-            dirty = true;
-        }
-        if ui.checkbox(&mut self.show_branch_cuts, "Show Volterra branch cuts").changed() {
+        if ui.checkbox(&mut self.show_branch_cuts, "Show branch cuts").changed() {
             self.sync_to_canvas(gallery_item, canvas, false);
         }
-        ui.horizontal(|ui| {
-            if ui.checkbox(&mut self.opts.auto_radius, "Auto (~500 sites)").changed() {
-                (dirty, reset_view) = (true, true);
-            }
-            if !self.opts.auto_radius
-                && ui.add(egui::Slider::new(&mut self.opts.manual_radius, MANUAL_R_MIN..=MANUAL_R_MAX).logarithmic(true)).changed()
-            {
-                (dirty, reset_view) = (true, true);
-            }
-        });
         ui.horizontal(|ui| {
             if self.is_building() {
                 ui.spinner();
@@ -170,17 +161,45 @@ impl CombineTabState {
             ));
         });
 
-        ui.horizontal(|ui| {
-            trigger_compare |= ui.button("Compare Single").clicked();
-            trigger_compare |= ui.checkbox(&mut self.auto_compare, "Auto").changed() && self.auto_compare;
-            ui.small("grid:");
-            for g in [1_usize, 2, 3] {
-                if ui.selectable_label(self.grid == g, g.to_string()).clicked() && self.grid != g {
-                    self.grid = g;
-                    trigger_compare |= self.auto_compare;
+        egui::CollapsingHeader::new("More")
+            .id_salt("combine_more")
+            .default_open(false)
+            .show(ui, |ui| {
+                if self.opts.draw_mode == CombineDrawMode::FastRelaxed
+                    && ui.checkbox(&mut self.opts.full_planar_repair, "Full planar repair").changed()
+                {
+                    dirty = true;
                 }
-            }
-        });
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut self.opts.auto_radius, "Auto patch size (~500 sites)").changed() {
+                        (dirty, reset_view) = (true, true);
+                    }
+                    if !self.opts.auto_radius
+                        && ui
+                            .add(egui::Slider::new(&mut self.opts.manual_radius, MANUAL_R_MIN..=MANUAL_R_MAX).logarithmic(true))
+                            .changed()
+                    {
+                        (dirty, reset_view) = (true, true);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.small("Core radius:");
+                    if ui.add(egui::Slider::new(&mut self.opts.core_radius, 1_usize..=4)).changed() {
+                        dirty = true;
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    trigger_compare |= ui.button("Compare now").clicked();
+                    trigger_compare |= ui.checkbox(&mut self.auto_compare, "Auto-compare").changed() && self.auto_compare;
+                    ui.small("Scan grid:");
+                    for g in [1_usize, 2, 3] {
+                        if ui.selectable_label(self.grid == g, g.to_string()).clicked() && self.grid != g {
+                            self.grid = g;
+                            trigger_compare |= self.auto_compare;
+                        }
+                    }
+                });
+            });
 
         if dirty {
             self.request_build(gallery_item, false, self.auto_compare, reset_view);

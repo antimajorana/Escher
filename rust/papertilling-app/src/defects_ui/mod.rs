@@ -53,7 +53,7 @@ impl DefectsTabState {
 
         match self.view_mode {
             DefectViewMode::Planar2D => {
-                ui.strong("2D Surgical Crystal Patch (irregular core rings, cones, A|B domains)");
+                ui.strong("2D Defect Patch");
                 ui.add_space(2.0);
                 self.show_2d_patch(ui, active_item, canvas, tokens);
             }
@@ -69,7 +69,7 @@ impl DefectsTabState {
                     "defects_split",
                     tokens,
                     |ui| {
-                        ui.strong("2D Surgical Crystal Patch");
+                        ui.strong("2D Defect Patch");
                         ui.add_space(2.0);
                         self.show_2d_patch(ui, active_item, canvas, tokens);
                     },

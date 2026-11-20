@@ -53,7 +53,7 @@ impl DefectSubTab {
         match self {
             Self::Dislocations => "Dislocations",
             Self::Disclinations => "Disclinations",
-            Self::Walls => "Walls (Wa-Wd)",
+            Self::Walls => "Mirror & glide walls",
         }
     }
 }

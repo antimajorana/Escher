@@ -38,7 +38,7 @@ impl CombineTabState {
         gallery_item: &CatalogueItemUi,
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
-        #[allow(unused_variables)] advanced: bool,
+        advanced: bool,
     ) {
         if self.is_initializing() || self.init_error.is_some() {
             return;
@@ -46,7 +46,7 @@ impl CombineTabState {
         let mut build_preview: Option<bool> = None;
         ui.strong(format!("Placed Defects ({})", self.specs.len()));
         if self.specs.is_empty() {
-            ui.small("Empty — use a preset or Click-to-Place.");
+            ui.small("Empty — use a preset or Place & Move.");
         } else {
             let outcome = self.placed_table_ui(ui);
             if let Some(idx) = outcome.select_idx
@@ -71,7 +71,7 @@ impl CombineTabState {
             }
             if has_coincident_same_kind_pins(&self.info, &self.specs)
                 && ui
-                    .small_button("Merge coincident pins")
+                    .small_button("Fuse overlapping defects")
                     .on_hover_text("Collapse superposed same-point pins permanently")
                     .clicked()
             {
@@ -89,7 +89,17 @@ impl CombineTabState {
 
         ui.separator();
         self.equivalence_ui(ui, tokens);
-        self.show_inspectors_ui(ui, gallery_item, canvas, tokens);
+        if advanced {
+            self.show_inspectors_ui(ui, gallery_item, canvas, tokens);
+        } else {
+            let (circ_dirty, ov_dirty) =
+                self.inspectors.show_controls_ui(ui, "comb_insp", self.specs.len(), tokens);
+            if circ_dirty {
+                self.on_combine_circuit_changed(gallery_item, canvas);
+            } else if ov_dirty {
+                self.sync_inspectors_to_canvas(gallery_item, canvas);
+            }
+        }
     }
 
     /// The placed-defects table; returns requested actions without double-building.
@@ -253,10 +263,7 @@ impl CombineTabState {
                         ui.small(&rep.verdict);
                     });
                 if !stale {
-                    ui.small(format!(
-                        "compared in {:.1} ms (scan cache {} hit(s), {} miss(es))",
-                        self.compare_ms, self.cache_stats.0, self.cache_stats.1
-                    ));
+                    ui.small(format!("Compared in {:.1} ms", self.compare_ms));
                 }
             }
             Some(Err(err)) => {

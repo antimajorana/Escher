@@ -1,4 +1,4 @@
-use super::{CombineTabState, MotionMode, ToolMode};
+use super::{CombineTabState, ToolMode};
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
 use crate::core_panel::show_core_panel;
@@ -90,12 +90,7 @@ impl CombineTabState {
             self.clear_selection();
             self.sync_selection_to_canvas(canvas);
         }
-        let header = match self.motion_mode {
-            MotionMode::Conserved => "2D Pin Editor [Conserved ΔN=0: dislocations glide along b | Shift+drag disclination: emit b]",
-            MotionMode::StepDisclinationEmit => "2D Pin Editor [Step D: dragging disclination emits b | dislocations glide along b]",
-            MotionMode::FreeSetup => "2D Pin Editor [Free Setup: unconstrained drag | drag empty: pan | scroll/pinch: zoom]",
-        };
-        ui.strong(header);
+        ui.strong("2D Defect Canvas  [drag defect: move, drag empty: pan, scroll: zoom]");
         ui.add_space(2.0);
         let click_to_place = self.tool_mode != ToolMode::PanAndDrag && !self.is_initializing() && self.init_error.is_none();
         let preview_world = match (self.tool_mode, self.last_hover_world) {

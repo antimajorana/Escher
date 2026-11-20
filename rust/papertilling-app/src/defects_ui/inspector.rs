@@ -10,12 +10,12 @@ impl DefectsTabState {
         active_item: &CatalogueItemUi,
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
-        #[allow(unused_variables)] advanced: bool,
+        advanced: bool,
     ) {
         if self.initializing {
             return;
         }
-        ui.strong("Core Charge & 3D Buckling Readout");
+        ui.strong("Topological Charge & Core");
         if self.is_busy() || self.error.is_some() {
             ui.horizontal(|ui| {
                 if self.is_busy() {
@@ -27,15 +27,6 @@ impl DefectsTabState {
         ui.label(&self.readout.charge_summary);
         ui.small(&self.readout.holonomy_detail);
         ui.small(format!("Core structure: {}", self.readout.core_rings));
-        if !self.last_sheet.xyz.is_empty() {
-            let z_min = self.last_sheet.xyz.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
-            let z_max = self.last_sheet.xyz.iter().map(|p| p[2]).fold(f64::NEG_INFINITY, f64::max);
-            let dz_a = (z_max - z_min) / self.last_sheet.mean_bond_len.max(1e-9);
-            ui.small(format!(
-                "3D Sheet: Δz/a = {dz_a:.2} | E_stretch = {:.4}, E_bend = {:.4}",
-                self.last_sheet.stretch_energy, self.last_sheet.bend_energy
-            ));
-        }
         if !self.readout.note.is_empty() {
             ui.colored_label(
                 tokens.status_warn,
@@ -47,13 +38,15 @@ impl DefectsTabState {
         if circ_dirty || ov_dirty {
             self.refresh_and_sync_inspectors(active_item, canvas);
         }
-        crate::bieberbach_ui::show_bieberbach_inspector_section(
-            ui,
-            &active_item.group,
-            &active_item.recipe,
-            &self.inspectors,
-            "def_bieberbach",
-            tokens,
-        );
+        if advanced {
+            crate::bieberbach_ui::show_bieberbach_inspector_section(
+                ui,
+                &active_item.group,
+                &active_item.recipe,
+                &self.inspectors,
+                "def_bieberbach",
+                tokens,
+            );
+        }
     }
 }

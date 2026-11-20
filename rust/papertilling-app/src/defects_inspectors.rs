@@ -187,7 +187,7 @@ impl DefectInspectors {
         let mut ov_dirty = false;
 
         ui.separator();
-        ui.strong("Burgers Circuit & Parallel Transport");
+        ui.strong("Burgers Circuit");
         ui.horizontal_wrapped(|ui| {
             if ui.checkbox(&mut self.circuit.enabled, "Burgers Circuit").changed() {
                 circ_dirty = true;
@@ -274,13 +274,13 @@ impl DefectInspectors {
         }
 
         ui.horizontal(|ui| {
-            ui.small("2D Overlay:");
+            ui.small("Color by:");
             let prev = self.overlay_mode;
             egui::ComboBox::from_id_salt(format!("{id_prefix}_2d_ov"))
-                .selected_text(self.overlay_mode.label())
+                .selected_text(plain_overlay_label(self.overlay_mode))
                 .show_ui(ui, |ui| {
                     for m in CrystalOverlayMode::NON_SPECTRAL.into_iter().filter(|&m| overlay_shown(m)) {
-                        ui.selectable_value(&mut self.overlay_mode, m, m.label());
+                        ui.selectable_value(&mut self.overlay_mode, m, plain_overlay_label(m));
                     }
                 });
             if self.overlay_mode != prev {
@@ -288,5 +288,15 @@ impl DefectInspectors {
             }
         });
         (circ_dirty, ov_dirty)
+    }
+}
+
+fn plain_overlay_label(m: CrystalOverlayMode) -> &'static str {
+    match m {
+        CrystalOverlayMode::Standard | CrystalOverlayMode::GsvEnergyShear => m.label(),
+        CrystalOverlayMode::BondStretchStrain => "Bond stretch",
+        CrystalOverlayMode::VertexAngleShear => "Adjacent bond-angle shear",
+        CrystalOverlayMode::PlaquetteFlux => "Plaquette flux",
+        CrystalOverlayMode::SeamConnections => "Volterra seam",
     }
 }

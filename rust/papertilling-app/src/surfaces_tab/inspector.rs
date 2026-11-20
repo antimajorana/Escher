@@ -10,23 +10,15 @@ impl SurfacesTabState {
     pub fn show_inspector_panel(
         &mut self,
         ui: &mut egui::Ui,
-        canvas: &mut Canvas2D,
-        view3d: &mut View3dState,
+        _canvas: &mut Canvas2D,
+        _view3d: &mut View3dState,
         tokens: &ThemeTokens,
     ) {
-        let (need_fvk, need_resync) = self.elastic.show_controls(ui, tokens);
-        if need_fvk && let Some(mesh) = &self.current_mesh {
-            self.elastic.request_relax(mesh.clone(), Some(ui.ctx()));
-        }
-        if need_resync {
-            self.sync_view3d_and_colors(canvas, view3d);
-        }
-        ui.separator();
         self.show_check_readout(ui, tokens);
     }
 
     fn show_check_readout(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
-        ui.strong("Topological Invariants Check");
+        ui.strong("Topology & Euler Characteristic");
         if let (Some(mesh), Some(rep)) = (&self.current_mesh, &self.current_report) {
             let badge_col = if rep.ok {
                 verdict_colour(VerdictKindUi::Ok, tokens)
