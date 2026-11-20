@@ -303,3 +303,29 @@ fn frieze_refused_scene(sym: &str, why: &str) -> (Scene2D, GpuMeshData, String) 
     };
     (Scene2D::VectorScene { primitives: prim }, GpuMeshData { radius: 1.0, ..Default::default() }, format!("1D Frieze {sym}: {why}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Hand: p1, p2, p1m1 have no fixed-point-free axis flip, so Möbius is refused ([PROVED]).
+    #[test]
+    fn every_frieze_quotient_builds_or_shows_its_refusal() {
+        for (i, sym) in FRIEZE_SYMBOLS.iter().enumerate() {
+            for topo in [FriezeTopology::OpenStrip, FriezeTopology::Cylinder, FriezeTopology::Mobius] {
+                let st = SubperiodicPanelState { frieze_idx: i, topology: topo, pristine_only: true, ..Default::default() };
+                let (scene, _, _) = st.build_scenes();
+                let Scene2D::VectorScene { primitives: prim } = scene else { panic!("vector scene expected") };
+                let refused = topo == FriezeTopology::Mobius && matches!(*sym, "p1" | "p2" | "p1m1");
+                assert_eq!(prim.title.ends_with("refused"), refused, "{sym} {topo:?}");
+                if refused {
+                    assert!(prim.note.starts_with("[PROVED]"));
+                } else {
+                    let p = build_frieze_patch(sym, st.cells, topo, FriezeDefect::None).unwrap();
+                    assert_eq!(prim.lines.len(), p.edges.len() - p.wrap_edges.len(), "{sym} {topo:?}");
+                    assert_eq!(p.wrap_edges.is_empty(), topo == FriezeTopology::OpenStrip);
+                }
+            }
+        }
+    }
+}
