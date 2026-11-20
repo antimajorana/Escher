@@ -36,6 +36,22 @@ def seed_tiles(base, seed: str):
     raise ValueError(_DIRICHLET_H2)
 
 
+def seed_centre(base, seed: str):
+    """Point the drawing is centred on: tile centre, base vertex 0 (vertex seed) or edge-0 midpoint (edge seed)."""
+    if seed == "vertex":
+        return base.vertices[0]
+    if seed == "edge":
+        return base.edge_midpoints[0]
+    return vc._ORIGIN
+
+
+def recentre(x):
+    """Lorentz boost taking hyperboloid point x to (0, 0, 1): [[I + s s^T / (1 + t), -s], [-s^T, t]]."""
+    a, b, t = x
+    k = 1.0 / (1.0 + t)
+    return ((1.0 + a * a * k, a * b * k, -a), (a * b * k, 1.0 + b * b * k, -b), (-a, -b, t))
+
+
 def seed_label(p: int, q: int, seed: str) -> str:
     if one_tile(seed):
         return f"one {p}-gon"
@@ -268,7 +284,7 @@ def grow_s2(p: int, faces, seed: str, max_layers: int) -> dict:
         es = {e for f in sel for e in edges[f]}
         return len(vs) - len(es) + len(sel)
 
-    face_layer = [None] * len(faces)
+    face_layer: list = [None] * len(faces)
     for f in s:
         face_layer[f] = 0
     counts, chis, stopped = [len(s)], [euler(s)], None
@@ -285,6 +301,5 @@ def grow_s2(p: int, faces, seed: str, max_layers: int) -> dict:
         s |= grown
         counts.append(len(s))
         chis.append(euler(s))
-    big = 2**64 - 1  # Rust usize::MAX for a face never reached (cannot happen on a connected sphere)
-    return {"seed": seed, "face_layer": [big if x is None else x for x in face_layer], "layer_counts": counts,
+    return {"seed": seed, "face_layer": face_layer, "layer_counts": counts,
             "layer_euler": chis, "stopped": stopped}

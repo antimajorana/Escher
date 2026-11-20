@@ -189,3 +189,55 @@ fn pilot_h2_layers_timing() {
         }
     }
 }
+
+#[test]
+fn seeded_drawings_are_centred_on_the_seed() {
+    // The vertex seed is drawn with its vertex at the disk centre; the edge seed with its edge's midpoint there, so
+    // the two ends of that edge are opposite points z, -z (hand: the boost fixes the geodesic through the seed).
+    let v = build_hyperbolic_tiling_seeded(5, 4, HyperbolicStyle::RegularPQ, 0, 0, SeedKind::Vertex).unwrap();
+    assert!(v.poincare_pts.iter().any(|z| z[0].hypot(z[1]) < 1e-12));
+    let e = build_hyperbolic_tiling_seeded(5, 4, HyperbolicStyle::RegularPQ, 0, 0, SeedKind::Edge).unwrap();
+    let opposite = |a: [f64; 2], b: [f64; 2]| (a[0] + b[0]).hypot(a[1] + b[1]) < 1e-12 && a[0].hypot(a[1]) > 1e-3;
+    assert!(e.poincare_pts.iter().any(|&a| e.poincare_pts.iter().any(|&b| opposite(a, b))));
+    // The tile seed keeps the tile centre at the disk centre (no centre point is a vertex).
+    let c = build_hyperbolic_tiling_seeded(5, 4, HyperbolicStyle::RegularPQ, 0, 0, SeedKind::Cell).unwrap();
+    assert!(c.poincare_pts.iter().all(|z| z[0].hypot(z[1]) > 1e-3));
+}
+
+/// Layers are no longer clamped, so every path is built at the deepest request (64): each must stop at its caps with
+/// a reason, never panic or exceed them. Covers all 92 pairs p, q <= 12 on the regular, kagome and dual paths with
+/// wedge delta 0, -1, +1 (tile seed), and the vertex and edge seeds on the regular path.
+#[test]
+fn deepest_request_stops_at_the_caps_on_every_path() {
+    let t0 = Instant::now();
+    let (mut built, mut refused) = (0, Vec::new());
+    for p in 3..=12 {
+        for q in 3..=12 {
+            if (p - 2) * (q - 2) <= 4 {
+                continue;
+            }
+            let mut cases: Vec<(HyperbolicStyle, i32, SeedKind)> = Vec::new();
+            for style in [HyperbolicStyle::RegularPQ, HyperbolicStyle::RectifiedKagome, HyperbolicStyle::DualQP] {
+                for delta in [0, -1, 1] {
+                    cases.push((style, delta, SeedKind::Cell));
+                }
+            }
+            cases.push((HyperbolicStyle::RegularPQ, 0, SeedKind::Vertex));
+            cases.push((HyperbolicStyle::RegularPQ, 0, SeedKind::Edge));
+            for (style, delta, seed) in cases {
+                match build_hyperbolic_tiling_seeded(p, q, style, 64, delta, seed) {
+                    Ok(t) => {
+                        built += 1;
+                        assert!(t.faces.len() <= super::DRAW_CAPS.max_faces, "{{{p},{q}}} {style:?} {delta} {seed:?}");
+                        assert!(t.complete_through_shell < 64 && t.face_shell.len() == t.faces.len());
+                        assert!(t.growth_rule.contains("omitted") || t.growth_rule.contains("truncated") || t.growth_rule.contains("precision"),
+                            "{{{p},{q}}} {style:?} {delta} {seed:?}: no stop reason in {}", t.growth_rule);
+                    }
+                    Err(e) => refused.push(format!("{{{p},{q}}} {style:?} {delta} {seed:?}: {e}")),
+                }
+            }
+        }
+    }
+    println!("# time all pairs/paths at layers 64: {:?} ({built} built, {} refused)", t0.elapsed(), refused.len());
+    assert!(refused.is_empty(), "{refused:#?}");
+}

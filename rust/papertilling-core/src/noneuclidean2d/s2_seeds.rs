@@ -12,8 +12,8 @@ use crate::growth::{LayerStats, SeedKind, Stopped};
 /// Layer table of one seeded growth on a finite face list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct S2Growth {
-    /// Layer at which each face joins (`usize::MAX` if never, which cannot happen on a connected sphere).
-    pub face_layer: Vec<usize>,
+    /// Layer at which each face joins; `None` for a face not reached within the requested layers.
+    pub face_layer: Vec<Option<usize>>,
     /// Readout of `S_0 .. S_K`.
     pub stats: Vec<LayerStats>,
     /// `Closed { layer }` when `S_layer` is the whole sphere, else `None` (stopped by `max_layers`).
@@ -88,9 +88,9 @@ pub fn grow_s2(p: usize, faces: &[Vec<usize>], seed: SeedKind, max_layers: usize
             return Err("the Dirichlet seed is defined for E² lattices only; use a vertex, edge or face seed".into());
         }
     };
-    let mut face_layer = vec![usize::MAX; faces.len()];
+    let mut face_layer = vec![None; faces.len()];
     for &f in &s {
-        face_layer[f] = 0;
+        face_layer[f] = Some(0);
     }
     let mut stats = vec![layer_stats(faces, &edges, &s, s.len(), p)];
     let mut stopped = None;
@@ -105,7 +105,7 @@ pub fn grow_s2(p: usize, faces: &[Vec<usize>], seed: SeedKind, max_layers: usize
         let verts: BTreeSet<usize> = s.iter().flat_map(|&f| faces[f].iter().copied()).collect();
         let grown = at(&|f| !s.contains(&f) && faces[f].iter().any(|v| verts.contains(v)));
         for &f in &grown {
-            face_layer[f] = k + 1;
+            face_layer[f] = Some(k + 1);
         }
         s.extend(grown.iter().copied());
         stats.push(layer_stats(faces, &edges, &s, grown.len(), p));
@@ -204,8 +204,10 @@ mod unified_tests {
         assert_eq!(cube.growth.layer_counts, vec![1, 5, 6]);
         assert_eq!(cube.growth.layer_euler, vec![1, 1, 2]);
         assert!(cube.growth.stopped.as_deref().unwrap().starts_with("closed at layer 2"));
-        // Asked for fewer layers than closure needs: no stop.
-        assert_eq!(build_unified_pq(4, 3, 1).unwrap().growth.stopped, None);
+        // Asked for fewer layers than closure needs: no stop, and the opposite face is not reached (None).
+        let short = build_unified_pq(4, 3, 1).unwrap();
+        assert_eq!(short.growth.stopped, None);
+        assert_eq!(short.growth.face_layer.iter().filter(|l| l.is_none()).count(), 1);
         // H² vertex seed {5,4}: S_0 = 4, S_1 = 24 tiles (cox_grow.py, and the hand layer-1 formula in
         // hyperbolic/seed_tests.rs); every requested layer is drawn, so no stop.
         let h = build_unified_pq_seeded(5, 4, 1, SeedKind::Vertex).unwrap();
@@ -214,8 +216,17 @@ mod unified_tests {
         assert_eq!(build_unified_pq(5, 4, 0).unwrap().n_faces, 1);
         let deep = build_unified_pq(5, 4, 9).unwrap();
         assert!(deep.growth.stopped.as_deref().is_some_and(|s| s.contains("omitted") || s.contains("truncated")));
-        // E²: one-face growth only; other seeds are refused with the place they are built.
+        // E²: one-face growth only; other seeds are refused with the place they are built. At the deepest layer
+        // (E2_MAX_LAYERS = 40) the face counts are the plan §2.4 face-seed forms (2n+1)^2 [hand], 6n^2 + 6n + 1
+        // [fit, n <= 8 checked independently] and 3n^2 + 3n + 1 [hand], and the patch is a disk.
         assert_eq!(build_unified_pq(4, 4, 0).unwrap().n_faces, 1);
+        let t0 = std::time::Instant::now();
+        for (p, q, want) in [(4, 4, 81 * 81), (3, 6, 6 * 1600 + 240 + 1), (6, 3, 3 * 1600 + 120 + 1)] {
+            let t = build_unified_pq(p, q, 40).unwrap();
+            assert_eq!((t.n_faces, t.euler_chi, t.layers), (want, 1, 40), "{{{p},{q}}}");
+        }
+        println!("# time E2 unified 40 layers, 3 tilings: {:?}", t0.elapsed());
+        assert_eq!(build_unified_pq(4, 4, 99).unwrap().layers, 40);
         let e2 = build_unified_pq_seeded(4, 4, 2, SeedKind::Vertex).unwrap_err();
         assert!(e2.contains("plane inflation"), "{e2}");
     }

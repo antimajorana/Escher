@@ -11,7 +11,7 @@
 use super::boundary_counts::{letter_counts_prefix, seed_letters};
 use super::inflation::is_hyperbolic;
 use super::inflation::{
-    BaseFace, HypPointSet, IDENTITY, Mat3, T_PRECISION_LIMIT, VcPatch, gamma_pq, mat_mul, mat_vec,
+    BaseFace, HypPointSet, IDENTITY, Mat3, T_PRECISION_LIMIT, VcPatch, Vec3, gamma_pq, mat_mul, mat_vec,
 };
 use crate::growth::SeedKind;
 
@@ -23,6 +23,26 @@ pub fn seed_tiles(base: &BaseFace, seed: SeedKind) -> Result<Vec<Mat3>, String> 
         SeedKind::Edge => Ok(vec![IDENTITY, base.reflections[0]]),
         SeedKind::Dirichlet => Err("the Dirichlet seed is defined for E² lattices only; use a vertex, edge or tile seed".into()),
     }
+}
+
+/// The point a drawing of this seed is centred on: the base tile centre (tile seed), base vertex 0 (vertex seed)
+/// or the midpoint of base edge 0 (edge seed), so that the drawing caps, measured from the disk centre, cut the
+/// patch symmetrically about the seed.
+pub fn seed_centre(base: &BaseFace, seed: SeedKind) -> Vec3 {
+    match seed {
+        SeedKind::Vertex => base.vertices[0],
+        SeedKind::Edge => base.edge_midpoints[0],
+        _ => [0.0, 0.0, 1.0],
+    }
+}
+
+/// The Lorentz boost taking the hyperboloid point `x` to the origin `(0, 0, 1)` along the geodesic joining them:
+/// with `s = (x0, x1)` and `t = x2`, `M = [[I + s s^T / (1 + t), -s], [-s^T, t]]`. Check: `M x = (s (1 + (t^2 - 1) /
+/// (1 + t) - t), t^2 - |s|^2) = (0, 0, 1)`. For `x` = the origin it is exactly the identity.
+pub fn recentre(x: Vec3) -> Mat3 {
+    let (a, b, t) = (x[0], x[1], x[2]);
+    let k = 1.0 / (1.0 + t);
+    [[1.0 + a * a * k, a * b * k, -a], [a * b * k, 1.0 + b * b * k, -b], [-a, -b, t]]
 }
 
 /// Short description of the seed for readouts.

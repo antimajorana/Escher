@@ -66,9 +66,9 @@ fn cell_seed() -> SeedKind {
 }
 
 /// Largest layer index accepted by [`build_hyperbolic_tiling_seeded`] (layers are 0-based, layer 0 = the seed).
-/// It only bounds the loop: the drawn depth is set by the face cap [`DRAW_CAPS`] (growth stops at twice the cap and
-/// the readout says which shell was omitted). Every hyperbolic pair grows at least like {3,7} (|S_n| passes 2000
-/// tiles by n = 6 from one tile), so no layer beyond about 8 is ever drawn.
+/// It only bounds the loop: the drawn depth is set by [`DRAW_CAPS`] (growth stops at twice the face cap and the
+/// readout says which shell was omitted or truncated). The slowest-growing pair is {7,3}: from one tile |S_6| = 1625
+/// and |S_7| = 4264 (boundary-letter counter), so no tile-seed layer beyond 6 is ever drawn.
 pub const MAX_H2_LAYERS: usize = 64;
 
 #[inline]
@@ -198,13 +198,16 @@ fn vertex_completion_patch(p: usize, q: usize, lay: usize, caps: DrawCaps, seed:
     let mut set = inflation::HypPointSet::new(inflation::hyp_dist(vc.base.vertices[0], vc.base.vertices[1]));
     let mut complete = keep - 1;
     let (mut faces, mut face_shell) = (Vec::new(), Vec::new());
+    // Draw centred on the seed (the identity for the tile seed), so the radius cap cuts symmetrically about it.
+    let m = inflation_seeds::recentre(inflation_seeds::seed_centre(&vc.base, seed));
     for (i, &s) in vc.shell.iter().enumerate().take_while(|&(_, &s)| s < keep) {
-        if s > 0 && c_norm2(inflation::hyperboloid_to_poincare(vc.centre(i))) > max_centre_radius.powi(2) {
+        let centre = inflation::mat_vec(&m, vc.centre(i));
+        if s > 0 && c_norm2(inflation::hyperboloid_to_poincare(centre)) > max_centre_radius.powi(2) {
             complete = complete.min(s - 1);
             continue;
         }
         let pts3 = vc.face_vertices(i);
-        faces.push(pts3.into_iter().map(|x| set.insert(x).0).collect());
+        faces.push(pts3.into_iter().map(|x| set.insert(inflation::mat_vec(&m, x)).0).collect());
         face_shell.push(s);
     }
     // The band guard sees `hyp_dist` only, not drift off the hyperboloid; for centres within the

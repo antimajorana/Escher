@@ -83,15 +83,16 @@ def _vertex_completion_patch(p: int, q: int, lay: int, seed: str = "cell"):
     pset = vc.HypPointSet(vc.hyp_dist(patch.base.vertices[0], patch.base.vertices[1]))
     complete = keep - 1
     faces, face_shell = [], []
+    m = seeds.recentre(seeds.seed_centre(patch.base, seed))  # centred on the seed; identity for the tile seed
     for i, s in enumerate(patch.shell):
         if s >= keep:
             break
         if s > 0:
-            z = vc.hyperboloid_to_poincare(patch.centre(i))
+            z = vc.hyperboloid_to_poincare(vc.mat_vec(m, patch.centre(i)))
             if z[0] * z[0] + z[1] * z[1] > MAX_CENTRE_RADIUS**2:
                 complete = min(complete, s - 1)
                 continue
-        faces.append([pset.insert(x)[0] for x in patch.face_vertices(i)])
+        faces.append([pset.insert(vc.mat_vec(m, x))[0] for x in patch.face_vertices(i)])
         face_shell.append(s)
     if pset.suspect > 0:
         raise ValueError(f"{{{p},{q}}}: f64 precision: {pset.suspect} drawn points have an ambiguous dedup distance")

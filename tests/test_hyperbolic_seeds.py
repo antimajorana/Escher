@@ -161,3 +161,24 @@ def test_budget_estimate_is_exact(no_rust):
     # {12,12} vertex seed: a_1 = q (q-3) + q (p-3)(q-2) = 1188 (hand); the stop quotes the exact next shell.
     vc = seeds.grow_vertex_completion_seeded(12, 12, "vertex", 64, 1000)
     assert vc.stopped == "face budget 1000: shell 1 (~1188 faces) not built" and vc.shell_sizes == [12]
+
+
+def test_seeded_drawings_centred_and_unreached_faces(no_rust):
+    v = build_hyperbolic_tiling(5, 4, "RegularPQ", 0, 0, seed="vertex")
+    assert any(math.hypot(*z) < 1e-12 for z in v["poincare_pts"])
+    e = build_hyperbolic_tiling(5, 4, "RegularPQ", 0, 0, seed="edge")
+    pts = e["poincare_pts"]
+    assert any(math.hypot(a[0] + b[0], a[1] + b[1]) < 1e-12 and math.hypot(*a) > 1e-3 for a in pts for b in pts)
+    short = pq.build_unified_pq(4, 3, 1)["growth"]
+    assert short["stopped"] is None and short["face_layer"].count(None) == 1
+
+
+def test_deep_requests_stop_at_caps(no_rust):
+    # Pilot (2026-11-20): each of these builds takes 0.2-0.7 s in Python.
+    for args in [(7, 3, "RectifiedKagome", 64, 0), (7, 3, "RegularPQ", 64, 1), (4, 5, "RegularPQ", 64, -1)]:
+        t = build_hyperbolic_tiling(*args)
+        assert len(t["faces"]) <= 1000 and t["complete_through_shell"] < 64 and "omitted" in t["growth_rule"]
+    # E^2 from one face at 12 layers: (2n+1)^2 [hand], 6n^2+6n+1 [fit], 3n^2+3n+1 [hand]; a disk.
+    for (p, q), want in (((4, 4), 625), ((3, 6), 937), ((6, 3), 469)):
+        u = pq.build_unified_pq(p, q, 12)
+        assert (u["n_faces"], u["euler_chi"]) == (want, 1)

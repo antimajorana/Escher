@@ -12,8 +12,9 @@ use crate::hyperbolic::{HyperbolicStyle, build_hyperbolic_tiling_seeded};
 use super::s2_seeds::grow_s2;
 use super::unified_s2::build_spherical_pq;
 
-/// Largest layer index of the E² path (0-based). Plan §6 pilot (2026-11-20, release): the plane touching rule
-/// reaches n = 40 in <= 150 ms (kagome 14 762 faces, {4,4} 6 724), so 40 layers cost well under a second.
+/// Largest layer index of the E² path (0-based). Measured 2026-11-20 (C1 WP-G3) at 40 layers from one face:
+/// {4,4} 6 561, {3,6} 9 841, {6,3} 4 921 faces (the plan §2.4 closed forms), in the pure-Python fallback
+/// 2.3-2.8 s per build, in Rust (release) 0.65 s for the three (`s2_seeds::unified_tests`, `# time`).
 pub const E2_MAX_LAYERS: usize = 40;
 
 /// Seeded layer growth readout of a `{p, q}` build (C1 WP-G3). Empty (the default) where it is not measured.
@@ -21,8 +22,9 @@ pub const E2_MAX_LAYERS: usize = 40;
 pub struct PqGrowth {
     /// The seed grown from; `None` when no layer table was computed.
     pub seed: Option<SeedKind>,
-    /// Layer at which each face of `faces` joins (S² and H²; empty on E²).
-    pub face_layer: Vec<usize>,
+    /// Layer at which each face of `faces` joins (S² and H²; empty on E²); `None` for an S² face not reached
+    /// within the requested layers.
+    pub face_layer: Vec<Option<usize>>,
     /// `|S_k|` for each complete layer `k = 0, 1, ..`.
     pub layer_counts: Vec<usize>,
     /// χ of `S_k` (S² only; empty where not measured).
@@ -117,7 +119,7 @@ pub fn build_unified_pq_seeded(p: usize, q: usize, layers: usize, seed: SeedKind
     let complete = h.complete_through_shell;
     let growth = PqGrowth {
         seed: Some(h.seed),
-        face_layer: h.face_shell.clone(),
+        face_layer: h.face_shell.iter().map(|&s| Some(s)).collect(),
         layer_counts: (0..=complete).map(|k| h.face_shell.iter().filter(|&&s| s <= k).count()).collect(),
         layer_euler: Vec::new(),
         stopped: (complete < h.layers).then(|| h.growth_rule.clone()),
