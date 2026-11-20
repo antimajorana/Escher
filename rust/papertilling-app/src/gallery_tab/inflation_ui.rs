@@ -325,6 +325,8 @@ impl GalleryInflationState {
     }
 }
 
+type InflatedPatchOut = (Scene2D, i32, Vec<ShellStats>, String, Option<String>);
+
 fn build_inflated_patch(
     cell: &Cell2D,
     seed_choice: E2SeedChoice,
@@ -333,7 +335,7 @@ fn build_inflated_patch(
     steps: usize,
     max_faces: usize,
     show_unit_cell: bool,
-) -> Result<(Scene2D, i32, Vec<ShellStats>, String, Option<String>), String> {
+) -> Result<InflatedPatchOut, String> {
     let tiling = PlaneTiling::new(cell)?;
     let seed = match seed_override {
         Some(s) => s,

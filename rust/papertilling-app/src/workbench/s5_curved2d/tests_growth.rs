@@ -121,7 +121,7 @@ fn kittest_s5_sliders_driven_to_caps_show_stop_banners() {
         app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     }
     wait_until(&mut h, "S5 pq cap", |a| !a.workbench_busy() && !a.workbench.dirty);
-    assert!(h.query_by_label_contains("Stopped at layer 3 (requested 8)").is_some());
+    assert!(h.query_all_by_label_contains("Stopped at layer 3 (requested 8)").next().is_some());
 
     // Wythoff {7,3} at slider max layers = 6 -> face budget 600 banner appears.
     {
@@ -133,7 +133,7 @@ fn kittest_s5_sliders_driven_to_caps_show_stop_banners() {
         app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     }
     wait_until(&mut h, "S5 wythoff cap", |a| !a.workbench_busy() && !a.workbench.dirty);
-    assert!(h.query_by_label_contains("face budget 600").is_some());
+    assert!(h.query_all_by_label_contains("face budget 600").next().is_some());
 
     // Surfaces {5,4} at slider max layers = 8 -> Stopped banner appears.
     {
@@ -145,5 +145,5 @@ fn kittest_s5_sliders_driven_to_caps_show_stop_banners() {
         app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     }
     wait_until(&mut h, "S5 surfaces cap", |a| !a.workbench_busy() && !a.workbench.dirty);
-    assert!(h.query_by_label_contains("Stopped at layer 3 (requested 8)").is_some());
+    assert!(h.query_all_by_label_contains("Stopped at layer 3 (requested 8)").next().is_some());
 }

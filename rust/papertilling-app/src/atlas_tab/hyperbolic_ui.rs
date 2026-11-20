@@ -74,10 +74,12 @@ pub struct HyperbolicPanelState {
     pub shell_key: Option<(usize, usize)>,
     /// Uncapped BDF vertex-completion shell counts, at most [`SHELL_CACHE_MAX`] `(p, q, seed)` keys
     /// (oldest dropped first), so Regular <-> Dual and seed toggles do not recompute.
-    pub shell_cache: Vec<((usize, usize, SeedKind), Result<ShellTable, String>)>,
+    pub shell_cache: Vec<ShellCacheEntry>,
     /// Which shells the drawn patch contains (from the tiling's `growth_rule`).
     pub drawn_patch_note: String,
 }
+
+pub type ShellCacheEntry = ((usize, usize, SeedKind), Result<ShellTable, String>);
 
 impl Default for HyperbolicPanelState {
     fn default() -> Self {

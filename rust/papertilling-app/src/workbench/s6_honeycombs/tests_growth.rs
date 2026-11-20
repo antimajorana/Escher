@@ -126,7 +126,8 @@ fn s3_600_cell_closes_at_layer_four_with_chi_zero() {
 fn cubic_434_through_schlafli_matches_all_four_seed_box_formulas_and_reaches_layer_ten() {
     // Hand formulas (c1-plan.md §2.4): boxes of whole cubes in {4,3,4}:
     // Cell (2n+1)³, Vertex (2n+2)³, Face (2n+1)²(2n+2), Edge (2n+1)(2n+2)².
-    let cases: [(SeedKind, fn(usize) -> usize); 4] = [
+    type SeedFormula = (SeedKind, fn(usize) -> usize);
+    let cases: [SeedFormula; 4] = [
         (SeedKind::Cell, |n| (2 * n + 1).pow(3)),
         (SeedKind::Vertex, |n| (2 * n + 2).pow(3)),
         (SeedKind::Face, |n| (2 * n + 1).pow(2) * (2 * n + 2)),
@@ -198,8 +199,8 @@ fn kittest_s6_h3_cap_banner_and_paracompact_ball_controls() {
         app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     }
     wait_until(&mut h, "{5,3,5} cap", |a| !a.workbench_busy() && !a.workbench.dirty);
-    assert!(h.query_by_label_contains("layer 2 needs more than 120000 cells (cap 120000)").is_some());
-    assert!(h.query_by_label_contains("120001").is_none());
+    assert!(h.query_all_by_label_contains("layer 2 needs more than 120000 cells (cap 120000)").next().is_some());
+    assert!(h.query_all_by_label_contains("120001").next().is_none());
 
     // Switch to paracompact {3,3,6}: Ball radius R slider and [PROVED] ideal-vertex reason appear.
     {
@@ -210,6 +211,6 @@ fn kittest_s6_h3_cap_banner_and_paracompact_ball_controls() {
         app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     }
     wait_until(&mut h, "{3,3,6} ball", |a| !a.workbench_busy() && !a.workbench.dirty);
-    assert!(h.query_by_label_contains("Ball radius R:").is_some());
-    assert!(h.query_by_label_contains("[PROVED] an ideal vertex lies in infinitely many cells").is_some());
+    assert!(h.query_all_by_label_contains("Ball radius R:").next().is_some());
+    assert!(h.query_all_by_label_contains("[PROVED] an ideal vertex lies in infinitely many cells").next().is_some());
 }

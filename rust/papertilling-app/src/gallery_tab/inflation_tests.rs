@@ -35,7 +35,7 @@ fn honeycomb_default_four_layers_gives_75_hexagons_by_hand() {
     assert!(st.inflation.last_shells.iter().all(|s| s.topology.chi == 1));
     match cv.scene() {
         Scene2D::VectorScene { primitives } => assert_eq!(primitives.polygons.len(), 75),
-        other => panic!("expected VectorScene, got {other:?}"),
+        _ => panic!("expected VectorScene"),
     }
 }
 
@@ -116,7 +116,7 @@ fn face_drawing_cap_stops_at_last_complete_layer_and_sets_stop_note() {
     assert!(stop.contains("layer 40") && stop.contains("10086") && stop.contains("10000"), "{stop}");
     match cv.scene() {
         Scene2D::VectorScene { primitives } => assert_eq!(primitives.polygons.len(), 9_600),
-        other => panic!("expected VectorScene, got {other:?}"),
+        _ => panic!("expected VectorScene"),
     }
 
     let ctx = egui::Context::default();

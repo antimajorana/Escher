@@ -119,11 +119,13 @@ fn kittest_atlas_h2_seed_toggle_and_slider_at_cap_shows_stop_banner() {
         );
     h.run_steps(4);
 
-    // Click Vertex seed on {7,3} at layers = 2: S_0 = 3, S_1 = 15, S_2 = 57 heptagons.
+    // Click Vertex seed on {7,3} at layers = 2:
+    // Hand (q = 3 spoke count): S_0 = 3 (∂E = 15, 3 concave + 12 convex); S_1 adds 12 heptagons sharing 12 spokes
+    // -> |S_1| = 15 (∂E = 84 - 15 - 24 = 45, 12 concave + 33 convex); S_2 adds 45 - 12 = 33 -> |S_2| = 48.
     h.get_by_label("Vertex").click();
     h.run_steps(3);
     assert_eq!(h.state().atlas.hyperbolic.seed, SeedKind::Vertex);
-    assert_eq!(h.state().atlas.hyperbolic.cache.as_ref().unwrap().base.faces.len(), 57);
+    assert_eq!(h.state().atlas.hyperbolic.cache.as_ref().unwrap().base.faces.len(), 48);
 
     // Drive Layers to slider cap (8): {7,3} Vertex seed exceeds 1000 faces before layer 8, showing the stop banner.
     {
@@ -134,6 +136,6 @@ fn kittest_atlas_h2_seed_toggle_and_slider_at_cap_shows_stop_banner() {
     h.run_steps(4);
     let complete = h.state().atlas.hyperbolic.cache.as_ref().unwrap().base.complete_through_shell;
     assert!(complete < 8);
-    assert!(h.query_by_label_contains(&format!("Stopped at layer {complete} (requested 8)")).is_some());
-    assert!(h.query_by_label_contains("Drawn patch layers").is_some());
+    assert!(h.query_all_by_label_contains(&format!("Stopped at layer {complete} (requested 8)")).next().is_some());
+    assert!(h.query_all_by_label_contains("Drawn patch layers").next().is_some());
 }
