@@ -261,7 +261,7 @@ def layer(number):
     F, labels = sites_from_orbits(g, seeds)
     P = cartesian(F, L)
     bonds, shells = shell_bonds(P, L, labels)
-    note = (f"exact layer group {g['symbol']} (spglib layer check)" if exact
+    note = (f"exact layer group {g['symbol']} (spglib layer check) [COMPUTATIONAL EVIDENCE]" if exact
             else f"symmetry at least {g['symbol']}")
     return dict(number=g["number"], symbol=g["symbol"], system=g["system"], L=L, F=F, P=P, labels=labels,
                 bonds=bonds, shells=shells, exact=exact, note=note,
@@ -308,9 +308,9 @@ def stack(lay, m, spacing, offset=(0.0, 0.0)):
     if m < 1:
         raise SlabRefusal("a stack needs at least one layer")
     if m > 1 and spacing <= lay["thickness"]:
-        raise SlabRefusal(f"spacing {spacing:g} <= slab thickness {lay['thickness']:g}: layers would interpenetrate")
+        raise SlabRefusal(f"[PROVED] spacing {spacing:g} <= slab thickness {lay['thickness']:g}: layers would interpenetrate")
     if not offset_keeps_group(lay["number"], offset, m):
-        raise SlabRefusal(f"offset {tuple(offset)} with {m} layers breaks {lay['symbol']}: some operation of the "
+        raise SlabRefusal(f"[PROVED] offset {tuple(offset)} with {m} layers breaks {lay['symbol']}: some operation of the "
                           "group is not an operation of the stack (the type may survive in another setting)")
     L, P = lay["L"], lay["P"]
     c = offset[0] * L[0] + offset[1] * L[1] + np.array([0.0, 0.0, spacing])

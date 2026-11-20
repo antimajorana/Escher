@@ -137,3 +137,8 @@ def test_parity_with_rust():
         rs, py = hc.paracompact_ball(*pqr, 1.2), _py_ball(*pqr, 1.2)
         assert (rs["faces"], rs["cells"], rs["reason"]) == (py["faces"], py["cells"], py["reason"])
         assert hc.counts(rs["complex"]) == hc.counts(py["complex"])
+    import json
+    raw_cx = json.loads(_rust.get().honeycomb3d_build_json(5, 3, 4, seed="cell", layers=1))
+    assert len(raw_cx["cells"]) == 63 and hc.euler(raw_cx) == 1
+    assert "complex" not in hc.grow_honeycomb("{4,3,5}", "cell", 1, draw=False)
+

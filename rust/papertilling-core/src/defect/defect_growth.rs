@@ -222,8 +222,30 @@ where
     Ok(out)
 }
 
-/// The core of a set of point defects: the mean of their positions (a dislocation without `at` sits at the patch
-/// centre the surgery picks). Walls are refused: Q8 grows point defects first.
+/// The core of a set of point defects on `cell`: the mean of their positions, resolving `Dislocation { at: None, .. }`
+/// at slot `idx` with the exact `(0.371 + 3·idx)·a₁ + 0.413·a₂` formula of [`crate::defect::surgery`].
+pub fn defect_core_in_cell(cell: &Cell2D, specs: &[DefectSpec]) -> Result<[f64; 2], String> {
+    if specs.is_empty() {
+        return Err("give at least one defect spec".into());
+    }
+    let mut sum = [0.0, 0.0];
+    for (idx, s) in specs.iter().enumerate() {
+        let p = match s {
+            DefectSpec::Dislocation { at, .. } => at.unwrap_or([
+                (0.371 + 3.0 * idx as f64) * cell.a1[0] + 0.413 * cell.a2[0],
+                (0.371 + 3.0 * idx as f64) * cell.a1[1] + 0.413 * cell.a2[1],
+            ]),
+            DefectSpec::Disclination { at, .. } => *at,
+            DefectSpec::HalfWall { .. } => return Err("growth of walls and half-walls comes later (Q8: point defects first)".into()),
+        };
+        sum = [sum[0] + p[0], sum[1] + p[1]];
+    }
+    let n = specs.len() as f64;
+    Ok([sum[0] / n, sum[1] / n])
+}
+
+/// The core of a set of point defects: the mean of their positions (a dislocation without `at` sits at `patch_centre`).
+/// Prefer [`defect_core_in_cell`] when `cell` is available so multi-defect `at: None` specs match surgery's per-slot position.
 pub fn defect_core(specs: &[DefectSpec], patch_centre: [f64; 2]) -> Result<[f64; 2], String> {
     if specs.is_empty() {
         return Err("give at least one defect spec".into());
@@ -287,7 +309,7 @@ pub fn grow_point_defects(
     }
     let info = LatticeCoreInfo::new(cell);
     let (ctr, r_min) = patch_centre_and_radius(&info, specs, r_opt, None)?;
-    let core = defect_core(specs, ctr)?;
+    let core = defect_core_in_cell(cell, specs)?;
     let r0 = match r_opt {
         Some(r) => r,
         // the patch is centred at `ctr`, not at the core, so add the offset between them

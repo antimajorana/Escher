@@ -321,6 +321,9 @@ fn draw_coxeter(x: &CoxeterComplex, g: &Growth<u32>, name: &str, regime: &str) -
     let mut remap: HashMap<u32, usize> = HashMap::new();
     let mut coords: Vec<[f64; 4]> = Vec::new();
     for (i, keep) in kept {
+        if boundary_only && keep.is_empty() {
+            continue;
+        }
         let cycles = x.face_cycles_of(cells[i].0);
         let mut faces = Vec::new();
         for (cyc, fid) in cycles.iter().zip(&face_ids[i]) {
