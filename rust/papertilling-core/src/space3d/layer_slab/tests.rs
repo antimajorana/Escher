@@ -5,7 +5,6 @@ use std::collections::{HashSet, VecDeque};
 
 use super::shells::{lattice_rank_index, quotient_state, Bond};
 use super::*;
-use crate::space3d::nets3d::build_layer_slab_patch;
 
 /// Independent connectivity check (no HNF): BFS over the derived net on cells |n| <= 6 from
 /// (site 0, cell 0) must reach every site of cell 0 and site 0 of cells (1,0) and (0,1).
@@ -78,12 +77,12 @@ fn one_site_square_net_has_coordination_four() {
 #[test]
 fn default_patch_is_built_for_all_80_groups() {
     for num in 1..=80u8 {
-        let p = build_layer_slab_patch(num).unwrap_or_else(|e| panic!("#{num}: {e}"));
+        let p = default_slab_patch(num).unwrap_or_else(|e| panic!("#{num}: {e}"));
         assert!(!p.bonds.is_empty(), "#{num}");
         assert_eq!(p.positions.len(), p.site_kinds.len());
         assert!(p.bonds.iter().all(|&(a, b, _)| a < p.positions.len() && b < p.positions.len() && a != b));
     }
-    assert!(build_layer_slab_patch(81).is_err());
+    assert!(default_slab_patch(81).is_err());
 }
 
 #[test]

@@ -1,11 +1,10 @@
 //! Canonical 3D crystal nets, 3D line defects (screw dislocation, pure 90 deg #123
-//! disclination, forced 4_2 #136 screw-dispiration), and 80-layer slab net visualizer.
+//! disclination, forced 4_2 #136 screw-dispiration). Layer-group slabs live in `layer_slab`.
 
 use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
-use super::layer_group_entry;
 use super::motifs::net_motif;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,10 +207,8 @@ pub fn build_net_3d(net: CanonicalNet3d, defect: LineDefect3d) -> Net3dPatch {
     }
 }
 
-/// Build a 3D slab patch for any of the 80 layer groups (`num = 1..=80`): a thin wrapper over
-/// [`super::layer_slab::default_slab_patch`] (exact-group sites, shell-rule bonds, grown in-plane), kept
-/// until WP-U4 moves the app to `layer_slab` (C1 WP-L1).
+/// Build a 3D slab patch for any of the 80 layer groups (`num = 1..=80`), delegating to
+/// [`crate::space3d::layer_slab::default_slab_patch`].
 pub fn build_layer_slab_patch(num: u8) -> Result<Net3dPatch, String> {
-    layer_group_entry(num)?;
-    super::layer_slab::default_slab_patch(num)
+    crate::space3d::layer_slab::default_slab_patch(num)
 }
