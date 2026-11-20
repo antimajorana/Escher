@@ -330,7 +330,7 @@ impl WbPanel for Panel {
     fn scenes(&self) -> WbScenes {
         let i = self.sub.idx();
         match &self.outs[i] {
-            Some(o) => WbScenes { scene2d: o.scene2d.clone(), mesh: Some(o.mesh.clone()), caption: o.caption.clone() },
+            Some(o) => WbScenes { scene2d: o.scene2d.clone(), mesh: Some(o.mesh.clone()), caption: o.caption.clone(), overlay: None },
             None => {
                 let note = match &self.errors[i] {
                     Some(e) => format!("refused: {e}"),
@@ -340,6 +340,7 @@ impl WbPanel for Panel {
                     scene2d: empty_scene(&format!("S5 {}", self.sub.label()), &note),
                     mesh: Some(placeholder_mesh()),
                     caption: String::from("S5: no result yet (placeholder tetrahedron)"),
+                    overlay: None,
                 }
             }
         }

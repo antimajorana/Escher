@@ -19,6 +19,7 @@ use serde_json::Value;
 
 use crate::app::{DefectsView, LatticesView};
 use crate::backend::{AppBackend, CatalogueItemUi};
+use crate::canvas2d::gauge_overlay::CrystalOverlayData;
 use crate::canvas2d::{Canvas2D, CanvasInteraction, Scene2D};
 use crate::mesh3d::GpuMeshData;
 use crate::session::{name_of, parse_named};
@@ -26,7 +27,7 @@ use crate::theme::ThemeTokens;
 use crate::ui::viewport_pane::show_split_2d_3d;
 use crate::view3d::View3dState;
 
-mod s2_defects;
+pub(crate) mod s2_defects;
 mod s3_detect;
 mod s4_flat3d;
 mod s5_curved2d;
@@ -140,6 +141,7 @@ pub(crate) struct WbScenes {
     pub scene2d: Scene2D,
     pub mesh: Option<GpuMeshData>,
     pub caption: String,
+    pub overlay: Option<CrystalOverlayData>,
 }
 
 /// One stage panel. A 3D panel must never return an empty mesh while idle (return the previous mesh or
@@ -194,7 +196,7 @@ pub(crate) struct WorkbenchState {
     pending_submit: bool,
     reset_view: bool,
     has_mesh: bool,
-    s2: s2_defects::Panel,
+    pub(crate) s2: s2_defects::Panel,
     s3: s3_detect::Panel,
     s4: s4_flat3d::Panel,
     s5: s5_curved2d::Panel,
@@ -301,6 +303,7 @@ impl WorkbenchState {
     pub(crate) fn sync_scenes(&mut self, canvas: &mut Canvas2D, view3d: &mut View3dState) {
         let sc = self.active().scenes();
         canvas.set_scene(sc.scene2d, std::mem::take(&mut self.reset_view));
+        canvas.set_gauge_overlay(sc.overlay);
         match sc.mesh {
             Some(mesh) => {
                 self.has_mesh = true;

@@ -321,7 +321,7 @@ impl WbPanel for Panel {
             (S3Sub::Elastic, _) => self.elastic.as_deref().map_or_else(|| placeholder("building ..."), elastic::scene),
             (S3Sub::Gif, _) => self.gif.as_deref().map_or_else(|| placeholder("building ..."), gif::scene),
         };
-        WbScenes { scene2d, mesh: None, caption: String::new() }
+        WbScenes { scene2d, mesh: None, caption: String::new(), overlay: None }
     }
 
     fn is_busy(&self) -> bool {

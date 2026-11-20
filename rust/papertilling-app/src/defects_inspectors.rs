@@ -13,11 +13,12 @@ use crate::canvas2d::gauge_overlay::{
 use crate::canvas2d::overlay_legend::seam_legend_chips;
 use crate::theme::ThemeTokens;
 
-/// The 2D overlay is offered (C1). Hidden: the GSV energy (part of the AO elastic view, which left the UI) and the
-/// vertex angle-shear energy, whose known-answer test fails (`live_ops_ao_tests`: a uniform stretch of a square
-/// patch gives it a nonzero value, because it also penalises the opposite-bond pairs, so it is not an angle shear).
+/// The 2D overlay is offered (C1). Hidden: the GSV energy (part of the AO elastic view, which left the UI). The vertex
+/// angle shear is shown again (C1 WP-U7): it now counts only angles between adjacent bonds
+/// (`live_ops_ao::adjacent_angle_shear`) and passes its known-answer tests in `live_ops_ao_tests` (0 under a uniform
+/// stretch, 2·atan(γ/2) at an interior square site under the pure shear [[1, γ/2], [γ/2, 1]]).
 pub(crate) fn overlay_shown(m: CrystalOverlayMode) -> bool {
-    !matches!(m, CrystalOverlayMode::GsvEnergyShear | CrystalOverlayMode::VertexAngleShear)
+    !matches!(m, CrystalOverlayMode::GsvEnergyShear)
 }
 
 /// Interactive inspection state shared by `DefectsTabState` and `CombineTabState`.
@@ -161,8 +162,10 @@ impl DefectInspectors {
                 Some(CrystalOverlayData { seams, chips, ..Default::default() })
             }
             // C1 hidden (see `overlay_shown`): never drawn, even when restored or set internally
-            CrystalOverlayMode::GsvEnergyShear | CrystalOverlayMode::VertexAngleShear => None,
-            CrystalOverlayMode::BondStretchStrain | CrystalOverlayMode::PlaquetteFlux => ao_override,
+            CrystalOverlayMode::GsvEnergyShear => None,
+            CrystalOverlayMode::BondStretchStrain | CrystalOverlayMode::VertexAngleShear | CrystalOverlayMode::PlaquetteFlux => {
+                ao_override
+            }
         }
     }
 

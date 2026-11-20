@@ -95,7 +95,7 @@ fn unknown_lattice_and_out_of_range_values_fall_back_with_notes_and_no_panic() {
     let notes = b.apply_session(&session_from(raw), None);
     let has = |s: &str| notes.iter().any(|n| n.contains(s));
     assert!(has("lattice not found") && has("PNG scale 3") && has("recent lattice") && has("out of range") && has("unknown tab"), "{notes:?}");
-    assert_eq!(b.gallery.base_item().named_key.as_deref(), Some("kagome"), "default lattice kept");
+    assert_eq!(b.gallery.base_item().named_key.as_deref(), Some("honeycomb"), "default lattice kept (C1: the app opens on the p6m honeycomb)");
     assert_eq!(b.active_tab, NavTab::Gallery);
     assert_eq!(b.png_scale, 2);
     assert_eq!((b.left_rail_width, b.viewport_split_ratio), (420.0, 0.2), "clamped to the panel limits (260..=420, 0.2..=0.8)");
@@ -328,13 +328,13 @@ fn restoring_builds_only_the_active_tab_and_restores_defects_and_combine() {
 fn recent_lattices_are_restored_most_recent_first() {
     let backend = AppBackend::new();
     let keys: Vec<LatticeAliasKey> =
-        ["square", "oblique", "kagome"].iter().map(|k| backend.find_named(k).unwrap().alias_key.clone()).collect();
+        ["square", "oblique", "honeycomb"].iter().map(|k| backend.find_named(k).unwrap().alias_key.clone()).collect();
     let mut st = app().capture_session();
     st.recent = keys.clone();
     let mut b = app();
     assert!(b.apply_session(&st, None).is_empty());
     let got: Vec<LatticeAliasKey> = b.switcher.recent.iter().map(|r| r.alias_key.clone()).collect();
-    // kagome (the restored lattice) was already selected, so the stored order stays as written
+    // honeycomb (the restored lattice) was already selected, so the stored order stays as written
     assert_eq!(got, keys);
 }
 

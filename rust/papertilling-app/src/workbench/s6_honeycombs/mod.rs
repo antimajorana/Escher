@@ -267,13 +267,13 @@ impl WbPanel for Panel {
 
     fn scenes(&self) -> WbScenes {
         if let Some(b) = self.current() {
-            return WbScenes { scene2d: b.scene2d.clone(), mesh: Some(b.mesh.clone()), caption: b.caption.clone() };
+            return WbScenes { scene2d: b.scene2d.clone(), mesh: Some(b.mesh.clone()), caption: b.caption.clone(), overlay: None };
         }
         let (title, note, caption) = match &self.errors[self.sub.idx()] {
             Some(e) => ("S6: input refused", e.as_str(), "S6 placeholder tetrahedron (input refused, see inspector)"),
             None => ("S6: building", "the result appears when the background build finishes", "S6 placeholder tetrahedron (building)"),
         };
-        WbScenes { scene2d: empty_scene(title, note), mesh: Some(placeholder_mesh()), caption: String::from(caption) }
+        WbScenes { scene2d: empty_scene(title, note), mesh: Some(placeholder_mesh()), caption: String::from(caption), overlay: None }
     }
 
     /// Busy only for the shown sub-row's own job (a job for another sub-row never holds back the scene sync).

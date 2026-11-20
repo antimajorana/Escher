@@ -86,9 +86,14 @@ impl DefectsTabState {
 
         ui.separator();
         ui.strong("Patch & 2D Drawing Controls");
+        let grow_active = self.growth.request(self.sub_tab).is_some();
         ui.horizontal(|ui| {
             ui.label("Radius R:");
-            if ui.add(egui::Slider::new(&mut self.radius, 2.4..=8.0).step_by(0.2)).changed() {
+            let slider = egui::Slider::new(&mut self.radius, 2.4..=8.0).step_by(0.2);
+            let resp = ui
+                .add_enabled(!grow_active, slider)
+                .on_disabled_hover_text("Sized automatically to hold the requested growth layers.");
+            if resp.changed() && !grow_active {
                 dirty = true;
                 reset_view = true;
             }

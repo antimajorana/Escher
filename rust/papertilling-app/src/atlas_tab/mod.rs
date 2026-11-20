@@ -94,8 +94,8 @@ impl AtlasTabState {
             pristine_only: true,
             sub_tab: AtlasSubTab::SpaceGroups3D,
             last_pristine_3d_subtab: AtlasSubTab::SpaceGroups3D,
-            // C1: the 3D line defects are hidden, so the Defects atlas opens on the H² wedge disclinations
-            last_defect_subtab: AtlasSubTab::HyperbolicH2,
+            // C1 (user, round 5): the Defects atlas opens on the flat 2D defects (0D/1D rosettes and friezes), not on H²
+            last_defect_subtab: AtlasSubTab::Subperiodic,
             seeded_initial_defects: false,
             subperiodic,
             layers: layers_ui::LayersPanelState::default(),
