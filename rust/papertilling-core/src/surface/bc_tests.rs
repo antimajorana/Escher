@@ -218,6 +218,10 @@ fn glide_search_is_kind_aware_and_basis_independent() {
     // x <-> y and x <-> -y keep the bond set; they swap kinds 0 and 1, and every other reflection maps a1 + a2 to
     // a non-bond. So with kinds there is no mirror or glide; with all kinds equal there are 2 reflection classes.
     assert!(glide_search(&square_kinds(0, 1, Some(2))).unwrap().is_empty());
+    // The verdict table follows the decorated cell, not the label: labelled p4m, this cell still has no mirror or
+    // glide once kinds count, so the Möbius and Klein rows are refusals proved on the lattice.
+    let rows = surface_table("p4m", &square_kinds(0, 1, Some(2)));
+    assert_eq!((rows[2].status.as_str(), rows[3].status.as_str()), ("IMPOSSIBLE", "IMPOSSIBLE"), "{:?}", &rows[2..4]);
     assert_eq!(glide_search(&square_kinds(0, 0, Some(0))).unwrap().len(), 2);
     // Two kinds on the axes: the axis mirrors keep kinds, the diagonals swap them: 2 classes (4 without kinds).
     assert_eq!(glide_search(&square_kinds(0, 1, None)).unwrap().len(), 2);
@@ -244,6 +248,52 @@ fn glide_search_is_kind_aware_and_basis_independent() {
     // the skewed square still builds a Möbius band (its axis vectors have large coefficients in this basis)
     let m = build_boundary(&skew_sq, &Bc::Mobius { glide: 0, steps: 3, width: 2 }).unwrap();
     assert_eq!(topology(&m.mesh), (0, 1, false));
+}
+
+#[test]
+fn non_primitive_cell_gives_not_found_not_a_proof() {
+    // Rectangle a = 1, b = 1.7, one site, bonds a1 (kind 0) and a2 (kind 1): pattern group p2mm, whose reflections
+    // have the linear parts x -> -x and y -> -y, so 2 classes on the primitive cell (hand count).
+    let base = Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.7], basis: vec![[0.0, 0.0]], bonds: vec![bond(0, 0, 1, 0, 0), bond(0, 0, 0, 1, 1)] };
+    assert_eq!(glide_search(&base).unwrap().len(), 2);
+    // The same pattern on the supercell S = (2,1), (0,3) (index 6): its lattice is {(2p, p + 3q)}. Both mirrors move
+    // (2,1) to (-2,1) or (2,-1), which are not in it, so no reflection of the pattern keeps the cell lattice and the
+    // search finds none. The empty result must not be read as a proof.
+    let s = [[2i32, 0], [1, 3]]; // columns (2,1), (0,3) in base coordinates
+    let inv = |p: [i32; 2]| [(3 * p[0]) as f64 / 6.0, (-p[0] + 2 * p[1]) as f64 / 6.0]; // S^-1 p
+    let mut pts: Vec<[i32; 2]> = Vec::new();
+    for x in -6..=6 {
+        for y in -6..=6 {
+            let f = inv([x, y]);
+            if f.iter().all(|&c| (-1e-9..1.0 - 1e-9).contains(&c)) {
+                pts.push([x, y]);
+            }
+        }
+    }
+    assert_eq!(pts.len(), 6);
+    let locate = |p: [i32; 2]| {
+        let f = inv(p);
+        let n = [(f[0] + 1e-9).floor() as i32, (f[1] + 1e-9).floor() as i32];
+        let r = [p[0] - s[0][0] * n[0] - s[0][1] * n[1], p[1] - s[1][0] * n[0] - s[1][1] * n[1]];
+        (pts.iter().position(|&q| q == r).unwrap(), n)
+    };
+    let mut bonds = Vec::new();
+    for (i, p) in pts.iter().enumerate() {
+        for (d, k) in [([1, 0], 0), ([0, 1], 1)] {
+            let (j, n) = locate([p[0] + d[0], p[1] + d[1]]);
+            bonds.push(bond(i, j, n[0], n[1], k));
+        }
+    }
+    let sup = Cell2D {
+        a1: [2.0, 1.7],
+        a2: [0.0, 5.1],
+        basis: pts.iter().map(|p| [p[0] as f64, 1.7 * p[1] as f64]).collect(),
+        bonds,
+    };
+    let err = glide_search(&sup).unwrap_err();
+    assert!(err.starts_with("NOT FOUND") && err.contains("not primitive"), "{err}");
+    let refusal = build_boundary(&sup, &Bc::Mobius { glide: 0, steps: 3, width: 2 }).unwrap_err();
+    assert!(!is_proved(&refusal), "{refusal}");
 }
 
 #[test]

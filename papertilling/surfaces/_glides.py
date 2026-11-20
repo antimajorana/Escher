@@ -3,10 +3,14 @@
 Mirror of `rust/papertilling-core/src/surface/glides.rs` (same candidate order, translations and axis vectors).
 Decorated: sites, bonds and bond kinds; a reflection that swaps two bond kinds is not a symmetry.
 
+Hypothesis: the cell is primitive for its decoration, so every symmetry of the pattern keeps the cell lattice. On a
+non-primitive cell a mirror can move the cell lattice and be missed, so an empty search there raises SurfaceNotFound
+(NON_PRIMITIVE), never a proof.
+
 Why the search is complete [PROVED] (the proof is written out in glides.rs): for a Gauss-reduced basis (|b1| <= |b2|,
 2|b1.b2| <= |b1|^2) every linear part of a lattice symmetry has integer entries in [-1, 1] (the scan uses [-2, 2]); the
 translation part is fixed modulo the lattice by the image of site 0, and every image is tried; the axis vectors have
-reduced coefficients in [-2, 2] (scan [-4, 4]). So an empty list proves that the decorated lattice has no mirror and no
+reduced coefficients in [-2, 2] (scan [-4, 4]). So on a primitive cell an empty list proves that the decorated lattice has no mirror and no
 glide line.
 """
 from __future__ import annotations
@@ -55,10 +59,29 @@ def _apply(M, t, F, k):
     return None
 
 
+NON_PRIMITIVE = ("NOT FOUND: the cell is not primitive for its decoration (a translation by a fraction of the cell maps "
+                 "the pattern onto itself), and the mirror/glide search is complete only for reflections that keep the "
+                 "cell lattice; none was found, which proves nothing here. Use the primitive cell for a proof")
+
+
+def _is_symmetry(M, t, F, bonds, darts):
+    """Whether x -> M x + t (fractional) maps the decorated cell onto itself (sites, bonds and bond kinds)."""
+    smap = [_apply(M, t, F, k) for k in range(len(F))]
+    if any(s is None for s in smap):
+        return False
+    for i, j, n1, n2, kind in bonds:
+        (ji, ci), (jj, cj) = smap[i], smap[j]
+        mn = M @ np.array([n1, n2])
+        if (ji, jj, int(mn[0] + cj[0] - ci[0]), int(mn[1] + cj[1] - ci[1]), kind) not in darts:
+            return False
+    return True
+
+
 def glide_search(A, basis, bonds):
     """Every mirror/glide class (one per linear part) of the cell (A: columns a1, a2; basis: Cartesian sites; bonds:
     (i, j, n1, n2, kind)), as dicts M, t, tau, along, across, half, length, mirror. Raises ValueError when an axis
-    vector is missing (never expected; never a silent drop)."""
+    vector is missing (never expected; never a silent drop), and SurfaceNotFound(NON_PRIMITIVE) when nothing is found on
+    a cell that is not primitive for its decoration."""
     A = np.asarray(A, float)
     Ainv = np.linalg.inv(A)
     F = [Ainv @ np.asarray(p, float) for p in basis]
@@ -101,17 +124,7 @@ def glide_search(A, basis, bonds):
         t = None
         for j0 in range(len(F)):
             tt = np.array([_wrap01(F[j0][0] - mf0[0]), _wrap01(F[j0][1] - mf0[1])])
-            smap = [_apply(M, tt, F, k) for k in range(len(F))]
-            if any(s is None for s in smap):
-                continue
-            ok = True
-            for i, j, n1, n2, kind in bonds:
-                (ji, ci), (jj, cj) = smap[i], smap[j]
-                mn = M @ np.array([n1, n2])
-                if (ji, jj, int(mn[0] + cj[0] - ci[0]), int(mn[1] + cj[1] - ci[1]), kind) not in darts:
-                    ok = False
-                    break
-            if ok:
+            if _is_symmetry(M, tt, F, bonds, darts):
                 t = tt
                 break
         if t is None:
@@ -134,6 +147,12 @@ def glide_search(A, basis, bonds):
         tc = A @ tau
         out.append(dict(M=M, t=np.asarray(t, float), tau=tau, along=along, across=across, half=tc / 2.0,
                         length=float(np.hypot(*tc)) / 2.0, mirror=mirror))
+    if not out:
+        I2 = np.eye(2, dtype=int)
+        if any(_is_symmetry(I2, np.array([_wrap01(F[j][0] - F[0][0]), _wrap01(F[j][1] - F[0][1])]), F, bonds, darts)
+               for j in range(1, len(F))):
+            from .refusal import SurfaceNotFound
+            raise SurfaceNotFound(NON_PRIMITIVE, retry=False)
     return out
 
 

@@ -83,6 +83,31 @@ def test_glide_search_is_kind_aware_and_basis_independent():
     assert len(glides(pt.named("triangular"))) == 6
 
 
+def test_non_primitive_cell_gives_not_found_not_a_proof():
+    # rectangle a = 1, b = 1.7, kinds 0/1 on a1/a2: p2mm, reflections x -> -x and y -> -y, 2 classes (hand count)
+    B = np.diag([1.0, 1.7])
+    assert len(glide_search(B, [(0.0, 0.0)], [(0, 0, 1, 0, 0), (0, 0, 0, 1, 1)])) == 2
+    # the same pattern on the supercell (2,1), (0,3) (index 6, lattice {(2p, p + 3q)}): both mirrors move (2,1) out of
+    # it, so no reflection keeps the cell lattice; the empty search must be NOT FOUND, not a proof
+    S = np.array([[2, 0], [1, 3]])
+    Sinv = np.linalg.inv(S)
+    pts = [(x, y) for x in range(-6, 7) for y in range(-6, 7)
+           if all(-1e-9 < c < 1 - 1e-9 for c in Sinv @ np.array([x, y]))]
+    assert len(pts) == 6
+
+    def locate(p):
+        n = np.floor(Sinv @ np.array(p) + 1e-9).astype(int)
+        r = tuple(int(v) for v in np.array(p) - S @ n)
+        return pts.index(r), n
+    bonds = []
+    for i, (x, y) in enumerate(pts):
+        for (dx, dy), k in (((1, 0), 0), ((0, 1), 1)):
+            j, n = locate((x + dx, y + dy))
+            bonds.append((i, j, int(n[0]), int(n[1]), k))
+    with pytest.raises(SurfaceNotFound, match="not primitive"):
+        glide_search(B @ S, [tuple(B @ np.array(p, float)) for p in pts], bonds)
+
+
 def test_wrap_complement_is_a_basis_partner():
     A = pt.named("triangular").cell().A
     for c in [(1, 0), (6, 0), (3, 1), (4, -7), (0, 5), (-2, 9)]:

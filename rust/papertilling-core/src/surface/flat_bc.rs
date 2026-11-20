@@ -136,9 +136,12 @@ fn obtuse_reduced(v1: [f64; 2], v2: [f64; 2]) -> ([f64; 2], [f64; 2]) {
     if vec2_dot(w1, w2) > 0.0 { (w1, [-w2[0], -w2[1]]) } else { (w1, w2) }
 }
 
+/// A Wigner-Seitz edge: its end points and its pair label 1..3.
+pub type WsEdge = ([f64; 2], [f64; 2], usize);
+
 /// Wigner-Seitz cell of the 2D lattice spanned by the Cartesian `v1, v2`: its vertices (counter-clockwise), the
 /// edges as `(p, q, pair label 1..3)`, and `true` when it is a rectangle (the third pair has length 0).
-pub fn wigner_seitz(v1: [f64; 2], v2: [f64; 2]) -> (Vec<[f64; 2]>, Vec<([f64; 2], [f64; 2], usize)>, bool) {
+pub fn wigner_seitz(v1: [f64; 2], v2: [f64; 2]) -> (Vec<[f64; 2]>, Vec<WsEdge>, bool) {
     let (w1, w2) = obtuse_reduced(v1, v2);
     let w12 = add2(w1, w2);
     let rect = vec2_dot(w1, w2).abs() <= 1e-9 * vec2_dot(w1, w1).max(vec2_dot(w2, w2));
