@@ -5,10 +5,14 @@
 //! bisectors, classical nodal approximations); no external net database is used.
 
 pub mod coxeter_gram;
+pub mod coxeter_ldl;
 pub mod coxeter_orbit;
 pub mod dirichlet_quotient;
+pub mod growth_build;
 pub mod honeycombs_e3;
 pub mod honeycombs_h3;
+pub mod key_index;
+pub mod paracompact_ball;
 pub mod polychora_s3;
 pub mod tpms_nets;
 pub mod tpms_surfaces;
@@ -18,13 +22,17 @@ pub mod voronoi3d_dirichlet;
 mod tests;
 #[cfg(test)]
 mod tests_geometry;
+#[cfg(test)]
+mod tests_growth;
 
 use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
 pub use coxeter_gram::{classify_schlafli, Classification, HoneycombRegime};
+pub use growth_build::{grow_honeycomb, GrowthRule, HoneycombGrowth, HoneycombKind};
 pub use honeycombs_e3::{build_euclidean_honeycomb, EuclideanKind};
+pub use paracompact_ball::{paracompact_ball, ParacompactBall};
 pub use honeycombs_h3::{build_honeycomb, build_hyperbolic_honeycomb};
 pub use polychora_s3::build_polychoron;
 pub use tpms_nets::{tpms_net, TpmsKind, TriplyPeriodicNet};
