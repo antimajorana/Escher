@@ -98,6 +98,125 @@ fn match_wyckoff_label(
         .map(|w| w.label.clone())
 }
 
+/// The C1 vertex angle shear: at each site, the bonds are ordered by the angle of their rest vectors, and each pair of
+/// *adjacent* bonds (consecutive in that order, cyclically) whose rest angle is below 180° gives one angle change
+/// |Δθ| = |θ_now − θ_rest| (wrapped to [0, π]), θ_now taken from the drawn positions. At a site-centred disclination
+/// apex (`crystal.cone_sites`), `b.vec` is un-sheeted while `b.ang` orders the cone sheets, so adjacent arm pairs and
+/// their intrinsic rest angles come from developing each bounded face corner around the apex via [`develop_face`].
+/// Cut-open ghost bonds and non-orientable Möbius seam-crossing chords are skipped; opposite bonds and rim outer gaps
+/// (≥ 180°) are never paired. Returns the mean |Δθ| per site and per bond (`crystal.edges` order).
+pub fn adjacent_angle_shear(crystal: &BuiltCrystal) -> (Vec<f64>, Vec<f64>) {
+    use papertilling_core::defect::charge::frame_faces;
+    use papertilling_core::growth::face_graph::develop_face;
+    use std::collections::{HashMap, HashSet};
+    use std::f64::consts::{PI, TAU};
+    let n = crystal.pos.len();
+    let edge_of: HashMap<(usize, usize), usize> =
+        crystal.edges.iter().enumerate().map(|(i, &(a, b))| ((a.min(b), a.max(b)), i)).collect();
+    let cone_set: HashSet<usize> = crystal.cone_sites.iter().copied().collect();
+    let cone_faces: Vec<Vec<usize>> = if !cone_set.is_empty() && !crystal.is_non_orientable {
+        let walks = frame_faces(crystal);
+        if walks.len() >= 2 {
+            let outer = (0..walks.len()).fold(0, |best, i| if walks[i].len() > walks[best].len() { i } else { best });
+            walks.into_iter().enumerate().filter(|&(i, _)| i != outer).map(|(_, w)| w).collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    let wrap = |a: f64| a.rem_euclid(TAU);
+    let bond_ok = |b: &papertilling_core::types::DirectedBondData| {
+        b.to < n && b.ghost_stub.is_none() && !(crystal.is_non_orientable && b.across) && b.vec[0].hypot(b.vec[1]) > 1e-12
+    };
+    let mut site = vec![0.0_f64; n];
+    let (mut bond_sum, mut bond_cnt) = (vec![0.0_f64; crystal.edges.len()], vec![0_usize; crystal.edges.len()]);
+    for u in 0..n.min(crystal.adj.len()) {
+        let (mut sum, mut cnt) = (0.0, 0_usize);
+        if cone_set.contains(&u) {
+            for f in &cone_faces {
+                if f.len() < 3 {
+                    continue;
+                }
+                for m in 0..f.len() {
+                    if f[m] != u {
+                        continue;
+                    }
+                    let (w_next, w_prev) = (f[(m + 1) % f.len()], f[(m + f.len() - 1) % f.len()]);
+                    if w_next == w_prev
+                        || !crystal.adj[u].iter().any(|b| b.to == w_next && bond_ok(b))
+                        || !crystal.adj[u].iter().any(|b| b.to == w_prev && bond_ok(b))
+                    {
+                        continue;
+                    }
+                    let Some(poly) = develop_face(crystal, f, m) else { continue };
+                    let d_next = [poly[1][0] - poly[0][0], poly[1][1] - poly[0][1]];
+                    let d_prev = [poly[poly.len() - 1][0] - poly[0][0], poly[poly.len() - 1][1] - poly[0][1]];
+                    if d_next[0].hypot(d_next[1]) <= 1e-12 || d_prev[0].hypot(d_prev[1]) <= 1e-12 {
+                        continue;
+                    }
+                    let rest = wrap(d_prev[1].atan2(d_prev[0]) - d_next[1].atan2(d_next[0]));
+                    if rest >= PI - 1e-9 || rest <= 1e-12 {
+                        continue;
+                    }
+                    let now_a = [crystal.pos[w_next][0] - crystal.pos[u][0], crystal.pos[w_next][1] - crystal.pos[u][1]];
+                    let now_b = [crystal.pos[w_prev][0] - crystal.pos[u][0], crystal.pos[w_prev][1] - crystal.pos[u][1]];
+                    if now_a[0].hypot(now_a[1]) <= 1e-12 || now_b[0].hypot(now_b[1]) <= 1e-12 {
+                        continue;
+                    }
+                    let now = wrap(now_b[1].atan2(now_b[0]) - now_a[1].atan2(now_a[0]));
+                    let d = ((now - rest + PI).rem_euclid(TAU) - PI).abs();
+                    sum += d;
+                    cnt += 1;
+                    for w in [w_next, w_prev] {
+                        if let Some(&e) = edge_of.get(&(u.min(w), u.max(w))) {
+                            bond_sum[e] += d;
+                            bond_cnt[e] += 1;
+                        }
+                    }
+                }
+            }
+        } else {
+            let mut arms: Vec<(f64, [f64; 2], Option<usize>)> = crystal.adj[u]
+                .iter()
+                .filter(|b| bond_ok(b))
+                .map(|b| {
+                    let now = [crystal.pos[b.to][0] - crystal.pos[u][0], crystal.pos[b.to][1] - crystal.pos[u][1]];
+                    (b.vec[1].atan2(b.vec[0]), now, edge_of.get(&(u.min(b.to), u.max(b.to))).copied())
+                })
+                .collect();
+            if arms.len() < 2 {
+                continue;
+            }
+            arms.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for i in 0..arms.len() {
+                let (a, b) = (arms[i], arms[(i + 1) % arms.len()]);
+                let rest = wrap(b.0 - a.0);
+                if rest >= PI - 1e-9 || rest <= 1e-12 {
+                    continue;
+                }
+                let (now_a, now_b) = (a.1, b.1);
+                if now_a[0].hypot(now_a[1]) <= 1e-12 || now_b[0].hypot(now_b[1]) <= 1e-12 {
+                    continue;
+                }
+                let now = wrap(now_b[1].atan2(now_b[0]) - now_a[1].atan2(now_a[0]));
+                let d = ((now - rest + PI).rem_euclid(TAU) - PI).abs();
+                sum += d;
+                cnt += 1;
+                for e in [a.2, b.2].into_iter().flatten() {
+                    bond_sum[e] += d;
+                    bond_cnt[e] += 1;
+                }
+            }
+        }
+        if cnt > 0 {
+            site[u] = sum / cnt as f64;
+        }
+    }
+    let bond = bond_sum.iter().zip(&bond_cnt).map(|(&s, &c)| if c > 0 { s / c as f64 } else { 0.0 }).collect();
+    (site, bond)
+}
+
 pub fn build_ao_crystal_overlay(
     crystal: &BuiltCrystal,
     mode: CrystalOverlayMode,
@@ -126,9 +245,9 @@ pub fn build_ao_crystal_overlay(
             Some(bond_strain_overlay(crystal.pos.len(), &crystal.edges, &diag.bond_strain))
         }
         CrystalOverlayMode::VertexAngleShear => {
-            let diag = gsv_diagnostics_2d(crystal, &crystal.pos).ok()?;
-            let (site_cols, legend) = perceptual_colorbar(&diag.site_shear, "Site shear E (√; bonds: |γ|)");
-            let (bond_cols, _bmax) = heat_bonds(&diag.bond_shear_strain);
+            let (site, bond) = adjacent_angle_shear(crystal);
+            let (site_cols, legend) = perceptual_colorbar(&site, "Angle change |Δθ| between adjacent bonds (rad, √)");
+            let (bond_cols, _bmax) = heat_bonds(&bond);
             Some(CrystalOverlayData {
                 site_rgba: Some(site_cols),
                 bond_rgba: Some(bond_cols),

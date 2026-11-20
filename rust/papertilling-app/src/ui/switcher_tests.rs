@@ -63,10 +63,10 @@ fn palette_pick_on_defects_tab_reloads_defects_without_a_tab_round_trip() {
     h.run_steps(2);
     h.state_mut().switch_tab(NavTab::Defects);
     wait_defects(&mut h);
-    assert_eq!(h.state().gallery.active_item().named_key.as_deref(), Some("kagome"));
+    assert_eq!(h.state().gallery.active_item().named_key.as_deref(), Some("honeycomb"), "C1: the app opens on the p6m honeycomb");
 
     ctrl_k(&mut h);
-    h.get_by_role(egui::accesskit::Role::TextInput).type_text("honeycomb");
+    h.get_by_role(egui::accesskit::Role::TextInput).type_text("kagome p6m");
     h.run_steps(2);
     h.key_press(Key::Enter);
     h.run_steps(2);
@@ -75,10 +75,10 @@ fn palette_pick_on_defects_tab_reloads_defects_without_a_tab_round_trip() {
     let app = h.state();
     assert!(!app.switcher.open, "a pick closes the palette");
     assert_eq!(app.active_tab, NavTab::Defects, "the tab is kept");
-    assert_eq!(app.gallery.active_item().named_key.as_deref(), Some("honeycomb"));
-    assert_eq!(app.defects.last_item.named_key.as_deref(), Some("honeycomb"), "Defects reloaded at once");
+    assert_eq!(app.gallery.active_item().named_key.as_deref(), Some("kagome"));
+    assert_eq!(app.defects.last_item.named_key.as_deref(), Some("kagome"), "Defects reloaded at once");
     assert!(app.defects.error.is_none(), "{:?}", app.defects.error);
-    assert_eq!(app.switcher.recent.front().and_then(|r| r.named_key.as_deref()), Some("honeycomb"));
+    assert_eq!(app.switcher.recent.front().and_then(|r| r.named_key.as_deref()), Some("kagome"));
 }
 
 #[test]

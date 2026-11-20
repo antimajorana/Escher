@@ -35,7 +35,7 @@ impl CrystalOverlayMode {
             Self::Standard => "Standard sublattice",
             Self::GsvEnergyShear => "GSV elastic energy (AO)",
             Self::BondStretchStrain => "Signed bond stretch ε_e",
-            Self::VertexAngleShear => "Vertex angle-shear energy",
+            Self::VertexAngleShear => "Vertex angle shear |Δθ| (adjacent bonds)",
             Self::PlaquetteFlux => "Plaquette flux (R_f, α_f, Wyckoff)",
             Self::SeamConnections => "Volterra seam g_e",
         }

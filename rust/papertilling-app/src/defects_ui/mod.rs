@@ -10,7 +10,7 @@ use crate::theme::ThemeTokens;
 use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
 use crate::view3d::View3dState;
 
-mod growth;
+pub(crate) mod growth;
 mod inspector;
 mod left;
 

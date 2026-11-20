@@ -160,9 +160,9 @@ pub enum SurfaceTargetUi {
     ProjectivePlane,
     Genus2,
     Genus3,
-    /// C1 (WP-U3): an open patch of the lattice (no gluing). Listed as "not yet available" until wired.
+    /// C1 (WP-U3): an open patch of the lattice (no gluing).
     Open,
-    /// C1 (WP-U3): a torus glued from a hexagonal domain (3 pairs of sides). Listed as "not yet available".
+    /// C1 (WP-U3): a torus glued from a hexagonal domain (3 pairs of sides).
     TorusHex,
 }
 
@@ -178,14 +178,20 @@ impl SurfaceTargetUi {
         Self::Genus3,
     ];
 
-    /// Targets added by the C1 boundary-conditions track and not built yet: never in `ALL` (the verdict matrix and
-    /// session decoding), shown on deck cards as "not yet available", and every build of one refuses.
-    pub const PENDING: [Self; 2] = [Self::Open, Self::TorusHex];
-
-    /// The target is one of [`Self::PENDING`].
-    pub fn is_pending(self) -> bool {
-        Self::PENDING.contains(&self)
-    }
+    /// Every target: [`Self::ALL`] (the 8 columns of the verdict matrix) and the two C1 boundary conditions that are
+    /// not columns of the Python `surface_table` (session decoding, deck cards).
+    pub const EVERY: [Self; 10] = [
+        Self::Torus,
+        Self::Cylinder,
+        Self::MobiusBand,
+        Self::KleinBottle,
+        Self::Sphere,
+        Self::ProjectivePlane,
+        Self::Genus2,
+        Self::Genus3,
+        Self::Open,
+        Self::TorusHex,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {

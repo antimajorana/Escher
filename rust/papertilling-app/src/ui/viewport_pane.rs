@@ -24,18 +24,22 @@ impl PapertillingApp {
                 self.surfaces
                     .poll_background(ui.ctx(), &mut self.canvas2d, &mut self.view3d);
                 let mut ratio = self.viewport_split_ratio;
+                let exact_2d = self.surfaces.notes.exact_view;
+                let not_iso_3d = self.surfaces.notes.picture_note.is_some();
                 show_split_2d_3d(
                     ui,
                     &mut ratio,
                     "surfaces_split",
                     &tokens,
                     |ui| {
-                        ui.strong("2D Fundamental Chart / Gluing Net (drag pan, scroll/pinch zoom)");
+                        let exact = if exact_2d { " (exact isometric domain)" } else { "" };
+                        ui.strong(format!("2D Fundamental Chart / Gluing Net (drag pan, scroll/pinch zoom){exact}"));
                         ui.add_space(2.0);
                         self.canvas2d.show(ui, &tokens);
                     },
                     |ui| {
-                        ui.strong("3D wgpu Surface Viewport (two-sided lit faces + bond curves)");
+                        let not_iso = if not_iso_3d { " — topological picture, not isometric" } else { "" };
+                        ui.strong(format!("3D wgpu Surface Viewport (two-sided lit faces + bond curves){not_iso}"));
                         ui.add_space(2.0);
                         self.view3d.show(ui, &tokens);
                     },

@@ -90,15 +90,15 @@ impl GalleryTabState {
         let catalogue = backend.catalogue_for_group(backend.groups()[selected_group_idx].symbol, rule);
         let selected_cat_idx = catalogue
             .iter()
-            .position(|it| it.named_key.as_deref() == Some("kagome"))
+            .position(|it| it.named_key.as_deref() == Some("honeycomb"))
             .unwrap_or(0);
         let selected_named_idx = backend
             .named_lattices()
             .iter()
-            .position(|it| it.named_key.as_deref() == Some("kagome"))
+            .position(|it| it.named_key.as_deref() == Some("honeycomb"))
             .unwrap_or(0);
         let item = backend
-            .find_named("kagome")
+            .find_named("honeycomb")
             .or_else(|| catalogue.get(selected_cat_idx))
             .or_else(|| backend.named_lattices().first())
             .cloned()

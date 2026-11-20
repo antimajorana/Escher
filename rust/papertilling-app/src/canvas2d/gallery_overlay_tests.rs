@@ -157,8 +157,8 @@ fn toggling_overlays_is_view_only() {
     assert!(canvas.gallery_overlay.is_some());
     assert_eq!(st.revision(), rev, "an overlay never changes the lattice");
     assert_eq!(st.active_item().recipe, item.recipe);
-    // patch size follows: kagome default patch is 3 x 3 cells -> 27 Voronoi cells
-    assert_eq!(canvas.gallery_overlay.as_ref().unwrap().under.polygons.len(), 3 * st.repeat as usize * st.repeat as usize);
+    // patch size follows: the default honeycomb (C1) has 2 sites per cell, so a 3 x 3 patch -> 18 Voronoi cells
+    assert_eq!(canvas.gallery_overlay.as_ref().unwrap().under.polygons.len(), 2 * st.repeat as usize * st.repeat as usize);
     st.set_overlays(GalleryOverlayToggles::default(), &mut canvas);
     assert!(canvas.gallery_overlay.is_none());
 }

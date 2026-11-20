@@ -1,12 +1,13 @@
 //! Geometry helpers of the Atlas 3D space-group view: the lattice frame of the drawn block (fractional coordinates),
 //! the z-slice slab, coordination numbers, and the unit-cell box / coordinate-axes wires.
 //!
-//! `papertilling_core::space3d::nets3d::build_net_3d` does not export its lattice, so [`net_frame`] restates the
-//! conventional lattice rows of each `CanonicalNet3d` and the block placement of `build_net_3d` (`nx = ny = 2` for a
+//! [`net_frame`] reads the conventional lattice rows of each `CanonicalNet3d` from the motif table
+//! (`space3d::motifs::net_motif`) and restates the block placement of `build_net_3d` (`nx = ny = 2` for a
 //! pristine net, 3 with a line defect; `nz = 2`; Cartesian `p = f . L - (mid a1x, mid a2y, c)` with `mid = nx / 2`
 //! and `c = a3z`). The unit test checks it against the core positions (pristine motifs land on their textbook
 //! fractional coordinates). Under a line defect the positions are warped, so fractional coordinates are nominal.
 
+use papertilling_core::space3d::motifs::net_motif;
 use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d};
 
 /// Lattice rows `a1, a2, a3` (Cartesian) and the Cartesian origin of fractional `(0, 0, 0)` (first cell of the block).
@@ -16,17 +17,9 @@ pub struct NetFrame {
     pub origin: [f64; 3],
 }
 
-const SQRT3_2: f64 = 0.8660254;
-
+/// Conventional lattice rows of `net`, read from the one motif table (`space3d::motifs`).
 pub fn net_lattice(net: CanonicalNet3d) -> [[f64; 3]; 3] {
-    let cubic = |c: f64| [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, c]];
-    let hex = [[1.0, 0.0, 0.0], [-0.5, SQRT3_2, 0.0], [0.0, 0.0, 1.35]];
-    match net {
-        CanonicalNet3d::HCP | CanonicalNet3d::BetaQuartz => hex,
-        CanonicalNet3d::Tetragonal123 => cubic(1.15),
-        CanonicalNet3d::Rutile136 => cubic(0.72),
-        _ => cubic(1.0),
-    }
+    net_motif(net).lattice
 }
 
 pub fn net_frame(net: CanonicalNet3d, defect: LineDefect3d) -> NetFrame {
