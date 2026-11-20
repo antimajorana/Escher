@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::PI;
 
 use crate::dsymbol::GeometryKind;
+use crate::hyperbolic::MAX_H2_LAYERS;
 use crate::hyperbolic::inflation::{
     HypPointSet, IDENTITY, Mat3, Vec3, grow_vertex_completion, hyp_dist,
     hyperboloid_to_poincare, mat_mul, mat_vec, mink,
@@ -11,6 +12,10 @@ use crate::hyperbolic::inflation::{
 
 use super::wythoff_archimedean::{SnubHandedness, WythoffOp, WythoffTiling};
 use super::wythoff_planar::{assemble_wythoff_result, solve3};
+
+/// Tile budget of the H² Wythoff patch: each tile becomes several Wythoff faces, so 600 tiles keep the drawn
+/// patch near the 1000-face drawing cap of `hyperbolic::DRAW_CAPS`.
+pub const WYTHOFF_TILE_BUDGET: usize = 600;
 
 fn det3(m: &Mat3) -> f64 {
     m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
@@ -89,8 +94,10 @@ pub(super) fn build_hyperbolic_wythoff(
     op: WythoffOp,
     layers: usize,
 ) -> Result<WythoffTiling, String> {
-    let lay = layers.clamp(1, 3);
-    let vc = grow_vertex_completion(p, q, lay, 600)?;
+    // Layers are 0-based (layer 0 = one tile); the tile budget, not a layer clamp, limits the depth, and a stop is
+    // reported in `stopped` instead of silently repeating the last patch (C1 WP-G3).
+    let lay = layers.min(MAX_H2_LAYERS);
+    let vc = grow_vertex_completion(p, q, lay, WYTHOFF_TILE_BUDGET)?;
     let ap = PI / p as f64;
     let (chr, shr) = (vc.base.inradius.cosh(), vc.base.inradius.sinh());
     let ns = [
@@ -269,7 +276,9 @@ pub(super) fn build_hyperbolic_wythoff(
             f.reverse();
         }
     }
-    Ok(assemble_wythoff_result(p, q, op, GeometryKind::Hyperbolic, coords_3d, coords_2d, faces_out))
+    let mut out = assemble_wythoff_result(p, q, op, GeometryKind::Hyperbolic, coords_3d, coords_2d, faces_out);
+    out.stopped = vc.stopped.clone();
+    Ok(out)
 }
 
 fn push_unique_h2(

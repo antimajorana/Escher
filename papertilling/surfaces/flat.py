@@ -34,7 +34,8 @@ import numpy as np
 from ..dsymbol import _darts, _faces, _rotation
 from ..legacy.wallpaper_lattices import _apply_to_site
 from .base import Surface
-from .refusal import SurfaceImpossible, SurfaceNotFound, no_reversing_reason, symmetry_facts
+from ._glides import glide_power
+from .refusal import SurfaceImpossible, SurfaceNotFound, no_glide_reason, no_reversing_reason, symmetry_facts
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -54,36 +55,14 @@ def _cell_and_ops(lattice):
 
 
 def glides(lattice):
-    """The orientation-reversing elements of the lattice's group usable for a Klein bottle or a Moebius band: for each
-    class of mirror or glide line, dict(M (fractional), t, tau = g^2 as an integer vector, half = tau/2 in Cartesian
-    coordinates, across = the shortest lattice vector perpendicular to the axis). A mirror is turned into a glide by
-    adding the shortest lattice translation along its axis. Empty for p1, p2, p3, p4, p6."""
+    """The mirror and glide classes of the decorated lattice usable for a Klein bottle or a Moebius band, one per linear
+    part: dicts M (fractional), t, tau = g^2 (integer), along / across (shortest lattice vectors on / across the axis),
+    half = tau/2 (Cartesian), length, mirror (a mirror class: t is the mirror followed by `along`). Found by the complete
+    search of _glides.py on the cell (bond kinds kept), not from the group label: empty exactly when the lattice has no
+    mirror or glide line [PROVED]."""
     L, cell, A, F, bonds, ops = _cell_and_ops(lattice)
-    rng = range(-4, 5)
-    vecs = [np.array([a, b]) for a in rng for b in rng if a or b]
-    vecs.sort(key=lambda v: float(np.linalg.norm(A @ v)))
-    out, seen = [], set()
-    for M, t in ops:
-        M = np.rint(np.asarray(M, float)).astype(int)
-        if round(np.linalg.det(M)) != -1:
-            continue
-        t = np.asarray(t, float)
-        along = next(v for v in vecs if np.array_equal(M @ v, v))          # shortest lattice vector on the axis
-        tau = M @ t + t
-        if np.allclose(tau, 0, atol=1e-6):                                   # a mirror: glide by the axis translation
-            t = t + along
-            tau = M @ t + t
-        tau = np.rint(tau).astype(int)
-        across = next(v for v in vecs if np.array_equal(M @ v, -v))         # shortest lattice vector across the axis
-        key = (tuple(M.ravel()), tuple(tau), round(float(np.dot(A @ along, A @ t) / np.dot(A @ along, A @ along) % 1), 6))
-        dirkey = tuple(M.ravel())
-        if dirkey in seen:
-            continue
-        seen.add(dirkey)
-        out.append(dict(M=M, t=t, tau=tau, along=along, across=across, half=A @ tau / 2.0,
-                        length=float(np.linalg.norm(A @ tau)) / 2.0, mirror=bool(np.allclose(M @ (t - along) + (t - along), 0, atol=1e-6)),
-                        key=key))
-    return out
+    from ._glides import glide_search
+    return glide_search(A, cell.basis, cell.bonds)
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -328,7 +307,8 @@ def cylinder(lattice, wrap=None, length=None, sites=SITES):
         hc = _site_area(cell, A) * m / a1                                # height of one row of cells
         wrap = (max(3, int(round(math.sqrt(sites * hc / (0.38 * m * a1))))), 0)
     C = np.array(wrap, int)
-    Tv = _complement(A, C, length)
+    from ._flat_bc import wrap_complement
+    Tv = wrap_complement(A, C)                                     # exact (extended Euclid), any (n, m)
     if length is None:
         per_row = abs(int(round(np.linalg.det(np.array([C, Tv], float)))))
         length = max(2, int(round(sites / (m * per_row))))
@@ -388,12 +368,12 @@ def _glide_setup(lattice, which, along, auto=None, what="Moebius band or a Klein
     orientation-reversing symmetry at all (refusal.py, proof (a)), else SurfaceNotFound."""
     L, cell, A, F, bonds, ops = _cell_and_ops(lattice)
     gl = glides(L)
-    if not gl:
-        if not symmetry_facts(L)["reversing"]:
-            raise SurfaceImpossible(no_reversing_reason(L.group, what),
-                                    "so the lattice cannot sit on any non-orientable surface")
-        raise SurfaceNotFound(f"the listed operations of {L.group} give no glide, but the lattice has an orientation-reversing "
-                              "symmetry on the cell (its label misses a symmetry): please report this lattice")
+    if not gl:                                                     # the search is complete: a proof (_glides.py)
+        if not symmetry_facts(L)["reversing"]:                     # no reflection even without bond kinds: proof (a)
+            raise SurfaceImpossible(no_reversing_reason(L.group, what), "so the lattice cannot sit on any non-orientable "
+                                    "surface")
+        raise SurfaceImpossible(no_glide_reason(what), "so the lattice cannot sit on any non-orientable surface",
+                                scope="lattice")
     g = dict(gl[which % len(gl)])
     if along is None and auto is not None:
         along = auto(cell, A, g)
@@ -401,10 +381,7 @@ def _glide_setup(lattice, which, along, auto=None, what="Moebius band or a Klein
         b0 = _bond_scale(cell, A)
         along = max(1, int(np.ceil(8 * b0 / np.linalg.norm(A @ g["tau"]))))
         along += 1 - along % 2
-    if along % 2 == 0:
-        raise ValueError("along must be odd: the band closes after an odd number of glide steps")
-    # the glide g' = g followed by (along - 1)/2 translations tau: g'^2 = along x tau
-    g["t"] = np.asarray(g["t"], float) + (along - 1) // 2 * g["tau"]
+    g = glide_power(g, along)                                      # even lengths only for a mirror class
     g["half"] = A @ (along * g["tau"]) / 2.0
     g["along"] = along
     return L, cell, A, F, bonds, g
@@ -426,7 +403,8 @@ def _arc8(x):
 
 
 def klein_bottle(lattice, along=None, across=None, which=0, sites=SITES):
-    """The lattice on a Klein bottle: the plane divided by a glide g of the lattice (repeated `along` times, odd) and by
+    """The lattice on a Klein bottle: the plane divided by a glide g of the lattice (repeated `along` times: odd, or any number
+    for a mirror class) and by
     `across` times the shortest translation T across its axis. Exact (flat). Needs a mirror or glide line (`which` picks
     one class, see glides(L)). When not given, along and across give about `sites` sites in proportions that suit the 3D
     picture, the figure-8 immersion (which passes through itself, as any Klein bottle in 3D must)."""

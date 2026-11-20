@@ -54,6 +54,10 @@ pub struct WythoffTiling {
     pub edges: Vec<(usize, usize)>,
     pub faces: Vec<Vec<usize>>,
     pub provenance: String,
+    /// Why the H² patch is shallower than the requested layers (tile budget or f64 precision; C1 WP-G3). `None`
+    /// when every requested layer was built, and always on S² and E².
+    #[serde(default)]
+    pub stopped: Option<String>,
 }
 
 /// Realise any of the 8 Wythoff operations on `{p, q}` across `S^2`, `E^2`, and `H^2`.

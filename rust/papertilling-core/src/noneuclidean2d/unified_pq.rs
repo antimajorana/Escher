@@ -6,9 +6,32 @@ use std::f64::consts::PI;
 use serde::{Deserialize, Serialize};
 
 use crate::dsymbol::GeometryKind;
-use crate::hyperbolic::{HyperbolicStyle, build_hyperbolic_tiling};
+use crate::growth::{SeedKind, Stopped};
+use crate::hyperbolic::{HyperbolicStyle, build_hyperbolic_tiling_seeded};
 
+use super::s2_seeds::grow_s2;
 use super::unified_s2::build_spherical_pq;
+
+/// Largest layer index of the E² path (0-based). Measured 2026-11-20 (C1 WP-G3) at 40 layers from one face:
+/// {4,4} 6 561, {3,6} 9 841, {6,3} 4 921 faces (the plan §2.4 closed forms), in the pure-Python fallback
+/// 2.3-2.8 s per build, in Rust (release) 0.65 s for the three (`s2_seeds::unified_tests`, `# time`).
+pub const E2_MAX_LAYERS: usize = 40;
+
+/// Seeded layer growth readout of a `{p, q}` build (C1 WP-G3). Empty (the default) where it is not measured.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PqGrowth {
+    /// The seed grown from; `None` when no layer table was computed.
+    pub seed: Option<SeedKind>,
+    /// Layer at which each face of `faces` joins (S² and H²; empty on E²); `None` for an S² face not reached
+    /// within the requested layers.
+    pub face_layer: Vec<Option<usize>>,
+    /// `|S_k|` for each complete layer `k = 0, 1, ..`.
+    pub layer_counts: Vec<usize>,
+    /// χ of `S_k` (S² only; empty where not measured).
+    pub layer_euler: Vec<i64>,
+    /// Why growth ended before the requested layer: closure of the sphere, or a drawing cap / precision stop in H².
+    pub stopped: Option<String>,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UnifiedPqTiling {
@@ -29,6 +52,8 @@ pub struct UnifiedPqTiling {
     pub edge_arcs_3d: Vec<Vec<[f64; 3]>>,
     pub faces: Vec<Vec<usize>>,
     pub provenance: String,
+    #[serde(default)]
+    pub growth: PqGrowth,
 }
 
 /// Exact integer curvature test `delta = 4 - (p - 2)(q - 2)` for `p >= 2, q >= 2`.
@@ -55,18 +80,50 @@ pub fn geometry_kind_pq(p: usize, q: usize) -> Result<GeometryKind, String> {
     })
 }
 
-/// Realise `{p, q}` in `S^2` (`delta > 0`), `E^2` (`delta == 0`), or `H^2` (`delta < 0`).
+/// Realise `{p, q}` in `S^2` (`delta > 0`), `E^2` (`delta == 0`), or `H^2` (`delta < 0`), grown from one face.
 pub fn build_unified_pq(p: usize, q: usize, layers: usize) -> Result<UnifiedPqTiling, String> {
+    build_unified_pq_seeded(p, q, layers, SeedKind::Cell)
+}
+
+/// [`build_unified_pq`] from `seed` (C1 WP-G3; layers are 0-based). S²: the whole solid is drawn and
+/// [`PqGrowth`] gives the touching-rule layers up to `layers`, stopping as closed when `S_k` is the whole sphere.
+/// H²: the patch `S_layers` of [`build_hyperbolic_tiling_seeded`], with `growth.stopped` set when a cap kept it
+/// shallower than asked. E²: one-face growth only (other seeds go through the plane inflation, `plane::inflation`).
+pub fn build_unified_pq_seeded(p: usize, q: usize, layers: usize, seed: SeedKind) -> Result<UnifiedPqTiling, String> {
     let delta = delta_pq(p, q)?;
     let kappa = (delta as f64) / (2.0 * (p as f64) * (q as f64));
     if delta > 0 {
-        return build_spherical_pq(p, q, layers, delta, kappa);
+        let mut t = build_spherical_pq(p, q, layers, delta, kappa)?;
+        let g = grow_s2(p, &t.faces, seed, layers)?;
+        t.growth = PqGrowth {
+            seed: Some(seed),
+            face_layer: g.face_layer,
+            layer_counts: g.stats.iter().map(|s| s.cells).collect(),
+            layer_euler: g.stats.iter().map(|s| s.euler).collect(),
+            stopped: g.stopped.map(|st| match st {
+                Stopped::Closed { layer } => format!("closed at layer {layer}: S_{layer} is the whole sphere (χ = 2)"),
+                other => format!("{other:?}"),
+            }),
+        };
+        return Ok(t);
     }
     if delta == 0 {
+        if !matches!(seed, SeedKind::Cell | SeedKind::Face) {
+            return Err(format!(
+                "{seed:?} seed: the E² {{p,q}} preview grows from one face; vertex and edge seeds of E² lattices are                  built by the plane inflation (Gallery)"
+            ));
+        }
         return build_euclidean_pq(p, q, layers, kappa);
     }
-    let lay = layers.clamp(1, 4);
-    let h = build_hyperbolic_tiling(p, q, HyperbolicStyle::RegularPQ, lay, 0)?;
+    let h = build_hyperbolic_tiling_seeded(p, q, HyperbolicStyle::RegularPQ, layers, 0, seed)?;
+    let complete = h.complete_through_shell;
+    let growth = PqGrowth {
+        seed: Some(h.seed),
+        face_layer: h.face_shell.iter().map(|&s| Some(s)).collect(),
+        layer_counts: (0..=complete).map(|k| h.face_shell.iter().filter(|&&s| s <= k).count()).collect(),
+        layer_euler: Vec::new(),
+        stopped: (complete < h.layers).then(|| h.growth_rule.clone()),
+    };
     let (n_v, n_e, n_f) = (h.poincare_pts.len(), h.edges.len(), h.faces.len());
     let edge_arcs_3d = h
         .edge_arcs
@@ -91,6 +148,7 @@ pub fn build_unified_pq(p: usize, q: usize, layers: usize) -> Result<UnifiedPqTi
         edge_arcs_3d,
         faces: h.faces,
         provenance: "[PROVED]".to_string(),
+        growth,
     })
 }
 
@@ -140,7 +198,7 @@ fn insert_e2_face(
 }
 
 fn build_euclidean_pq(p: usize, q: usize, layers: usize, kappa: f64) -> Result<UnifiedPqTiling, String> {
-    let lay = layers.clamp(1, 6);
+    let lay = layers.min(E2_MAX_LAYERS);
     let rad = 0.5 / (PI / (p as f64)).sin();
     let base_verts: Vec<[f64; 2]> = (0..p)
         .map(|k| {
@@ -252,5 +310,6 @@ fn build_euclidean_pq(p: usize, q: usize, layers: usize, kappa: f64) -> Result<U
         edge_arcs_3d,
         faces,
         provenance: "[PROVED]".to_string(),
+        growth: PqGrowth::default(),
     })
 }

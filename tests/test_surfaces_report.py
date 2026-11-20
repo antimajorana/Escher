@@ -65,8 +65,8 @@ def test_constructors_raise_the_right_class():
     with pytest.raises(SurfaceNotFound) as e:
         genus_surface(pt.named("square"), g=2, torus_size=(1, 1))
     assert "torus_size=(3, 3)" in e.value.hint
-    with pytest.raises(ValueError) as e:                               # a bad argument is neither
-        klein_bottle(pt.named("square"), along=2)
+    with pytest.raises(ValueError) as e:                               # a bad argument is neither: a glide class with
+        klein_bottle(pt.named("brick_pg"), along=2)                    # no mirror closes only after odd steps (C1 WP-B1)
     assert not isinstance(e.value, SurfaceRefused)
 
 

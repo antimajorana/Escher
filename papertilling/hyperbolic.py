@@ -13,6 +13,7 @@ import math
 from typing import Any
 
 from . import _rust
+from . import _hyperbolic_seeds as seeds
 from . import _hyperbolic_vc as vc
 from .dsymbol import orbifold_curvature
 
@@ -25,6 +26,8 @@ __all__ = ["build_hyperbolic_tiling", "to_klein", "to_hyperboloid"]
 MAX_DRAWN_FACES = 1000
 MAX_CENTRE_RADIUS = 0.998
 WEDGE_MERGE_DIST = 1e-3
+# `MAX_H2_LAYERS` there: layers are 0-based and only bound the loop; the face cap sets the drawn depth.
+MAX_H2_LAYERS = 64
 _STYLES = ("RegularPQ", "RectifiedKagome", "DualQP")
 
 
@@ -69,29 +72,34 @@ def _geodesic_arc(a, b, segs: int = 8):
     return [[cx + rad * math.cos(th0 + dth * k / segs), cy + rad * math.sin(th0 + dth * k / segs)] for k in range(segs + 1)]
 
 
-def _vertex_completion_patch(p: int, q: int, lay: int):
+def _vertex_completion_patch(p: int, q: int, lay: int, seed: str = "cell"):
     """Drawn patch for wedge_delta == 0 (RegularPQ/DualQP): whole vertex-completion shells within the caps."""
-    patch = vc.grow_vertex_completion(p, q, lay, 2 * MAX_DRAWN_FACES)
+    patch = seeds.grow_vertex_completion_seeded(p, q, seed, lay, 2 * MAX_DRAWN_FACES)
     keep, notes = vc.keep_whole_shells(patch.shell_sizes, patch.stopped, MAX_DRAWN_FACES)
+    if keep == 0:
+        raise ValueError(
+            f"{{{p},{q}}}: the seed alone ({patch.shell_sizes[0]} tiles) exceeds the {MAX_DRAWN_FACES}-face drawing cap"
+        )
     pset = vc.HypPointSet(vc.hyp_dist(patch.base.vertices[0], patch.base.vertices[1]))
     complete = keep - 1
     faces, face_shell = [], []
+    m = seeds.recentre(seeds.seed_centre(patch.base, seed))  # centred on the seed; identity for the tile seed
     for i, s in enumerate(patch.shell):
         if s >= keep:
             break
-        if i > 0:
-            z = vc.hyperboloid_to_poincare(patch.centre(i))
+        if s > 0:
+            z = vc.hyperboloid_to_poincare(vc.mat_vec(m, patch.centre(i)))
             if z[0] * z[0] + z[1] * z[1] > MAX_CENTRE_RADIUS**2:
                 complete = min(complete, s - 1)
                 continue
-        faces.append([pset.insert(x)[0] for x in patch.face_vertices(i)])
+        faces.append([pset.insert(vc.mat_vec(m, x))[0] for x in patch.face_vertices(i)])
         face_shell.append(s)
     if pset.suspect > 0:
         raise ValueError(f"{{{p},{q}}}: f64 precision: {pset.suspect} drawn points have an ambiguous dedup distance")
     if complete + 1 < keep:
         notes.append(f"shell {complete + 1} truncated by the centre radius cap {MAX_CENTRE_RADIUS}")
     growth_rule = (
-        f"BDF vertex completion from one {p}-gon: S_0..S_{complete} complete, {len(faces)} faces drawn "
+        f"BDF vertex completion from {seeds.seed_label(p, q, seed)}: S_0..S_{complete} complete, {len(faces)} faces drawn "
         f"(requested S_{lay})" + "".join(f"; {n}" for n in notes)
     )
     pts = [vc.hyperboloid_to_poincare(x) for x in pset.pts]
@@ -162,29 +170,42 @@ def build_hyperbolic_tiling(
     style: str = "RegularPQ",
     layers: int = 2,
     wedge_delta: int = 0,
+    seed: str = "cell",
 ) -> dict[str, Any]:
     """Generate a hyperbolic {p, q} / rectified (p.q.p.q) / dual {q, p} tiling patch in D and H^2.
 
     For wedge_delta == 0 the patch is BDF vertex completion S_layers of one p-gon (or the cluster
-    rule on (p.q.p.q) kagome; layers clamped to 1..4), trimmed to whole shells within MAX_DRAWN_FACES
+    rule on (p.q.p.q) kagome; layers 0-based, at most MAX_H2_LAYERS), trimmed to whole shells within MAX_DRAWN_FACES
     faces and to face centres within Poincare radius MAX_CENTRE_RADIUS; `face_shell`,
     `complete_through_shell` and `growth_rule` say which. For wedge_delta != 0 it is vertex
-    completion of copies of a p_core-gon wedge core, with the same caps.
+    completion of copies of a p_core-gon wedge core, with the same caps. `seed` ("cell", "vertex" or
+    "edge"; C1 WP-G3) applies to the regular and dual paths only; kagome and wedge refuse other seeds.
     """
+    seed = seeds.norm_seed(seed)
     rs = _rust.get()
-    if rs is not None and hasattr(rs, "hyperbolic_tiling_json"):
-        return json.loads(rs.hyperbolic_tiling_json(int(p), int(q), style, int(layers), int(wedge_delta)))
+    args = (int(p), int(q), style, int(layers), int(wedge_delta))
+    # An extension built before C1 WP-G3 has only the tile-seed function; other seeds then use the Python path.
+    if rs is not None and hasattr(rs, "hyperbolic_tiling_seeded_json"):
+        return json.loads(rs.hyperbolic_tiling_seeded_json(*args, seed))
+    if rs is not None and hasattr(rs, "hyperbolic_tiling_json") and seed == "cell":
+        return json.loads(rs.hyperbolic_tiling_json(*args))
+    one = seeds.one_tile(seed)
     st = style if style in _STYLES else "RegularPQ"
     p_in, q_in, wd = int(p), int(q), int(wedge_delta)
     pe, qe = (q_in, p_in) if st == "DualQP" else (p_in, q_in)
     if not vc.is_hyperbolic(pe, qe):
         raise ValueError(f"{{{pe}, {qe}}} is not hyperbolic (requires (p-2)(q-2) > 4)")
-    lay = max(1, min(4, int(layers)))
+    lay = max(0, min(MAX_H2_LAYERS, int(layers)))
+    if not one and (wd != 0 or st == "RectifiedKagome"):
+        raise ValueError(
+            f"{seed.capitalize()} seed: only the regular and dual {{p,q}} paths take vertex or edge seeds; the kagome "
+            "cluster rule and the wedge core grow from their own core (use the tile seed)"
+        )
     p_core = max(3, min(12, pe + wd))
     if wd == 0 and st == "RectifiedKagome":
         pts, faces, face_shell, complete, growth_rule = _kagome_cluster_patch(pe, qe, lay)
     elif wd == 0:
-        pts, faces, face_shell, complete, growth_rule = _vertex_completion_patch(pe, qe, lay)
+        pts, faces, face_shell, complete, growth_rule = _vertex_completion_patch(pe, qe, lay, seed)
     else:
         pts, faces, face_shell, complete, growth_rule = _wedge_patch(pe, qe, st, lay, p_core)
     eset = set()
@@ -218,4 +239,5 @@ def build_hyperbolic_tiling(
         "face_shell": face_shell,
         "complete_through_shell": complete,
         "growth_rule": growth_rule,
+        "seed": "cell" if one else seed,
     }
