@@ -431,3 +431,20 @@ fn v1_session_migrates_to_v2_on_load_saves_v2_on_exit_and_leaves_v99_untouched()
     assert!(!f.save_session_on_exit());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), v99);
 }
+
+#[test]
+fn restored_surface_size_wins_over_boundary_options_edited_before() {
+    // WP-U3: the session stores (h, k); boundary options edited before the restore must not hide the restored size
+    let mut a = app();
+    a.surfaces.target = SurfaceTargetUi::Torus;
+    a.surfaces.auto_size = false;
+    (a.surfaces.params.h, a.surfaces.params.k) = (2, 3);
+    let st = a.capture_session();
+    let mut b = app();
+    b.surfaces.choose_target(SurfaceTargetUi::Torus);
+    b.surfaces.bc.t1 = [5, 0];
+    let notes = b.apply_session(&st, None);
+    assert!(notes.is_empty(), "{notes:?}");
+    assert!(!b.surfaces.bc.explicit, "the options map from the restored (h, k) again");
+    assert_eq!((b.surfaces.params.h, b.surfaces.params.k), (2, 3));
+}

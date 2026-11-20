@@ -5,7 +5,7 @@
 use super::badges::{Badge, badge_widget};
 use super::realms::{Card, CardId, LatticeRef, orbifold_of};
 use crate::app::{DefectsView, LatticesView, PapertillingApp};
-use crate::backend::{SurfaceTargetUi, VerdictKindUi};
+use crate::backend::{SurfaceCellVerdictUi, SurfaceTargetUi, VerdictKindUi};
 use crate::gallery_tab::browser::rule_tag;
 use crate::gallery_tab::filter::ita_number;
 use crate::presets::PRESETS;
@@ -139,7 +139,24 @@ impl PapertillingApp {
         let item = self.gallery.active_item().clone();
         row(ui, t, "Lattice", &item.display_with_orig());
         let k = SurfaceTargetUi::ALL.iter().position(|&x| x == s);
-        let cell = k.and_then(|k| self.surfaces.lattice_verdicts(&item).map(|cells| cells[k].clone()));
+        let cell = k
+            .and_then(|k| self.surfaces.lattice_verdicts(&item).map(|cells| cells[k].clone()))
+            .or_else(|| {
+                self.surfaces.bc_summary(&item).and_then(|sum| sum.verdict(s)).map(|bv| {
+                    let scope = bv
+                        .text
+                        .strip_prefix("IMPOSSIBLE (")
+                        .and_then(|r| r.split_once("):"))
+                        .map(|(sc, _)| sc.to_owned());
+                    SurfaceCellVerdictUi {
+                        verdict: bv.kind,
+                        scope,
+                        sites: None,
+                        cones_summary: if bv.kind == VerdictKindUi::Ok { String::from("none") } else { String::new() },
+                        reason: bv.text.clone(),
+                    }
+                })
+            });
         let Some(cell) = cell else {
             text(ui, egui::RichText::new("No verdict for this lattice.").color(t.text_muted));
             return;

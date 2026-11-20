@@ -17,6 +17,7 @@ use crate::live_ops_ao::Defect2dMode;
 
 #[path = "live_ops_surfaces.rs"]
 mod live_ops_surfaces;
+pub(crate) use live_ops_surfaces::surface_error_message;
 pub use live_ops_surfaces::{
     build_surface_mesh, build_surface_mesh_auto, build_verdict_cells, build_verdict_matrix,
 };
