@@ -1,7 +1,9 @@
 """C1 WP-N1: the canonical 3D net motifs (one table, `papertilling/_net_motifs.py` = core `space3d/motifs.rs`).
 
-Known answers: space groups and Wyckoff letters from spglib (an independent tool) against the International
-Tables (Vol. A: #227 origin choice 2, #180, #136, #221, #123, #194); hand-derived coordination numbers.
+Known answers: space-group numbers and Wyckoff letters from spglib 2.8.0 (an independent tool) against the label
+and the standard ITA settings (#227 origin choice 2, #180, #136, #221, #123, #194); hand-derived coordination numbers.
+Wyckoff letters are fixed only up to the origin spglib picks (16c/16d, 3c/3d, 1a/1b): the group number is the real
+check, the letters pin spglib's standard choice. spglib results are [COMPUTATIONAL EVIDENCE] at symprec 1e-5.
 """
 from __future__ import annotations
 

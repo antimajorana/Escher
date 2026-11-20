@@ -1,6 +1,7 @@
-//! Known-answer tests of the canonical 3D net motifs (C1 WP-N1). Reference site lists are written out here from
-//! the International Tables (Vol. A, 2016: #227 origin choice 2, #180, #136, #221), not read from the table under
-//! test; the exact space group of every motif is checked with spglib in `tests/test_net_motifs.py`.
+//! Known-answer tests of the canonical 3D net motifs (C1 WP-N1). Reference site lists are written out here in the
+//! standard ITA settings (#227 origin choice 2, #180, #136, #221), not read from the table under test; they were
+//! cross-checked with spglib 2.8.0 (group numbers, Wyckoff letters, and its database six-fold (x-y, x, z+1/3) for
+//! #180 vs z+2/3 for #181). The exact space group of every motif is checked with spglib in `tests/test_net_motifs.py`.
 
 use super::{net_motif, NetMotif};
 use crate::flat3d::Cell3D;
