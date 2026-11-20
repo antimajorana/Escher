@@ -109,6 +109,7 @@ impl PapertillingApp {
                     SurfaceSize::Auto => self.surfaces.auto_size = true,
                     SurfaceSize::Manual { h, k } => {
                         self.surfaces.auto_size = false;
+                        self.surfaces.bc.explicit = false; // the preset's (h, k) size the boundary options
                         (self.surfaces.params.h, self.surfaces.params.k) = (h, k);
                     }
                 }

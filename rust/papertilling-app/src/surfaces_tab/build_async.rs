@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use papertilling_core::types::{SurfaceCheckReport, SurfaceMesh};
 
 use super::SurfacesTabState;
+use super::bc::{self, BcControls, BcNotes};
 use crate::backend::{CatalogueItemUi, SurfaceBuildParamsUi, SurfaceTargetUi};
 use crate::canvas2d::Canvas2D;
 use crate::combine_worker::LatestWorker;
@@ -17,22 +18,31 @@ use crate::view3d::View3dState;
 
 pub const DEBOUNCE: Duration = Duration::from_millis(120);
 
-pub(super) type Built = Result<(SurfaceMesh, SurfaceCheckReport), String>;
+pub(super) type Built = Result<(SurfaceMesh, SurfaceCheckReport, BcNotes), String>;
 
 pub(super) struct SurfaceJob {
     pub item: CatalogueItemUi,
     pub target: SurfaceTargetUi,
     pub params: SurfaceBuildParamsUi,
     pub auto_size: bool,
+    /// The boundary-condition options to build from (`None`: the table sizes or the legacy surface builders).
+    pub bc: Option<BcControls>,
 }
 
 /// Build the surface of `job` (as `activate_and_sync` always did).
 pub(super) fn run_job(job: &SurfaceJob) -> Built {
-    if job.auto_size {
+    if let Some(ctl) = &job.bc {
+        return bc::build_bc(&job.item, job.target, ctl);
+    }
+    let built = if job.auto_size {
         live_ops::build_surface_mesh_auto(&job.item, job.target, job.params.centre_mode, job.params.genus_g)
     } else {
         live_ops::build_surface_mesh(&job.item, job.target, &job.params)
-    }
+    };
+    built.map(|(mesh, rep)| {
+        let notes = bc::notes_for_built(&mesh, job.target);
+        (mesh, rep, notes)
+    })
 }
 
 pub(super) type SurfaceWorker = LatestWorker<SurfaceJob, (String, Built)>;

@@ -38,12 +38,8 @@ impl PapertillingApp {
                 }
             }
             CardId::Combine => self.select_defects_view(DefectsView::CombineAndFuse),
-            // C1 pending targets (open patch, hexagonal torus): refused, never approximated by another surface
-            CardId::Surface(t) if t.is_pending() => {
-                self.export_status = format!("{}: not yet available", t.label());
-            }
             CardId::Surface(t) => {
-                self.surfaces.target = t;
+                self.surfaces.choose_target(t);
                 self.surfaces.clamp_params(self.gallery.active_item());
                 let builds = self.surfaces.syncs;
                 self.select_lattices_view(LatticesView::Manifolds);
