@@ -98,6 +98,16 @@ def test_e3_other_kinds_match_independent_grower():
     print(f"# time indep E3 n=0..2: {time.time() - t:.1f}s")
 
 
+@pytest.mark.slow
+def test_e3_independent_grower_to_layer_4():
+    # The source of the n = 3, 4 pins in growth/tests.rs (Kelvin, rhombic, octet rows).
+    t = time.time()
+    for kind in KINDS[1:]:
+        for seed in SEEDS:
+            assert cells(growth.grow_e3(kind, seed, 4)) == _indep_e3(kind, seed, 4), (kind, seed)
+    print(f"# time indep E3 n=0..4: {time.time() - t:.1f}s")
+
+
 def test_e3_hand_counts():
     # Layer 0 by incidence; cell-seed layer 1: Kelvin 1 + 14; rhombic 1 + 12 + 6;
     # octahedron 1 + 18 octahedra + 32 tetrahedra; tetrahedron 16 + 23 = 39 (inclusion-exclusion).

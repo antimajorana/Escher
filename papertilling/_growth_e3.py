@@ -14,7 +14,7 @@ import itertools
 import json
 
 from . import _rust
-from .growth import GrowthError, grow
+from ._growth_engine import GrowthError, grow
 
 E3_SCALE = 2
 KINDS = ("cubic", "bitruncated_cubic", "rhombic_dodecahedral", "alternated_cubic")
