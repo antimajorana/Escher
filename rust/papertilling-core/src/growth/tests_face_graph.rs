@@ -317,3 +317,35 @@ fn pilot_radius_needed_per_layer() {
     }
     println!("# time pilot total {:.2} s", t0.elapsed().as_secs_f64());
 }
+
+#[test]
+fn stone_wales_core_grows_like_the_bond_star_of_the_honeycomb() {
+    // Stone-Wales (Q8 point defects) on a perfect honeycomb disk, flipped at the bond nearest the disk centre, grown
+    // from the Dirichlet seed about the bond midpoint (the flip rotates about it, so it stays put).
+    // Hand: DirichletAt(midpoint) is the 2 hexagons sharing the bond (centroids at equal distance, ties included); the
+    // flip cuts both, so the seed is the 4 defect faces 5-5-7-7 (every face with u or v; the heptagons reach the cut
+    // hexagons' corners at the other neighbours of u and v).
+    // [PROVED] The 4 defect faces cover the same 16 sites as the 4 hexagons around the bond, and every other face is
+    // unchanged, so by induction S_n has as many faces as perfect-honeycomb growth from that 4-hexagon bond star.
+    // Those counts come from the independent `sw_hex.py` (triangular-lattice grower, no repository code):
+    // 4, 14, 30, 52, 80, 114 = (3n+4)(n+1).
+    let cell = named("honeycomb").cell;
+    let c = PlaneTiling::new(&cell).unwrap().most_symmetric_point().point;
+    let a = (cell.a1[0].hypot(cell.a1[1])).max(cell.a2[0].hypot(cell.a2[1]));
+    let disk = perfect_disk(&cell, c, 14.0 * a);
+    let mid = |&(u, v): &(usize, usize)| [0.5 * (disk.ref_pos[u][0] + disk.ref_pos[v][0]), 0.5 * (disk.ref_pos[u][1] + disk.ref_pos[v][1])];
+    let dist = |p: [f64; 2]| (p[0] - c[0]).hypot(p[1] - c[1]);
+    let ei = (0..disk.edges.len()).min_by(|&i, &j| dist(mid(&disk.edges[i])).total_cmp(&dist(mid(&disk.edges[j])))).unwrap();
+    let core = mid(&disk.edges[ei]);
+    let sw = crate::defect::stone_wales::stone_wales_flip(&disk, ei, None).unwrap();
+    assert_eq!(sw.after_rings, [5, 5, 7, 7]);
+    let info = LatticeCoreInfo::new(&cell);
+    let cg = grow_crystal(&sw.crystal, &info.lat, core, 5, DEFECT_MAX_CELLS).unwrap();
+    check_disks_and_rim("stone-wales", &cg);
+    assert_eq!((cg.seed.perfect_faces, cg.seed.carried, cg.seed.missing, cg.seed.core_faces), (2, 0, 2, 4), "{:?}", cg.seed);
+    let mut rings: Vec<usize> = cg.seed.cells.iter().map(|&f| cg.complex.faces[f as usize].len()).collect();
+    rings.sort_unstable();
+    assert_eq!(rings, [5, 5, 7, 7]);
+    assert_eq!(cg.complete_layers(), 6, "{:?}", cg.growth.stopped);
+    assert_eq!(counts(&cg), (0..=5usize).map(|n| (3 * n + 4) * (n + 1)).collect::<Vec<_>>());
+}
