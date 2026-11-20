@@ -76,7 +76,13 @@ pub fn stop_text_cap(stopped: Option<&Stopped>, cap: usize) -> Option<String> {
     stopped.map(|s| match s {
         Stopped::CellCap { layer, .. } => format!("Stopped: layer {layer} would pass {cap} cells and was not built."),
         Stopped::Closed { layer } => format!("Closed at layer {layer}: the whole complex is grown."),
-        other => format!("Stopped at layer {}: {other:?}", other.layer()),
+        Stopped::Infinite { layer, reason } => format!("Stopped: layer {layer} would be infinite ({reason})."),
+        Stopped::Precision { layer, gap } => {
+            format!("Stopped: layer {layer} lost merge precision (smallest key gap {gap:.2e}).")
+        }
+        Stopped::Rim { layer } => {
+            format!("Stopped: layer {layer} reached the outer boundary of the finite patch and was not built.")
+        }
     })
 }
 
@@ -211,8 +217,10 @@ fn entry_hover(e: &PointsEntry) -> String {
 
 fn show_readout(ui: &mut egui::Ui, g: &PointsGrowth) {
     for (k, s) in g.stats.iter().enumerate() {
+        let closed = matches!(g.stopped, Some(Stopped::Closed { layer }) if layer as usize == k);
+        let flag = if !closed && s.euler != 1 { " (layer is not a ball)" } else { "" };
         ui.small(format!(
-            "S{k}: {} cells (+{}) | boundary {} vertices, {} edges | χ = {}",
+            "S{k}: {} cells (+{}) | boundary {} vertices, {} edges | χ = {}{flag}",
             s.cells, s.new_cells, s.boundary_vertices, s.boundary_edges, s.euler
         ));
     }

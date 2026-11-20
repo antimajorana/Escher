@@ -14,7 +14,7 @@
 //!   the touching rule ([`crate::growth::periodic_net`]) and the entry's bonds are drawn between grown cells.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use serde::Deserialize;
 
@@ -24,6 +24,10 @@ use crate::growth::{grow, GrowthCaps, LayerStats, SeedKind, Stopped};
 
 const POINTS_JSON: &str = include_str!("../../../../papertilling/data/points3d.json");
 const COVERAGE_JSON: &str = include_str!("../../../../papertilling/data/points3d_coverage.json");
+const MAX_CACHED_NETS: usize = 64;
+
+type SharedNet = Arc<Mutex<PeriodicNet>>;
+type NetCache = Mutex<HashMap<(u16, usize), SharedNet>>;
 
 /// One catalogue lattice (fields of `points3d.json` that the app uses; the key and sequences are skipped).
 #[derive(Clone, Debug, Deserialize)]
@@ -78,14 +82,12 @@ pub struct PointsCoverage {
 
 #[derive(Deserialize)]
 struct PointsFile {
-    note: String,
     partial: bool,
     groups: HashMap<String, PointsGroup>,
 }
 
 #[derive(Deserialize)]
 struct CoverageFile {
-    rule: String,
     status: String,
     groups: Vec<PointsCoverage>,
 }
@@ -94,6 +96,19 @@ static POINTS: LazyLock<PointsFile> =
     LazyLock::new(|| serde_json::from_str(POINTS_JSON).expect("valid embedded points3d.json"));
 static COVERAGE: LazyLock<CoverageFile> =
     LazyLock::new(|| serde_json::from_str(COVERAGE_JSON).expect("valid embedded points3d_coverage.json"));
+static NET_CACHE: LazyLock<NetCache> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn cached_points_net(num: u16, idx: usize, lattice: &[[f64; 3]; 3], sites: &[[f64; 3]]) -> Result<SharedNet, String> {
+    if let Some(net) = NET_CACHE.lock().unwrap_or_else(|p| p.into_inner()).get(&(num, idx)).cloned() {
+        return Ok(net);
+    }
+    let built = Arc::new(Mutex::new(PeriodicNet::new(lattice, sites)?));
+    let mut cache = NET_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    if cache.len() >= MAX_CACHED_NETS && !cache.contains_key(&(num, idx)) {
+        cache.clear();
+    }
+    Ok(cache.entry((num, idx)).or_insert_with(|| built).clone())
+}
 
 /// The catalogue entries of space group `num` (1..=230).
 pub fn points_group(num: u16) -> Result<&'static PointsGroup, String> {
@@ -111,7 +126,10 @@ pub fn points_coverage(num: u16) -> Option<&'static PointsCoverage> {
 /// The catalogue caveat shown with every entry: evidence status, rule and the duplicate-key note.
 pub fn points_note() -> String {
     let partial = if POINTS.partial { " Partial sweep: some groups are missing." } else { "" };
-    format!("[{}] {}. {}{partial}", COVERAGE.status, COVERAGE.rule, POINTS.note)
+    format!(
+        "[{}] Bonded by shells until connected and 3-periodic, with exact space group verified by spglib over 48 parameter samples (seed 0). Entries sharing space group, sites per primitive cell, and per-orbit coordination sequences to depth 12 are merged; coordination sequences to depth 12 are not an exact isomorphism key, so non-isomorphic nets with equal sequences may be merged.{partial}",
+        COVERAGE.status,
+    )
 }
 
 /// "k of 7 found" readout of a group (with the stopping tier when below `n`).
@@ -159,9 +177,12 @@ pub fn grow_points3d(num: u16, idx: usize, seed: SeedKind, layers: u32, max_cell
         [0, 1, 2].map(|k| a[0] * l[0][k] + a[1] * l[1][k] + a[2] * l[2][k])
     };
     let sites: Vec<[f64; 3]> = e.frac.iter().map(|&f| cart(f, [0; 3])).collect();
-    let mut net = PeriodicNet::new(&l, &sites)?;
-    let s0 = net.seed_cells(seed)?;
-    let gr = grow(&mut net, s0, GrowthCaps { max_layers: layers, max_cells });
+    let net_arc = cached_points_net(num, idx, &l, &sites)?;
+    let gr = {
+        let mut net = net_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let s0 = net.seed_cells(seed)?;
+        grow(&mut *net, s0, GrowthCaps { max_layers: layers, max_cells })
+    };
     let cells: Vec<NetCell> = gr.layers.iter().flatten().copied().collect();
     let index: HashMap<NetCell, usize> = cells.iter().enumerate().map(|(k, c)| (*c, k)).collect();
     let mut positions: Vec<[f64; 3]> = cells.iter().map(|c| cart(e.frac[c.0 as usize], c.1)).collect();

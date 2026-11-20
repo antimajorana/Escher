@@ -63,6 +63,8 @@ impl Space3dPanelState {
                 if !self.pristine_only {
                     self.selected_defect = LineDefect3d::PureDisclination90_123;
                 }
+                self.set_catalogue(None);
+                self.view.catalogue_error = None;
                 dirty = true;
             }
             if ui.small_button("#136 P4_2/mnm (Rutile)").clicked() {
@@ -71,6 +73,8 @@ impl Space3dPanelState {
                 if !self.pristine_only {
                     self.selected_defect = LineDefect3d::ScrewDispiration42_136;
                 }
+                self.set_catalogue(None);
+                self.view.catalogue_error = None;
                 dirty = true;
             }
         });
@@ -79,7 +83,7 @@ impl Space3dPanelState {
             ui.add(egui::TextEdit::singleline(&mut self.filter).desired_width(120.0));
         });
         let q = self.filter.trim().to_lowercase();
-        egui::ScrollArea::vertical().id_salt("atlas_sg230_scroll").max_height(155.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("atlas_sg230_scroll").max_height(120.0).show(ui, |ui| {
             for sg in list_space_groups_3d() {
                 if !q.is_empty()
                     && !sg.symbol.to_lowercase().contains(&q)
@@ -99,12 +103,19 @@ impl Space3dPanelState {
 
         ui.separator();
         ui.strong("3D Crystal Net");
+        let selected_text = if self.view.catalogue.is_some() {
+            "Catalogue entry (pick canonical…)"
+        } else {
+            self.selected_net.label()
+        };
         egui::ComboBox::from_id_salt("atlas_3d_net")
-            .selected_text(self.selected_net.label())
+            .selected_text(selected_text)
             .show_ui(ui, |ui| {
                 for n in CanonicalNet3d::ALL {
-                    if ui.selectable_value(&mut self.selected_net, n, n.label()).changed() {
-                        self.set_catalogue(None); // C1 WP-U4: a canonical net replaces the catalogue entry
+                    if ui.selectable_label(self.view.catalogue.is_none() && self.selected_net == n, n.label()).clicked() {
+                        self.selected_net = n;
+                        self.set_catalogue(None);
+                        self.view.catalogue_error = None;
                         dirty = true;
                     }
                 }
@@ -112,8 +123,8 @@ impl Space3dPanelState {
         if !self.pristine_only {
             ui.small("3D line defects are hidden until a real cut-and-reglue exists; the net is drawn pristine.");
         }
-        dirty |= super::points3d_ui::show(ui, self);
         self.show_view_controls(ui);
+        dirty |= super::points3d_ui::show(ui, self);
         dirty
     }
 

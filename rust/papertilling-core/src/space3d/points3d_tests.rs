@@ -44,6 +44,10 @@ fn every_group_shows_seven_entries_and_the_coverage_agrees() {
     assert!(grow_points3d(221, 99, SeedKind::Cell, 1, CAP).is_err());
     let note = points_note();
     assert!(note.contains("COMPUTATIONAL EVIDENCE") && note.contains("coordination sequences"), "{note}");
+    assert!(note.contains("shells until connected") && note.contains("spglib") && note.contains("not an exact"), "{note}");
+    assert!(!note.contains("plan T4") && !note.contains("plan Q1") && !note.contains("plan Q10"), "{note}");
+    assert!(crate::space3d::nets3d::build_layer_slab_patch(1).is_ok());
+    assert!(crate::space3d::nets3d::build_layer_slab_patch(81).is_err());
 }
 
 #[test]

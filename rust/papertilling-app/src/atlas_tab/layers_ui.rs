@@ -94,6 +94,12 @@ impl LayersPanelState {
         self.ensure_cached();
         let patch = self.growth.patch(self.selected_num);
         let mesh = mesh_from_net3d(&patch);
+        let site_fill = |kind: u8| match kind % 4 {
+            0 => [56, 112, 199, 255],
+            1 => [217, 92, 51, 255],
+            2 => [46, 163, 112, 255],
+            _ => [148, 92, 184, 255],
+        };
         let circles: Vec<CirclePrim> = patch
             .positions
             .iter()
@@ -103,18 +109,18 @@ impl LayersPanelState {
                 radius_world: 0.055,
                 min_px: 3.0,
                 max_px: 9.0,
-                fill: if patch.site_kinds[i] == 0 { [42, 92, 168, 255] } else { [214, 92, 52, 255] },
+                fill: site_fill(patch.site_kinds.get(i).copied().unwrap_or(0)),
                 stroke: ([255, 255, 255, 255], 1.0),
             })
             .collect();
         let lines: Vec<LinePrim> = patch
             .bonds
             .iter()
-            .map(|&(u, v, _)| LinePrim {
+            .map(|&(u, v, b_kind)| LinePrim {
                 a: [patch.positions[u][0] as f32, patch.positions[u][1] as f32],
                 b: [patch.positions[v][0] as f32, patch.positions[v][1] as f32],
-                color: [44, 62, 88, 200],
-                width: 1.4,
+                color: if b_kind == 1 { [242, 82, 36, 255] } else { [44, 62, 88, 200] },
+                width: if b_kind == 1 { 2.2 } else { 1.4 },
                 dashed: false,
                 arrow_mid: false,
             })

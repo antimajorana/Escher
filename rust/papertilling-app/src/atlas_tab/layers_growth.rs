@@ -5,7 +5,7 @@
 //!
 //! Advanced only: this panel lives inside the existing layer-group atlas view, reached from its Command Deck card.
 
-use papertilling_core::growth::SeedKind;
+use papertilling_core::growth::{SeedKind, Stopped};
 use papertilling_core::space3d::layer_slab::{SlabGrowth, StackSpec, grow_layer_slab};
 use papertilling_core::space3d::nets3d::Net3dPatch;
 
@@ -18,9 +18,10 @@ pub const MAX_INPLANE: u32 = 6;
 pub const MAX_STACK: u32 = 8;
 /// Cell cap of the in-plane growth (as `default_slab_patch`).
 pub const MAX_CELLS: usize = 20_000;
-const SEEDS: [(SeedKind, &str); 3] = [
+const SEEDS: [(SeedKind, &str); 4] = [
     (SeedKind::Vertex, "Vertex (cells at a Voronoi vertex)"),
     (SeedKind::Edge, "Edge (cells on a Voronoi edge)"),
+    (SeedKind::Face, "Face (2 cells on a Voronoi face)"),
     (SeedKind::Cell, "Cell (one Dirichlet cell)"),
 ];
 
@@ -58,20 +59,20 @@ impl LayerGrowthState {
     }
 
     /// The grown (and stacked) slab of group `num`, rebuilt only when a setting changed. A refused stack falls
-    /// back to one layer and records the reason in `refusal`.
+    /// back to one layer, records the reason in `refusal`, and prepends it to `patch.info` for the 3D caption.
     pub fn growth(&mut self, num: u8) -> Result<&SlabGrowth, String> {
         let key = self.key(num);
         if self.built.as_ref().is_none_or(|(k, _)| *k != key) {
             self.built = None;
+            self.refusal = None;
             let g = match grow_layer_slab(num, self.seed, self.layers, &self.spec(), MAX_CELLS) {
-                Ok(g) => {
-                    self.refusal = None;
-                    g
-                }
+                Ok(g) => g,
                 Err(e) => {
-                    self.refusal = Some(format!("Refused: {e}. One layer is drawn."));
                     let one = StackSpec { layers: 1, ..StackSpec::default() };
-                    grow_layer_slab(num, self.seed, self.layers, &one, MAX_CELLS)?
+                    let mut g = grow_layer_slab(num, self.seed, self.layers, &one, MAX_CELLS)?;
+                    g.patch.info = format!("Refused: {e} (showing 1 layer) | {}", g.patch.info);
+                    self.refusal = Some(format!("Refused: {e}. One layer is drawn."));
+                    g
                 }
             };
             self.built = Some((key, g));
@@ -143,8 +144,17 @@ fn show_body(ui: &mut egui::Ui, lp: &mut LayersPanelState) -> bool {
         Ok(g) => {
             ui.small(g.symmetry_note.as_str());
             for (k, s) in g.stats.iter().enumerate() {
-                let chi = if g.euler_defined { format!(" | χ = {}", s.euler) } else { String::new() };
-                ui.small(format!("S{k}: {} cells (+{}){chi}", s.cells, s.new_cells));
+                let closed = matches!(g.stopped, Some(Stopped::Closed { layer }) if layer as usize == k);
+                let chi = if g.euler_defined {
+                    let flag = if !closed && s.euler != 1 { " (layer is not a disk)" } else { "" };
+                    format!(" | χ = {}{flag}", s.euler)
+                } else {
+                    String::new()
+                };
+                ui.small(format!(
+                    "S{k}: {} cells (+{}) | boundary {} vertices, {} edges{chi}",
+                    s.cells, s.new_cells, s.boundary_vertices, s.boundary_edges
+                ));
             }
             if !g.euler_defined {
                 ui.small("χ is not shown: the Dirichlet cells of a non-planar layer are unbounded.");

@@ -206,3 +206,9 @@ pub fn build_net_3d(net: CanonicalNet3d, defect: LineDefect3d) -> Net3dPatch {
         info,
     }
 }
+
+/// Build a 3D slab patch for any of the 80 layer groups (`num = 1..=80`), delegating to
+/// [`crate::space3d::layer_slab::default_slab_patch`].
+pub fn build_layer_slab_patch(num: u8) -> Result<Net3dPatch, String> {
+    crate::space3d::layer_slab::default_slab_patch(num)
+}
