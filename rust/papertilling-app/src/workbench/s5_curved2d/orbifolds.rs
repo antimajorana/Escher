@@ -294,5 +294,15 @@ pub(crate) fn build_tg(name: &str) -> Result<S5Out, String> {
         .map(|s| vec![s.side_a.to_string(), s.side_b.to_string(), s.edge_index.to_string()])
         .collect();
     let caption = format!("TG cell {} (genus {}) on the hemisphere model", qc.name, qc.genus);
-    Ok(S5Out { scene2d, mesh, caption, rows, notes, table: Some((vec!["Side a", "Side b", "Edge"], table)), svg: None })
+    Ok(S5Out {
+        scene2d,
+        mesh,
+        caption,
+        rows,
+        notes,
+        stopped: None,
+        table: Some((vec!["Side a", "Side b", "Edge"], table)),
+        extra_table: None,
+        svg: None,
+    })
 }

@@ -23,14 +23,8 @@ impl GalleryTabState {
         self.parameter_sliders(ui, canvas, tokens);
 
         ui.separator();
-        if !self.inflation.enabled || self.inflation.last_error.is_some() {
-            ui.horizontal(|ui| {
-                ui.label("Patch repeat:");
-                let mut r = self.repeat;
-                if ui.add(egui::Slider::new(&mut r, 1..=6)).changed() {
-                    self.set_repeat(r, canvas);
-                }
-            });
+        if self.inflation.show_default_controls(ui, tokens) {
+            self.sync_scene(canvas, true);
         }
         let mut show = self.show_unit_cell;
         if ui.checkbox(&mut show, "Show unit cell (a1, a2)").changed() {
@@ -48,18 +42,15 @@ impl GalleryTabState {
         if let Some(note) = canvas.gallery_overlay_note() {
             ui.colored_label(tokens.status_warn, note);
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Patch mode:");
-            let mut enabled = self.inflation.enabled;
-            let mut mode_changed = false;
-            mode_changed |= ui.selectable_value(&mut enabled, false, "Periodic grid").changed();
-            mode_changed |= ui.selectable_value(&mut enabled, true, "Shell inflation").changed();
-            if mode_changed {
-                self.set_inflation_enabled(enabled, canvas);
-            }
-        });
-        if self.inflation.enabled && self.inflation.show_controls(ui, tokens) {
+        let (infl_changed, mode_toggle, new_repeat) =
+            self.inflation.show_more_controls(ui, &self.cell, self.repeat);
+        if let Some(en) = mode_toggle {
+            self.set_inflation_enabled(en, canvas);
+        } else if infl_changed {
             self.sync_scene(canvas, true);
+        }
+        if let Some(r) = new_repeat {
+            self.set_repeat(r, canvas);
         }
 
         ui.separator();

@@ -2,10 +2,12 @@
 //! Poincaré disk, Dunham hyperboloid), drawn in the Poincaré, Klein or upper-half-plane model and, in 3D, on the
 //! hemisphere model. Faces are tinted by shell (vertex-completion layer).
 
+use papertilling_core::hyperbolic::boundary_counts::vertex_completion_counts_combinatorial;
 use papertilling_core::noneuclidean2d::{H2Kernel, H2SurfaceKind, build_hyperbolic_large, map_poincare_to_surface};
 use serde_json::{Value, json};
 
 use super::draw::{DiskModel, h2_picture};
+use super::growth_table::{GROWTH_HEADERS, non_disk_flags, patch_layer_stats, stats_to_rows};
 use super::{MAX_PQ, S5Out, delta_badge, get_usize, pq_controls};
 use crate::mesh3d::wb_mesh::{mesh_from_polygons, wb_face_tint};
 use crate::workbench::scene_helpers::heat_rgba;
@@ -135,10 +137,24 @@ pub(crate) fn build(j: &LargeJob) -> Result<S5Out, String> {
     let faces3 = &faces[..faces.len().min(MAX_3D_FACES)];
     let mesh = mesh_from_polygons(&pts3, faces3, &[], wb_face_tint);
 
-    let mut per_shell = vec![0usize; s.max_shell + 1];
-    for &sh in &shells {
-        per_shell[sh] += 1;
-    }
+    let stats = patch_layer_stats(&faces, &shells, s.max_shell);
+    let stop_msg = match vertex_completion_counts_combinatorial(j.p, j.q, s.max_shell) {
+        Some(exact) if stats.len() == s.max_shell + 1 && (stats[s.max_shell].new_cells as u64) < exact[s.max_shell] => {
+            format!(
+                "Stopped at target {} faces: layer {} is partial ({} of {} faces built; complete through layer {}) [COMPUTATIONAL EVIDENCE].",
+                j.target,
+                s.max_shell,
+                stats[s.max_shell].new_cells,
+                exact[s.max_shell],
+                s.max_shell.saturating_sub(1)
+            )
+        }
+        _ => format!(
+            "Stopped at target {} faces after completing layer {} ({} faces) [COMPUTATIONAL EVIDENCE].",
+            j.target, s.max_shell, s.total_faces
+        ),
+    };
+
     let rows = vec![
         (String::from("Kernel"), kname.to_string()),
         (String::from("Target / built faces"), format!("{} / {}", j.target, s.total_faces)),
@@ -148,16 +164,28 @@ pub(crate) fn build(j: &LargeJob) -> Result<S5Out, String> {
         (String::from("Outermost shell"), s.max_shell.to_string()),
     ];
     let mut notes = vec![
+        stop_msg.clone(),
         String::from("Counts of the built patch [COMPUTATIONAL EVIDENCE]; a disk patch has V − E + F = 1."),
         String::from("3D: hemisphere model of H² (conformal, not an isometric embedding) [PROVED]."),
     ];
+    notes.extend(non_disk_flags(&stats, None));
     if faces.len() > MAX_3D_FACES {
         notes.push(format!("3D shows the innermost {MAX_3D_FACES} of {} faces.", faces.len()));
     }
     if dropped > 0 {
         notes.push(format!("{dropped} face(s) outside the 2D window (|w| <= {}) were not drawn.", super::draw::CLIP_R));
     }
-    let table = per_shell.iter().enumerate().map(|(k, n)| vec![k.to_string(), n.to_string()]).collect();
+    let table = (!stats.is_empty()).then(|| (GROWTH_HEADERS.to_vec(), stats_to_rows(&stats)));
     let caption = format!("{{{},{}}} patch on the hemisphere model: {} faces", j.p, j.q, faces3.len());
-    Ok(S5Out { scene2d, mesh, caption, rows, notes, table: Some((vec!["Shell", "Faces"], table)), svg: None })
+    Ok(S5Out {
+        scene2d,
+        mesh,
+        caption,
+        rows,
+        notes,
+        stopped: Some(stop_msg),
+        table,
+        extra_table: None,
+        svg: None,
+    })
 }

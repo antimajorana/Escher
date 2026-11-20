@@ -1,25 +1,35 @@
-//! Regular `{p,q,r}` (S³ polychora, the cubic E³ honeycomb, compact and paracompact H³ patches) and the four
-//! Euclidean honeycombs: controls, the live `classify_schlafli` badge, and the cell-complex presentation.
+//! Regular `{p,q,r}` (S³ polychora, the cubic E³ honeycomb, compact H³ growth, and paracompact H³ ball truncations)
+//! and the four Euclidean honeycombs: controls, live `classify_schlafli` badge, and core growth/ball dispatch.
 
-use std::collections::HashMap;
-
-use papertilling_core::honeycomb3d::honeycombs_e3::MAX_E3_SHELLS;
-use papertilling_core::honeycomb3d::honeycombs_h3::{MAX_H3_SHELLS, MAX_PATCH_LAYERS};
+use papertilling_core::growth::h3_complex::{IDEAL_VERTEX_REASON, INFINITE_CELL_REASON};
+use papertilling_core::growth::{GrowthCaps, SeedKind};
+use papertilling_core::honeycomb3d::growth_build::{MAX_GROWTH_CELLS, MAX_GROWTH_LAYERS};
 use papertilling_core::honeycomb3d::{
-    CellComplex3d, Classification, EuclideanKind, HoneycombRegime, build_euclidean_honeycomb, build_honeycomb,
-    classify_schlafli,
+    Classification, EuclideanKind, GrowthRule, HoneycombKind, HoneycombRegime, classify_schlafli, grow_honeycomb,
+    paracompact_ball,
 };
 use serde_json::{Value, json};
 
-use super::present::{Built, COUNTS_EVIDENCE, CoreOut, palette_rgba, projection_scene};
-use crate::mesh3d::wb_mesh::mesh_from_polygons;
-use crate::workbench::scene_helpers::unit_circle_lines;
+use super::S6Job;
+use super::honeycomb_present::{present_growth, present_paracompact_ball, rule_label, seed_label};
+use super::present::Built;
 
 /// Range offered for each Schläfli entry (wide enough that degenerate and hyperideal symbols are reachable).
 pub(crate) const PQR_RANGE: std::ops::RangeInclusive<u32> = 2..=8;
 
-pub(crate) const EUCLID_KINDS: [EuclideanKind; 4] =
-    [EuclideanKind::Cubic, EuclideanKind::BitruncatedCubic, EuclideanKind::RhombicDodecahedral, EuclideanKind::AlternatedCubic];
+pub(crate) const RADIUS_CENTI_MIN: u32 = 30;
+pub(crate) const RADIUS_CENTI_MAX: u32 = 300;
+pub(crate) const RADIUS_CENTI_DEFAULT: u32 = 100;
+
+pub(crate) const EUCLID_KINDS: [EuclideanKind; 4] = [
+    EuclideanKind::Cubic,
+    EuclideanKind::BitruncatedCubic,
+    EuclideanKind::RhombicDodecahedral,
+    EuclideanKind::AlternatedCubic,
+];
+
+pub(crate) const SEEDS_3D: [SeedKind; 4] = [SeedKind::Vertex, SeedKind::Edge, SeedKind::Face, SeedKind::Cell];
+pub(crate) const RULES_3D: [GrowthRule; 2] = [GrowthRule::Touching, GrowthRule::FaceShells];
 
 /// Short badge of a regime (never equal to a sub-row label).
 pub(crate) fn regime_badge(r: HoneycombRegime) -> &'static str {
@@ -33,27 +43,65 @@ pub(crate) fn regime_badge(r: HoneycombRegime) -> &'static str {
     }
 }
 
-/// Shell cap of a regime: `None` when the whole object is built (S³) or nothing is (refused).
-pub(crate) fn shell_cap(r: HoneycombRegime) -> Option<u32> {
-    match r {
-        HoneycombRegime::EuclideanE3 => Some(MAX_E3_SHELLS),
-        HoneycombRegime::HyperbolicCompactH3 | HoneycombRegime::HyperbolicParacompactH3 => Some(MAX_H3_SHELLS),
+fn show_seed_rule_layers(ui: &mut egui::Ui, seed: &mut SeedKind, rule: &mut GrowthRule, layers: &mut u32) -> bool {
+    let mut ch = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Seed:");
+        for s in SEEDS_3D {
+            ch |= ui.selectable_value(seed, s, seed_label(s)).changed();
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Rule:");
+        for r in RULES_3D {
+            ch |= ui.selectable_value(rule, r, rule_label(r)).changed();
+        }
+    });
+    let mut lay = (*layers).min(MAX_GROWTH_LAYERS);
+    ui.horizontal(|ui| {
+        ui.label("Layers:");
+        if ui.add(egui::Slider::new(&mut lay, 0..=MAX_GROWTH_LAYERS)).changed() {
+            *layers = lay;
+            ch = true;
+        }
+    });
+    ch
+}
+
+fn parse_seed(s: &str) -> Option<SeedKind> {
+    SEEDS_3D.into_iter().find(|k| format!("{k:?}").eq_ignore_ascii_case(s))
+}
+
+fn parse_rule(s: &str) -> Option<GrowthRule> {
+    match s {
+        "Touching" | "touching" => Some(GrowthRule::Touching),
+        "FaceShells" | "face_shells" => Some(GrowthRule::FaceShells),
         _ => None,
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SchlafliState {
     pub(crate) p: u32,
     pub(crate) q: u32,
     pub(crate) r: u32,
-    pub(crate) shells: u32,
-    pub(crate) patch_layers: u32,
+    pub(crate) seed: SeedKind,
+    pub(crate) rule: GrowthRule,
+    pub(crate) layers: u32,
+    pub(crate) radius_centi: u32,
 }
 
 impl Default for SchlafliState {
     fn default() -> Self {
-        Self { p: 4, q: 3, r: 4, shells: 1, patch_layers: 1 }
+        Self {
+            p: 4,
+            q: 3,
+            r: 4,
+            seed: SeedKind::Vertex,
+            rule: GrowthRule::Touching,
+            layers: 1,
+            radius_centi: RADIUS_CENTI_DEFAULT,
+        }
     }
 }
 
@@ -62,12 +110,25 @@ impl SchlafliState {
         classify_schlafli(self.p, self.q, self.r)
     }
 
-    /// Job inputs with irrelevant entries zeroed (so equal builds share a cache key).
-    pub(crate) fn params(&self) -> (u32, u32, u32, u32, u32) {
+    pub(crate) fn job(&self) -> S6Job {
         let c = self.classify();
-        let shells = shell_cap(c.regime).map_or(0, |cap| self.shells.min(cap));
-        let layers = if c.has_infinite_euclidean_cells { self.patch_layers.clamp(1, MAX_PATCH_LAYERS) } else { 1 };
-        (self.p, self.q, self.r, shells, layers)
+        if c.regime == HoneycombRegime::HyperbolicParacompactH3 {
+            S6Job::ParacompactBall {
+                p: self.p,
+                q: self.q,
+                r: self.r,
+                radius_centi: self.radius_centi.clamp(RADIUS_CENTI_MIN, RADIUS_CENTI_MAX),
+            }
+        } else {
+            S6Job::SchlafliGrowth {
+                p: self.p,
+                q: self.q,
+                r: self.r,
+                seed: self.seed,
+                rule: self.rule,
+                layers: self.layers.min(MAX_GROWTH_LAYERS),
+            }
+        }
     }
 
     pub(crate) fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
@@ -82,30 +143,42 @@ impl SchlafliState {
         let col = if c.is_buildable() { egui::Color32::from_rgb(39, 174, 96) } else { egui::Color32::from_rgb(192, 57, 43) };
         ui.colored_label(col, regime_badge(c.regime));
         ui.add(egui::Label::new(egui::RichText::new(&c.reason).small()).wrap());
-        match shell_cap(c.regime) {
-            Some(cap) => {
-                self.shells = self.shells.min(cap);
-                ui.horizontal(|ui| {
-                    ui.label("Shells of cells:");
-                    ch |= ui.add(egui::Slider::new(&mut self.shells, 0..=cap)).changed();
-                });
-            }
-            None if c.regime == HoneycombRegime::SphericalS3 => {
-                ui.label("Whole polychoron (all cells), stereographic projection.");
-            }
-            None => {}
+        if !c.is_buildable() {
+            return ch;
         }
-        if c.has_infinite_euclidean_cells {
-            ui.horizontal(|ui| {
-                ui.label("Patch rings of infinite cells:");
-                ch |= ui.add(egui::Slider::new(&mut self.patch_layers, 1..=MAX_PATCH_LAYERS)).changed();
+        if c.regime == HoneycombRegime::HyperbolicParacompactH3 {
+            let why = if c.has_infinite_euclidean_cells { INFINITE_CELL_REASON } else { IDEAL_VERTEX_REASON };
+            ui.colored_label(egui::Color32::from_rgb(180, 95, 20), egui::RichText::new(why).small());
+            ui.add_enabled_ui(false, |ui| {
+                let _ = show_seed_rule_layers(ui, &mut self.seed, &mut self.rule, &mut self.layers);
             });
+            let mut rad = f64::from(self.radius_centi.clamp(RADIUS_CENTI_MIN, RADIUS_CENTI_MAX)) / 100.0;
+            ui.horizontal(|ui| {
+                ui.label("Ball radius R:");
+                if ui.add(egui::Slider::new(&mut rad, 0.30..=3.00).fixed_decimals(2)).changed() {
+                    let next = ((rad * 100.0).round() as u32).clamp(RADIUS_CENTI_MIN, RADIUS_CENTI_MAX);
+                    if next != self.radius_centi {
+                        self.radius_centi = next;
+                        ch = true;
+                    }
+                }
+            });
+        } else {
+            ch |= show_seed_rule_layers(ui, &mut self.seed, &mut self.rule, &mut self.layers);
         }
         ch
     }
 
     pub(crate) fn save(&self) -> Value {
-        json!({"p": self.p, "q": self.q, "r": self.r, "shells": self.shells, "patch_layers": self.patch_layers})
+        json!({
+            "p": self.p,
+            "q": self.q,
+            "r": self.r,
+            "seed": format!("{:?}", self.seed),
+            "rule": format!("{:?}", self.rule),
+            "layers": self.layers,
+            "radius_centi": self.radius_centi,
+        })
     }
 
     pub(crate) fn restore(&mut self, v: &Value) {
@@ -120,28 +193,50 @@ impl SchlafliState {
         if let Some(x) = get("r") {
             self.r = clamp_pqr(x);
         }
-        if let Some(x) = get("shells") {
-            self.shells = x.min(MAX_E3_SHELLS.max(MAX_H3_SHELLS));
+        if let Some(s) = v.get("seed").and_then(Value::as_str).and_then(parse_seed) {
+            self.seed = s;
         }
-        if let Some(x) = get("patch_layers") {
-            self.patch_layers = x.clamp(1, MAX_PATCH_LAYERS);
+        if let Some(r) = v.get("rule").and_then(Value::as_str).and_then(parse_rule) {
+            self.rule = r;
+        }
+        if let Some(x) = get("layers").or_else(|| get("shells")) {
+            self.layers = x.min(MAX_GROWTH_LAYERS);
+        }
+        if let Some(x) = get("radius_centi") {
+            self.radius_centi = x.clamp(RADIUS_CENTI_MIN, RADIUS_CENTI_MAX);
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EuclidState {
     pub(crate) kind: EuclideanKind,
-    pub(crate) shells: u32,
+    pub(crate) seed: SeedKind,
+    pub(crate) rule: GrowthRule,
+    pub(crate) layers: u32,
 }
 
 impl Default for EuclidState {
     fn default() -> Self {
-        Self { kind: EuclideanKind::Cubic, shells: 1 }
+        Self {
+            kind: EuclideanKind::Cubic,
+            seed: SeedKind::Vertex,
+            rule: GrowthRule::Touching,
+            layers: 1,
+        }
     }
 }
 
 impl EuclidState {
+    pub(crate) fn job(&self) -> S6Job {
+        S6Job::Euclid {
+            kind: self.kind,
+            seed: self.seed,
+            rule: self.rule,
+            layers: self.layers.min(MAX_GROWTH_LAYERS),
+        }
+    }
+
     pub(crate) fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
         let mut ch = false;
         egui::ComboBox::from_id_salt("wb_s6_euclid_kind").selected_text(self.kind.label()).show_ui(ui, |ui| {
@@ -149,15 +244,17 @@ impl EuclidState {
                 ch |= ui.selectable_value(&mut self.kind, k, k.label()).changed();
             }
         });
-        ui.horizontal(|ui| {
-            ui.label("Shells of cells:");
-            ch |= ui.add(egui::Slider::new(&mut self.shells, 0..=MAX_E3_SHELLS)).changed();
-        });
+        ch |= show_seed_rule_layers(ui, &mut self.seed, &mut self.rule, &mut self.layers);
         ch
     }
 
     pub(crate) fn save(&self) -> Value {
-        json!({"kind": format!("{:?}", self.kind), "shells": self.shells})
+        json!({
+            "kind": format!("{:?}", self.kind),
+            "seed": format!("{:?}", self.seed),
+            "rule": format!("{:?}", self.rule),
+            "layers": self.layers,
+        })
     }
 
     pub(crate) fn restore(&mut self, v: &Value, notes: &mut Vec<String>) {
@@ -167,109 +264,61 @@ impl EuclidState {
                 None => notes.push(format!("S6 panel: unknown Euclidean honeycomb {s:?} (kept current)")),
             }
         }
-        if let Some(x) = v.get("shells").and_then(Value::as_u64) {
-            self.shells = x.min(u64::from(MAX_E3_SHELLS)) as u32;
+        if let Some(s) = v.get("seed").and_then(Value::as_str).and_then(parse_seed) {
+            self.seed = s;
+        }
+        if let Some(r) = v.get("rule").and_then(Value::as_str).and_then(parse_rule) {
+            self.rule = r;
+        }
+        let get = |k: &str| v.get(k).and_then(Value::as_u64);
+        if let Some(x) = get("layers").or_else(|| get("shells")) {
+            self.layers = x.min(u64::from(MAX_GROWTH_LAYERS)) as u32;
         }
     }
 }
 
-/// Build `{p,q,r}`; a refused symbol returns the core's `[PROVED]` reason.
-pub(crate) fn build_schlafli(p: u32, q: u32, r: u32, shells: u32, layers: u32) -> Result<Built, String> {
+/// Grow `{p,q,r}` (S³, E³ `{4,3,4}`, or compact H³); a refused symbol returns the core's `[PROVED]` reason.
+pub(crate) fn build_schlafli_growth(
+    p: u32,
+    q: u32,
+    r: u32,
+    seed: SeedKind,
+    rule: GrowthRule,
+    layers: u32,
+) -> Result<Built, String> {
     let c = classify_schlafli(p, q, r);
     if !c.is_buildable() {
         return Err(c.reason);
     }
-    if let Some(cap) = shell_cap(c.regime).filter(|&cap| shells > cap) {
-        return Err(format!("shells = {shells} exceeds the maximum {cap} for this regime"));
+    if layers > MAX_GROWTH_LAYERS {
+        return Err(format!("layers = {layers} exceeds the maximum {MAX_GROWTH_LAYERS}"));
     }
-    let cx = build_honeycomb(p, q, r, shells, layers)?;
-    Ok(present_complex(cx, Some(&c), shells, layers))
+    let caps = GrowthCaps { max_layers: layers, max_cells: MAX_GROWTH_CELLS };
+    let g = grow_honeycomb(HoneycombKind::Schlafli(p, q, r), seed, rule, caps)?;
+    Ok(present_growth(g, Some(&c), layers))
 }
 
-pub(crate) fn build_euclid(kind: EuclideanKind, shells: u32) -> Result<Built, String> {
-    let cx = build_euclidean_honeycomb(kind, shells)?;
-    Ok(present_complex(cx, None, shells, 0))
-}
-
-/// Model note of a regime string (`CellComplex3d::regime`).
-fn model_note(regime: &str) -> &'static str {
-    match regime {
-        "SphericalS3" => "Drawn by stereographic projection of S³ from a pole that is not a vertex: conformal, not isometric (cells near the pole look large).",
-        "EuclideanE3" => "Drawn in Euclidean coordinates (isometric).",
-        _ => "Drawn in the Poincaré ball model of H³: conformal, not isometric; ideal vertices lie on the unit sphere.",
+/// Build the paracompact ball truncation of `{p,q,r}` at radius `radius_centi / 100.0`.
+pub(crate) fn build_paracompact(p: u32, q: u32, r: u32, radius_centi: u32) -> Result<Built, String> {
+    let c = classify_schlafli(p, q, r);
+    if !c.is_buildable() {
+        return Err(c.reason);
     }
-}
-
-/// Mesh (faces tinted by the shell of their innermost cell), xy projection, inspector rows and stamps.
-pub(crate) fn present_complex(cx: CellComplex3d, cls: Option<&Classification>, shells: u32, layers: u32) -> Built {
-    let mut face_shell = vec![u32::MAX; cx.faces.len()];
-    for (ci, cell) in cx.cells.iter().enumerate() {
-        let s = cx.cell_shell.get(ci).copied().unwrap_or(0);
-        for &f in cell {
-            if let Some(fs) = face_shell.get_mut(f) {
-                *fs = (*fs).min(s);
-            }
-        }
-    }
-    let shell_of: HashMap<&[usize], u32> = cx.faces.iter().zip(&face_shell).map(|(f, &s)| (f.as_slice(), s)).collect();
-    let spherical = cx.regime == "SphericalS3";
-    let tint = |face: &[usize]| {
-        let s = shell_of.get(face).copied().unwrap_or(0);
-        if spherical {
-            palette_rgba(s as usize, if s == 0 { 0.6 } else { 0.22 })
-        } else {
-            let alpha = [0.85, 0.42, 0.26, 0.18][s.min(3) as usize];
-            palette_rgba(s as usize, alpha)
-        }
-    };
-    let edges: Vec<(usize, usize)> = cx.edges.iter().map(|e| (e[0], e[1])).collect();
-    let mesh = mesh_from_polygons(&cx.points, &cx.faces, &edges, tint);
-    let hyperbolic = cx.regime.starts_with("Hyperbolic");
-    let extra = if hyperbolic { unit_circle_lines(96, [120, 120, 120, 255]) } else { Vec::new() };
-    let title = format!("{}: xy projection of the edges", cx.name);
-    let scene2d = projection_scene(&cx.points, edges.iter().copied(), extra, &title, model_note(&cx.regime));
-    let (v, e, f, c) = cx.counts();
-    let mut rows = vec![
-        (String::from("Complex"), cx.name.clone()),
-        (String::from("Regime"), cx.regime.clone()),
-        (String::from("V, E, F, C"), format!("{v}, {e}, {f}, {c}")),
-        (String::from("V − E + F − C"), cx.euler().to_string()),
-    ];
-    if !spherical {
-        rows.push((String::from("Shells requested"), shells.to_string()));
-        let max_shell = cx.cell_shell.iter().copied().max().unwrap_or(0);
-        let per: Vec<String> = (0..=max_shell).map(|s| cx.cell_shell.iter().filter(|&&x| x == s).count().to_string()).collect();
-        rows.push((String::from("Cells per shell"), per.join(", ")));
-    }
-    let ideal = cx.is_ideal.iter().filter(|&&b| b).count();
-    let truncated = cx.cell_truncated.iter().filter(|&&b| b).count();
-    if hyperbolic {
-        rows.push((String::from("Ideal vertices"), ideal.to_string()));
-        rows.push((String::from("Truncated infinite cells"), truncated.to_string()));
-        if truncated > 0 {
-            rows.push((String::from("Patch rings per infinite cell"), layers.to_string()));
-        }
-    }
-    let mut notes = Vec::new();
-    if let Some(c) = cls {
-        notes.push(c.reason.clone());
-    } else {
-        notes.push(String::from("[PROVED: the four Euclidean honeycombs here are the SC, BCC and FCC Voronoi tilings and the octet tiling, all face-to-face tilings of E³]"));
-    }
-    notes.push(String::from(COUNTS_EVIDENCE));
-    notes.push(String::from(if spherical {
-        "Expected V − E + F − C = 0 = χ(S³) for a cell decomposition of S³ [PROVED: Euler characteristic of S³]."
-    } else if truncated > 0 {
-        "No 3-ball test here: a truncated infinite cell is an open patch of its faces, not a closed 3-cell, so V − E + F − C counts a complex that is not a cell decomposition of B³ and need not equal 1."
-    } else {
-        "Expected V − E + F − C = 1 for a patch that is a 3-ball [PROVED: χ(B³) = 1]; any other value means the patch is not a ball."
-    }));
-    if truncated > 0 {
-        notes.push(String::from(
-            "Infinite horospherical cells are cut to finite patches: the drawn cells are pieces, not whole cells (no geometry is approximated).",
+    if !(RADIUS_CENTI_MIN..=RADIUS_CENTI_MAX).contains(&radius_centi) {
+        return Err(format!(
+            "radius_centi = {radius_centi} outside allowed {RADIUS_CENTI_MIN}..={RADIUS_CENTI_MAX}"
         ));
     }
-    notes.push(String::from(model_note(&cx.regime)));
-    let caption = format!("{} — {v} V, {e} E, {f} F, {c} cells", cx.name);
-    Built { core: CoreOut::Complex(Box::new(cx)), scene2d, mesh, caption, rows, notes }
+    let radius = f64::from(radius_centi) / 100.0;
+    let b = paracompact_ball(p, q, r, radius)?;
+    Ok(present_paracompact_ball(b, &c))
+}
+
+pub(crate) fn build_euclid(kind: EuclideanKind, seed: SeedKind, rule: GrowthRule, layers: u32) -> Result<Built, String> {
+    if layers > MAX_GROWTH_LAYERS {
+        return Err(format!("layers = {layers} exceeds the maximum {MAX_GROWTH_LAYERS}"));
+    }
+    let caps = GrowthCaps { max_layers: layers, max_cells: MAX_GROWTH_CELLS };
+    let g = grow_honeycomb(HoneycombKind::Euclid(kind), seed, rule, caps)?;
+    Ok(present_growth(g, None, layers))
 }

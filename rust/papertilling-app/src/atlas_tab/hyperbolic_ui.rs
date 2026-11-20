@@ -1,18 +1,29 @@
 //! Hyperbolic `H^2` `{p, q}` tilings, `(p.q.p.q)` kagome, Poincare geodesics, Klein chords,
-//! 3D Minkowski hyperboloid bowl, wedge disclinations, and `kappa(D) < 0` inspector.
+//! 3D Minkowski hyperboloid bowl, wedge disclinations, 0-based seeded layer growth, and `kappa(D) < 0` inspector.
 //!
-//! Interactive view (rendering only; the tiling is cached and rebuilt only when `p, q`, style, layers or wedge
+//! Interactive view (rendering only; the tiling is cached and rebuilt only when `p, q`, style, layers, seed or wedge
 //! change): a hyperbolic pan (a disk isometry applied to the 2D disk and the 3D sheet, so the picture stays a valid
 //! `{p,q}` tiling), a view zoom of the 2D disk, and face / vertex picking with a readout (`hyperbolic_pick`).
 
-use papertilling_core::hyperbolic::{HyperbolicStyle, HyperbolicTiling, build_hyperbolic_tiling};
+use papertilling_core::growth::{LayerStats, SeedKind};
+use papertilling_core::hyperbolic::{HyperbolicStyle, HyperbolicTiling, build_hyperbolic_tiling_seeded};
 
 use super::hyperbolic_scene::{disk_scene, empty_scene, sheet_mesh};
-use super::hyperbolic_shells::{SHELL_CACHE_MAX, ShellTable, shell_table};
+use super::hyperbolic_shells::{SHELL_CACHE_MAX, ShellTable, drawn_patch_stats, shell_table_seeded};
 use super::hyperbolic_view::{DiskIsometry, vertex_generations, view_tiling};
 use crate::mesh3d::GpuMeshData;
 use crate::scene2d::Scene2D;
 use crate::theme::ThemeTokens;
+
+#[cfg(test)]
+#[path = "hyperbolic_growth_tests.rs"]
+mod hyperbolic_growth_tests;
+
+/// Largest 0-based layer index offered in the Atlas H² slider (`0..=8`).
+pub const MAX_UI_H2_LAYERS: usize = 8;
+
+const SEED_FORCED_HOVER: &str =
+    "Kagome cluster patches and Δp ≠ 0 wedge cores grow from their own central core (Cell seed only).";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiskProjection {
@@ -27,14 +38,15 @@ pub enum HypPick {
     Vertex(usize),
 }
 
-type TilingKey = (usize, usize, HyperbolicStyle, usize, i32);
+type TilingKey = (usize, usize, HyperbolicStyle, usize, i32, SeedKind);
 
-/// The origin-frame tiling of a key with its face and vertex generations.
+/// The origin-frame tiling of a key with its face/vertex generations and complete-shell topological readout.
 pub struct CachedTiling {
     pub key: TilingKey,
     pub base: HyperbolicTiling,
     pub face_gen: Vec<usize>,
     pub vertex_gen: Vec<usize>,
+    pub drawn_stats: Vec<LayerStats>,
 }
 
 pub struct HyperbolicPanelState {
@@ -43,6 +55,7 @@ pub struct HyperbolicPanelState {
     pub q: usize,
     pub style: HyperbolicStyle,
     pub layers: usize,
+    pub seed: SeedKind,
     pub wedge_delta: i32,
     pub disk_proj: DiskProjection,
     pub status: String,
@@ -59,9 +72,9 @@ pub struct HyperbolicPanelState {
     pub(super) view: Option<HyperbolicTiling>,
     /// Effective `{p, q}` whose shell table the inspector shows.
     pub shell_key: Option<(usize, usize)>,
-    /// Uncapped BDF vertex-completion shell counts, at most [`SHELL_CACHE_MAX`] `{p, q}` keys
-    /// (oldest dropped first), so Regular <-> Dual toggles and revisits do not recompute.
-    pub shell_cache: Vec<((usize, usize), Result<ShellTable, String>)>,
+    /// Uncapped BDF vertex-completion shell counts, at most [`SHELL_CACHE_MAX`] `(p, q, seed)` keys
+    /// (oldest dropped first), so Regular <-> Dual and seed toggles do not recompute.
+    pub shell_cache: Vec<((usize, usize, SeedKind), Result<ShellTable, String>)>,
     /// Which shells the drawn patch contains (from the tiling's `growth_rule`).
     pub drawn_patch_note: String,
 }
@@ -74,6 +87,7 @@ impl Default for HyperbolicPanelState {
             q: 3,
             style: HyperbolicStyle::RegularPQ,
             layers: 2,
+            seed: SeedKind::Cell,
             wedge_delta: 0,
             disk_proj: DiskProjection::Poincare,
             status: String::new(),
@@ -94,6 +108,18 @@ impl Default for HyperbolicPanelState {
 impl HyperbolicPanelState {
     pub fn effective_wedge(&self) -> i32 {
         if self.pristine_only { 0 } else { self.wedge_delta }
+    }
+
+    /// Active seed: forced to [`SeedKind::Cell`] when `RectifiedKagome` or `effective_wedge() != 0` is active.
+    pub fn effective_seed(&self) -> SeedKind {
+        if self.style == HyperbolicStyle::RectifiedKagome || self.effective_wedge() != 0 {
+            SeedKind::Cell
+        } else {
+            match self.seed {
+                SeedKind::Vertex | SeedKind::Edge | SeedKind::Cell => self.seed,
+                SeedKind::Face | SeedKind::Dirichlet => SeedKind::Cell,
+            }
+        }
     }
 
     pub fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
@@ -120,8 +146,35 @@ impl HyperbolicPanelState {
             dirty |= ui.add(egui::DragValue::new(&mut self.p).range(3..=12)).changed();
             ui.small("q:");
             dirty |= ui.add(egui::DragValue::new(&mut self.q).range(3..=12)).changed();
+        });
+        let mut lay = self.layers.min(MAX_UI_H2_LAYERS);
+        ui.horizontal(|ui| {
             ui.small("Layers:");
-            dirty |= ui.add(egui::DragValue::new(&mut self.layers).range(1..=4)).changed();
+            if ui.add(egui::Slider::new(&mut lay, 0..=MAX_UI_H2_LAYERS)).changed() {
+                self.layers = lay;
+                dirty = true;
+            }
+        });
+        let seed_allowed = self.style != HyperbolicStyle::RectifiedKagome && self.effective_wedge() == 0;
+        let eff = self.effective_seed();
+        ui.horizontal_wrapped(|ui| {
+            ui.small("Seed:");
+            for (s, lbl) in [(SeedKind::Vertex, "Vertex"), (SeedKind::Edge, "Edge")] {
+                let resp = ui.add_enabled(seed_allowed, egui::Button::selectable(eff == s, lbl));
+                if !seed_allowed {
+                    resp.on_disabled_hover_text(SEED_FORCED_HOVER);
+                } else if resp.clicked() && self.seed != s {
+                    self.seed = s;
+                    dirty = true;
+                }
+            }
+            let cell_resp = ui.selectable_label(eff == SeedKind::Cell, "Cell");
+            if !seed_allowed {
+                cell_resp.on_hover_text(SEED_FORCED_HOVER);
+            } else if cell_resp.clicked() && self.seed != SeedKind::Cell {
+                self.seed = SeedKind::Cell;
+                dirty = true;
+            }
         });
         ui.horizontal_wrapped(|ui| {
             ui.small("Tiling:");
@@ -151,13 +204,11 @@ impl HyperbolicPanelState {
         ui.strong("Disk View: Hyperbolic Pan, Zoom & Picking");
         ui.small("Drag the disk: hyperbolic pan (Mobius). Click: pick a face or vertex.");
         let mut changed = false;
-        // one step = hyperbolic distance 0.25 (Poincare radius tanh(0.125))
         let r = 0.125_f64.tanh();
         ui.horizontal(|ui| {
             ui.small("Pan:");
             for (lbl, d) in [("←", [-r, 0.0]), ("→", [r, 0.0]), ("↑", [0.0, r]), ("↓", [0.0, -r])] {
                 if ui.small_button(lbl).clicked() {
-                    // move the content by `d`: the view origin's content goes to `d`
                     self.pan = self.pan.then(DiskIsometry::from_origin(d));
                     changed = true;
                 }
@@ -192,33 +243,58 @@ impl HyperbolicPanelState {
             let col = if is_hyperbolic { tokens.status_ok } else { tokens.status_err };
             ui.colored_label(col, egui::RichText::new(&self.status).small());
         }
+        if let Some(cache) = &self.cache
+            && cache.base.complete_through_shell < self.layers
+        {
+            ui.colored_label(
+                tokens.status_warn,
+                egui::RichText::new(format!(
+                    "Stopped at layer {} (requested {}): {}",
+                    cache.base.complete_through_shell, self.layers, cache.base.growth_rule
+                ))
+                .small()
+                .strong(),
+            );
+        }
         if self.pristine_only {
-            ui.small(format!("Schläfli {{{}, {}}} | Layers: {}", self.p, self.q, self.layers));
+            ui.small(format!(
+                "Schläfli {{{}, {}}} | Seed: {:?} | Layers: {}",
+                self.p,
+                self.q,
+                self.effective_seed(),
+                self.layers
+            ));
         } else {
             ui.small(format!(
-                "Schläfli {{{}, {}}} | Layers: {} | Wedge Δp: {:+}",
-                self.p, self.q, self.layers, self.effective_wedge()
+                "Schläfli {{{}, {}}} | Seed: {:?} | Layers: {} | Wedge Δp: {:+}",
+                self.p,
+                self.q,
+                self.effective_seed(),
+                self.layers,
+                self.effective_wedge()
             ));
         }
         ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
         self.show_pick_readout(ui, tokens);
+        self.show_drawn_growth_table(ui, tokens);
         self.show_shell_table(ui);
     }
 
     fn key(&self) -> TilingKey {
-        (self.p, self.q, self.style, self.layers, self.effective_wedge())
+        (self.p, self.q, self.style, self.layers, self.effective_wedge(), self.effective_seed())
     }
 
     /// Build (or reuse) the origin-frame tiling of the current key and update the shell table cache;
     /// a new key clears the pick.
     fn ensure_tiling(&mut self) -> Result<(), String> {
         let (pe, qe) = if self.style == HyperbolicStyle::DualQP { (self.q, self.p) } else { (self.p, self.q) };
-        if !self.shell_cache.iter().any(|(k, _)| *k == (pe, qe)) {
-            let res = shell_table(pe, qe);
+        let eff_seed = self.effective_seed();
+        if !self.shell_cache.iter().any(|(k, _)| *k == (pe, qe, eff_seed)) {
+            let res = shell_table_seeded(pe, qe, eff_seed);
             if self.shell_cache.len() >= SHELL_CACHE_MAX {
-                self.shell_cache.drain(..1); // drop the oldest table
+                self.shell_cache.drain(..1);
             }
-            self.shell_cache.push(((pe, qe), res));
+            self.shell_cache.push(((pe, qe, eff_seed), res));
         }
         self.shell_key = Some((pe, qe));
         let key = self.key();
@@ -228,7 +304,14 @@ impl HyperbolicPanelState {
         self.cache = None;
         self.picked = None;
         self.hovered = None;
-        let base = match build_hyperbolic_tiling(self.p, self.q, self.style, self.layers, self.effective_wedge()) {
+        let base = match build_hyperbolic_tiling_seeded(
+            self.p,
+            self.q,
+            self.style,
+            self.layers,
+            self.effective_wedge(),
+            eff_seed,
+        ) {
             Ok(b) => b,
             Err(e) => {
                 self.drawn_patch_note.clear();
@@ -238,7 +321,8 @@ impl HyperbolicPanelState {
         self.drawn_patch_note = base.growth_rule.clone();
         let face_gen = base.face_shell.clone();
         let vertex_gen = vertex_generations(base.poincare_pts.len(), &base.faces, &face_gen);
-        self.cache = Some(CachedTiling { key, base, face_gen, vertex_gen });
+        let drawn_stats = drawn_patch_stats(&base.faces, &base.face_shell, base.complete_through_shell);
+        self.cache = Some(CachedTiling { key, base, face_gen, vertex_gen, drawn_stats });
         Ok(())
     }
 

@@ -423,3 +423,6 @@ impl GalleryTabState {
 fn same_lattice_base(a: &CatalogueItemUi, base: &CatalogueItemUi) -> bool {
     a.frame == base.frame && a.group == base.group && a.label == base.label && a.named_key == base.named_key && a.index == base.index
 }
+
+#[cfg(test)]
+mod inflation_tests;

@@ -1,11 +1,16 @@
 //! Wythoff family of {p,q}: the seven ringed operations and the snub (both hands) on S², E² and H² via
-//! `build_wythoff`; vertex symbol and face-type counts in the inspector.
+//! `build_wythoff`; vertex symbol, face-type counts, `WythoffTiling::stopped` banner, and base-patch layer table.
 
 use papertilling_core::dsymbol::GeometryKind;
-use papertilling_core::noneuclidean2d::{SnubHandedness, WythoffOp, build_wythoff};
+use papertilling_core::growth::{SeedKind, Stopped};
+use papertilling_core::hyperbolic::inflation::{HypPointSet, grow_vertex_completion, hyp_dist};
+use papertilling_core::noneuclidean2d::s2_seeds::grow_s2;
+use papertilling_core::noneuclidean2d::wythoff_h2::WYTHOFF_TILE_BUDGET;
+use papertilling_core::noneuclidean2d::{SnubHandedness, WythoffOp, build_unified_pq, build_wythoff};
 use serde_json::{Value, json};
 
 use super::draw::{DiskModel, Picture, e2_picture, h2_picture, mesh_with_arcs, s2_picture, slerp};
+use super::growth_table::{GROWTH_HEADERS, build_e2_regular_seeded, non_disk_flags, patch_layer_stats, stats_to_rows};
 use super::{S5Out, check_symbol, delta_badge, euler_note, geom_label, get_usize, pq_controls};
 use crate::workbench::scene_helpers::{EDGE_RGBA, ring_size_tint};
 
@@ -22,8 +27,8 @@ pub(crate) const OPS: [(WythoffOp, &str); 9] = [
     (WythoffOp::Snub { chirality: SnubHandedness::Right }, "snub sr, right hand"),
 ];
 
-/// Layers honoured by the Wythoff builders on E² and H² (S² is closed).
-pub(crate) const MAX_LAYERS: usize = 3;
+/// 0-based layer range offered for Wythoff base patches (`0..=6`; capped by `WYTHOFF_TILE_BUDGET` on H²).
+pub(crate) const MAX_LAYERS: usize = 6;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WyJob {
@@ -49,7 +54,7 @@ impl Default for WyState {
 
 impl WyState {
     pub(crate) fn job(&self) -> WyJob {
-        WyJob { p: self.p, q: self.q, op: self.op, layers: self.layers }
+        WyJob { p: self.p, q: self.q, op: self.op, layers: self.layers.min(MAX_LAYERS) }
     }
 
     pub(super) fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
@@ -63,10 +68,14 @@ impl WyState {
                 }
             });
         });
-        if !matches!(check_symbol(self.p, self.q), Ok(GeometryKind::Spherical)) {
+        if check_symbol(self.p, self.q).is_ok() {
+            let mut lay = self.layers.min(MAX_LAYERS);
             ui.horizontal(|ui| {
-                ui.label("Layers of the base patch:");
-                rebuild |= ui.add(egui::DragValue::new(&mut self.layers).range(1..=MAX_LAYERS)).changed();
+                ui.label("Layers:");
+                if ui.add(egui::Slider::new(&mut lay, 0..=MAX_LAYERS)).changed() {
+                    self.layers = lay;
+                    rebuild = true;
+                }
             });
         }
         rebuild
@@ -86,8 +95,36 @@ impl WyState {
         if let Some(x) = get_usize(v, "op", 0, OPS.len() - 1) {
             self.op = x;
         }
-        if let Some(x) = get_usize(v, "layers", 1, MAX_LAYERS) {
+        if let Some(x) = get_usize(v, "layers", 0, MAX_LAYERS) {
             self.layers = x;
+        }
+    }
+}
+
+fn base_growth_readout(p: usize, q: usize, kind: GeometryKind, layers: usize) -> Option<(Vec<Vec<String>>, Vec<String>)> {
+    match kind {
+        GeometryKind::Spherical => {
+            let u = build_unified_pq(p, q, layers).ok()?;
+            let g = grow_s2(p, &u.faces, SeedKind::Cell, layers).ok()?;
+            let closed = match g.stopped {
+                Some(Stopped::Closed { layer }) => Some(layer as usize),
+                _ => None,
+            };
+            Some((stats_to_rows(&g.stats), non_disk_flags(&g.stats, closed)))
+        }
+        GeometryKind::Euclidean => {
+            let (_, stats) = build_e2_regular_seeded(p, q, layers.clamp(1, 3), SeedKind::Cell).ok()?;
+            Some((stats_to_rows(&stats), non_disk_flags(&stats, None)))
+        }
+        GeometryKind::Hyperbolic => {
+            let vc = grow_vertex_completion(p, q, layers, WYTHOFF_TILE_BUDGET).ok()?;
+            let mut set = HypPointSet::new(hyp_dist(vc.base.vertices[0], vc.base.vertices[1]));
+            let faces: Vec<Vec<usize>> = (0..vc.faces.len())
+                .map(|i| vc.face_vertices(i).into_iter().map(|v| set.insert(v).0).collect())
+                .collect();
+            let max_l = vc.shell_sizes.len().saturating_sub(1);
+            let stats = patch_layer_stats(&faces, &vc.shell, max_l);
+            Some((stats_to_rows(&stats), non_disk_flags(&stats, None)))
         }
     }
 }
@@ -95,10 +132,16 @@ impl WyState {
 pub(crate) fn build(j: &WyJob) -> Result<S5Out, String> {
     let kind = check_symbol(j.p, j.q)?;
     let (op, op_label) = *OPS.get(j.op).ok_or_else(|| format!("unknown Wythoff operation #{}", j.op))?;
-    if !(1..=MAX_LAYERS).contains(&j.layers) {
-        return Err(format!("{} layers refused: allowed 1..={MAX_LAYERS}", j.layers));
+    if j.layers > MAX_LAYERS {
+        return Err(format!("{} layers refused: allowed 0..={MAX_LAYERS}", j.layers));
     }
     let t = build_wythoff(j.p, j.q, op, j.layers)?;
+    if t.faces.is_empty() {
+        return Err(format!(
+            "{op_label} of {{{},{}}} at layer 0 has no surrounded {}-valent base vertex yet; increase Layers to >= 1 [PROVED]",
+            j.p, j.q, j.q
+        ));
+    }
     if let Some(f) = t.faces.iter().find(|f| f.len() < 3) {
         return Err(format!(
             "{op_label} of {{{},{}}} has {}-gon (digon) faces, which this view cannot draw or count as a polygon mesh; the Regular {{p,q}} row draws hosohedra and dihedra",
@@ -141,19 +184,49 @@ pub(crate) fn build(j: &WyJob) -> Result<S5Out, String> {
     if !closed {
         rows.push((String::from("Base patch layers"), j.layers.to_string()));
     }
-    // The core's stamp is a blanket one; state what each part rests on instead of forwarding it.
+    let stopped = match kind {
+        GeometryKind::Hyperbolic => t.stopped.clone().map(|s| format!("Stopped: {s} [COMPUTATIONAL EVIDENCE]")),
+        GeometryKind::Euclidean if j.layers > 3 => Some(format!(
+            "Stopped at layer 3 (requested {}): E² Wythoff caps the base patch at 3 layers [COMPUTATIONAL EVIDENCE].",
+            j.layers
+        )),
+        GeometryKind::Euclidean if j.layers == 0 => Some(String::from(
+            "Base layer 0 promoted to layer 1 on E² so every Wythoff vertex figure closes [COMPUTATIONAL EVIDENCE].",
+        )),
+        _ => None,
+    };
+
     let seed = if matches!(op, WythoffOp::Snub { .. }) { "; the snub generating point is a numerical root" } else { "" };
     let mut notes = vec![format!(
         "Wythoff construction (Coxeter, Longuet-Higgins & Miller 1954){seed}; the built vertex coordinates are floating point{} [COMPUTATIONAL EVIDENCE]",
         if closed { "" } else { " and the patch is cut at the requested layers" }
     )];
     notes.push(euler_note(closed, t.euler_chi));
+    if let Some(s) = &stopped {
+        notes.push(s.clone());
+    }
+    let extra_table = if let Some((g_rows, flags)) = base_growth_readout(j.p, j.q, kind, j.layers) {
+        notes.extend(flags);
+        (!g_rows.is_empty()).then(|| (GROWTH_HEADERS.to_vec(), g_rows))
+    } else {
+        None
+    };
     if dropped > 0 {
         notes.push(format!("{dropped} face(s) outside the 2D clip window were not drawn."));
     }
     let table_rows = t.face_type_counts.iter().map(|(s, c)| vec![format!("{s}-gon"), c.to_string()]).collect();
     let caption = format!("Wythoff {} of {{{},{}}}: {} faces", t.op_name, j.p, j.q, t.n_faces);
-    Ok(S5Out { scene2d, mesh, caption, rows, notes, table: Some((vec!["Face type", "Count"], table_rows)), svg: None })
+    Ok(S5Out {
+        scene2d,
+        mesh,
+        caption,
+        rows,
+        notes,
+        stopped,
+        table: Some((vec!["Face type", "Count"], table_rows)),
+        extra_table,
+        svg: None,
+    })
 }
 
 /// Fallback for S² results whose vertices are not on the unit sphere: the core's stereographic coordinates with

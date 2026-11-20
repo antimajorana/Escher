@@ -1,6 +1,7 @@
 //! S6 panel tests. Expected values are hand counts or published values, never read back from the panel:
-//! - Cubic honeycomb, one shell: the central cube plus its 6 face neighbours; each neighbour adds 4 vertices,
-//!   8 edges and 5 faces, so (V, E, F, C) = (8 + 24, 12 + 48, 6 + 30, 7) = (32, 60, 36, 7), χ = 1 (a 3-ball).
+//! - Cubic honeycomb {4,3,4}: Vertex + Touching layer 1 is a 4×4×4 box of cubes: V = 5³ = 125, E = 3·4·5² = 300,
+//!   F = 3·4²·5 = 240, C = 4³ = 64, χ = 1; Cell + FaceShells layer 1 is the central cube plus 6 face neighbours:
+//!   (V, E, F, C) = (32, 60, 36, 7), χ = 1.
 //! - 16-cell {3,3,4}: (8, 24, 32, 16), χ(S³) = 0 (Coxeter, Regular Polytopes, Table I(ii)).
 //! - Wigner-Seitz cells: cube (8, 12, 6), rhombic dodecahedron (14, 24, 12) with 12 rhombi, truncated octahedron
 //!   (24, 36, 14) with 6 squares and 8 hexagons.
@@ -14,18 +15,21 @@
 use std::time::{Duration, Instant};
 
 use egui_kittest::kittest::Queryable;
-use papertilling_core::honeycomb3d::{EuclideanKind, HoneycombRegime, TpmsKind, nodal_surface_mesh, petrie_coxeter_surface};
+use papertilling_core::growth::SeedKind;
+use papertilling_core::honeycomb3d::{
+    EuclideanKind, GrowthRule, HoneycombRegime, TpmsKind, nodal_surface_mesh, petrie_coxeter_surface,
+};
 
 use super::present::CoreOut;
 use super::tpms::{TpmsMode, build_net, net_drawing, unwrap_faces};
 use super::{Panel, S6Job, S6Sub, run_job};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, wait_until};
-use crate::game_menu::test_util::goto_lattices_view;
 use crate::app::{LatticesView, NavTab, PapertillingApp};
 use crate::canvas2d::Scene2D;
+use crate::game_menu::test_util::goto_lattices_view;
 use crate::workbench::{WbCtx, WbPanel, WorkbenchView};
 
-fn new_app() -> PapertillingApp {
+pub(super) fn new_app() -> PapertillingApp {
     PapertillingApp::new(false, String::from("test"), String::from("test"))
 }
 
@@ -35,7 +39,7 @@ fn frame(app: &mut PapertillingApp, ctx: &egui::Context) {
     });
 }
 
-fn settle(app: &mut PapertillingApp, ctx: &egui::Context, what: &str) {
+pub(super) fn settle(app: &mut PapertillingApp, ctx: &egui::Context, what: &str) {
     let t0 = Instant::now();
     for _ in 0..4 {
         frame(app, ctx);
@@ -47,7 +51,7 @@ fn settle(app: &mut PapertillingApp, ctx: &egui::Context, what: &str) {
     }
 }
 
-fn s6_app(ctx: &egui::Context) -> PapertillingApp {
+pub(super) fn s6_app(ctx: &egui::Context) -> PapertillingApp {
     let mut app = new_app();
     app.select_lattices_view(LatticesView::Honeycombs3D);
     settle(&mut app, ctx, "enter S6");
@@ -55,28 +59,40 @@ fn s6_app(ctx: &egui::Context) -> PapertillingApp {
     app
 }
 
-fn resubmit(app: &mut PapertillingApp, ctx: &egui::Context) {
+pub(super) fn resubmit(app: &mut PapertillingApp, ctx: &egui::Context) {
     app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     settle(app, ctx, "resubmit");
 }
 
-fn complex_counts(job: S6Job) -> ((usize, usize, usize, usize), i64) {
-    match run_job(job).unwrap().core {
-        CoreOut::Complex(cx) => (cx.counts(), cx.euler()),
-        _ => panic!("not a cell complex"),
+pub(super) fn complex_counts(job: S6Job) -> ((usize, usize, usize, usize), i64) {
+    let b = run_job(job).unwrap();
+    let cx = b.core.complex().expect("not a cell complex");
+    let (v, e, f, c) = cx.counts();
+    match &b.core {
+        CoreOut::Growth(_, meta) => {
+            let cells = meta.stats.last().map_or(c, |s| s.cells);
+            let chi = meta.stats.last().map_or(cx.euler(), |s| s.euler);
+            ((v, e, f, cells), chi)
+        }
+        _ => ((v, e, f, c), cx.euler()),
     }
 }
 
 #[test]
-fn default_view_is_cubic_shell_one_with_hand_counts() {
+fn default_view_is_cubic_vertex_touching_layer_one_with_hand_counts() {
+    // Hand count: {4,3,4} with default Vertex + Touching at layers = 1 is a 4×4×4 box of unit cubes:
+    // V = 5³ = 125, E = 3·4·5² = 300, F = 3·4²·5 = 240, C = 4³ = 64, χ = 125 − 300 + 240 − 64 = 1.
     let ctx = egui::Context::default();
     let app = s6_app(&ctx);
     let p = &app.workbench.s6;
     assert!(p.error().is_none(), "{:?}", p.error());
     let b = p.current().expect("default build stored");
     match &b.core {
-        CoreOut::Complex(cx) => assert_eq!((cx.counts(), cx.euler()), ((32, 60, 36, 7), 1)),
-        _ => panic!("default is a cell complex"),
+        CoreOut::Growth(cx, meta) => {
+            assert_eq!((cx.counts(), meta.stats.last().unwrap().euler), ((125, 300, 240, 64), 1));
+            assert_eq!(meta.stats.iter().map(|s| s.cells).collect::<Vec<_>>(), vec![8, 64]);
+        }
+        _ => panic!("default is a growth cell complex"),
     }
     assert!(app.view3d.has_geometry());
     assert_eq!(app.view3d.caption(), b.caption);
@@ -85,18 +101,60 @@ fn default_view_is_cubic_shell_one_with_hand_counts() {
 
 #[test]
 fn schlafli_known_counts_and_regimes() {
-    assert_eq!(complex_counts(S6Job::Schlafli { p: 3, q: 3, r: 4, shells: 0, layers: 1 }), ((8, 24, 32, 16), 0));
-    assert_eq!(complex_counts(S6Job::Schlafli { p: 4, q: 3, r: 4, shells: 0, layers: 1 }), ((8, 12, 6, 1), 1));
-    let st = |p, q, r| super::honeycomb::SchlafliState { p, q, r, shells: 9, patch_layers: 9 };
+    assert_eq!(
+        complex_counts(S6Job::SchlafliGrowth {
+            p: 3,
+            q: 3,
+            r: 4,
+            seed: SeedKind::Vertex,
+            rule: GrowthRule::Touching,
+            layers: 1,
+        }),
+        ((8, 24, 32, 16), 0)
+    );
+    assert_eq!(
+        complex_counts(S6Job::SchlafliGrowth {
+            p: 4,
+            q: 3,
+            r: 4,
+            seed: SeedKind::Cell,
+            rule: GrowthRule::Touching,
+            layers: 0,
+        }),
+        ((8, 12, 6, 1), 1)
+    );
+    assert_eq!(
+        complex_counts(S6Job::SchlafliGrowth {
+            p: 4,
+            q: 3,
+            r: 4,
+            seed: SeedKind::Cell,
+            rule: GrowthRule::FaceShells,
+            layers: 1,
+        })
+        .0,
+        (32, 60, 36, 7)
+    );
+    let st = |p, q, r| super::honeycomb::SchlafliState {
+        p,
+        q,
+        r,
+        layers: 25,
+        radius_centi: 999,
+        ..Default::default()
+    };
     assert_eq!(st(4, 3, 4).classify().regime, HoneycombRegime::EuclideanE3);
     assert_eq!(st(5, 3, 5).classify().regime, HoneycombRegime::HyperbolicCompactH3);
     assert_eq!(st(5, 3, 3).classify().regime, HoneycombRegime::SphericalS3);
-    assert_eq!(st(4, 3, 4).params(), (4, 3, 4, 3, 1), "E³ shells clamped to MAX_E3_SHELLS");
-    assert_eq!(st(5, 3, 5).params(), (5, 3, 5, 2, 1), "H³ shells clamped to MAX_H3_SHELLS");
-    assert_eq!(st(3, 3, 5).params(), (3, 3, 5, 0, 1), "S³ builds the whole polychoron");
-    assert_eq!(st(4, 4, 3).params(), (4, 4, 3, 2, 2), "infinite cells keep patch rings, clamped");
-    // the cubic shell-one count is the one from the module docs
-    assert_eq!(complex_counts(S6Job::Schlafli { p: 4, q: 3, r: 4, shells: 1, layers: 1 }).0, (32, 60, 36, 7));
+    assert_eq!(
+        st(4, 3, 4).job(),
+        S6Job::SchlafliGrowth { p: 4, q: 3, r: 4, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 10 }
+    );
+    assert_eq!(
+        st(4, 4, 3).job(),
+        S6Job::ParacompactBall { p: 4, q: 4, r: 3, radius_centi: 300 },
+        "paracompact dispatches to ball with radius_centi clamped to 30..=300"
+    );
 }
 
 #[test]
@@ -104,7 +162,7 @@ fn refused_symbols_show_reason_and_placeholder_never_an_old_mesh() {
     let ctx = egui::Context::default();
     let mut app = s6_app(&ctx);
     for (p, q, r, want) in [(7, 3, 3, "hyperideal"), (3, 7, 3, "hyperideal"), (4, 4, 2, "reducible")] {
-        app.workbench.s6.schlafli = super::honeycomb::SchlafliState { p, q, r, shells: 1, patch_layers: 1 };
+        app.workbench.s6.schlafli = super::honeycomb::SchlafliState { p, q, r, ..Default::default() };
         resubmit(&mut app, &ctx);
         let p6 = &app.workbench.s6;
         let e = p6.error().unwrap_or_else(|| panic!("{{{p},{q},{r}}} must be refused"));
@@ -132,12 +190,23 @@ fn euclidean_kinds_central_cells_and_balls() {
         (EuclideanKind::RhombicDodecahedral, (14, 24, 12, 1)),
     ];
     for (kind, counts) in cases {
-        assert_eq!(complex_counts(S6Job::Euclid { kind, shells: 0 }), (counts, 1), "{kind:?}");
+        assert_eq!(
+            complex_counts(S6Job::Euclid { kind, seed: SeedKind::Cell, rule: GrowthRule::Touching, layers: 0 }),
+            (counts, 1),
+            "{kind:?}"
+        );
     }
     for kind in super::honeycomb::EUCLID_KINDS {
-        assert_eq!(complex_counts(S6Job::Euclid { kind, shells: 1 }).1, 1, "{kind:?}: a one-shell patch is a 3-ball");
+        assert_eq!(
+            complex_counts(S6Job::Euclid { kind, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 1 }).1,
+            1,
+            "{kind:?}: a one-layer vertex patch is a 3-ball"
+        );
     }
-    assert!(run_job(S6Job::Euclid { kind: EuclideanKind::Cubic, shells: 4 }).is_err(), "MAX_E3_SHELLS respected");
+    assert!(
+        run_job(S6Job::Euclid { kind: EuclideanKind::Cubic, seed: SeedKind::Cell, rule: GrowthRule::Touching, layers: 11 }).is_err(),
+        "MAX_GROWTH_LAYERS respected"
+    );
 }
 
 #[test]
@@ -156,7 +225,6 @@ fn voronoi_cells_and_dirichlet_quotients() {
     let CoreOut::Manifold(_, q) = &b.core else { panic!("manifold") };
     assert_eq!((q.h1_label.as_str(), q.euler), ("0", 0));
     assert!(b.notes.iter().any(|n| n.starts_with("Combinatorial model only")), "the S³ drawing is labelled a model");
-    // domains: dodecahedron (12 faces), cube (6), rhombic dodecahedron (12), truncated octahedron (14); faces paired
     let want = [12, 12, 6, 12, 14];
     for ((name, _), faces) in super::voronoi::MANIFOLDS.into_iter().zip(want) {
         let b = run_job(S6Job::Manifold { name }).unwrap();
@@ -179,7 +247,6 @@ fn labyrinth_nets_hand_counts_and_ghost_ends() {
         let CoreOut::Net(n2) = &two.core else { panic!("net") };
         assert_eq!((n2.positions.len(), n2.edges.len()), (2 * sites, 2 * bonds), "{kind:?}: both labyrinths");
     }
-    // pcu: the single site bonds to itself across the cell; in a 2³ block, 8 sites, 24 bonds, 12 leave the block
     let net = papertilling_core::honeycomb3d::tpms_net(TpmsKind::P, 1).unwrap();
     let (pts, _, edges, real) = net_drawing(&net, 1);
     assert_eq!((real, pts.len() - real, edges.len()), (1, 3, 3));
@@ -215,8 +282,19 @@ fn periodic_surfaces_genus_three_and_unwrapped_faces_are_short() {
 #[test]
 fn s6_panel_state_survives_json_roundtrip() {
     let mut p = Panel { sub: S6Sub::Voronoi, ..Default::default() };
-    p.schlafli = super::honeycomb::SchlafliState { p: 5, q: 3, r: 5, shells: 2, patch_layers: 1 };
+    p.schlafli = super::honeycomb::SchlafliState {
+        p: 5,
+        q: 3,
+        r: 5,
+        seed: SeedKind::Edge,
+        rule: GrowthRule::FaceShells,
+        layers: 2,
+        radius_centi: 150,
+    };
     p.euclid.kind = EuclideanKind::AlternatedCubic;
+    p.euclid.seed = SeedKind::Face;
+    p.euclid.rule = GrowthRule::FaceShells;
+    p.euclid.layers = 4;
     p.tpms.kind = TpmsKind::G;
     p.tpms.mode = TpmsMode::Nodal;
     p.tpms.n = 24;
@@ -231,11 +309,20 @@ fn s6_panel_state_survives_json_roundtrip() {
     q.restore(&back, &mut notes);
     assert!(notes.is_empty(), "{notes:?}");
     assert_eq!(q.save(), v);
-    let junk = serde_json::json!({"sub": "Nope", "schlafli": {"p": 99, "shells": 40}, "tpms": {"kind": "Q", "n": 5000, "reps": 9},
-        "euclid": {"shells": 77}, "voronoi": {"manifold": "lens_space"}});
+    let junk = serde_json::json!({
+        "sub": "Nope",
+        "schlafli": {"p": 99, "layers": 40, "radius_centi": 999},
+        "tpms": {"kind": "Q", "n": 5000, "reps": 9},
+        "euclid": {"layers": 77},
+        "voronoi": {"manifold": "lens_space"}
+    });
     q.restore(&junk, &mut notes);
     assert_eq!(notes.len(), 3, "{notes:?}");
-    assert_eq!((q.sub, q.schlafli.p, q.tpms.n, q.tpms.reps, q.euclid.shells), (S6Sub::Voronoi, 8, 32, 2, 3), "clamped");
+    assert_eq!(
+        (q.sub, q.schlafli.p, q.schlafli.layers, q.schlafli.radius_centi, q.tpms.n, q.tpms.reps, q.euclid.layers),
+        (S6Sub::Voronoi, 8, 10, 300, 32, 2, 10),
+        "clamped"
+    );
     assert!(!notes.iter().any(|n| n.contains("workbench")));
 }
 
@@ -262,6 +349,7 @@ fn s6_sources_carry_no_spectral_wording() {
         include_str!("mod.rs"),
         include_str!("present.rs"),
         include_str!("honeycomb.rs"),
+        include_str!("honeycomb_present.rs"),
         include_str!("tpms.rs"),
         include_str!("voronoi.rs"),
     ];
@@ -277,13 +365,13 @@ fn s6_sources_carry_no_spectral_wording() {
 #[test]
 fn pilot_timing_heaviest_s6_jobs() {
     let jobs = [
-        S6Job::Schlafli { p: 4, q: 3, r: 4, shells: 1, layers: 1 },
-        S6Job::Schlafli { p: 5, q: 3, r: 3, shells: 0, layers: 1 },
-        S6Job::Schlafli { p: 3, q: 3, r: 5, shells: 0, layers: 1 },
-        S6Job::Schlafli { p: 5, q: 3, r: 5, shells: 2, layers: 1 },
-        S6Job::Schlafli { p: 3, q: 5, r: 3, shells: 2, layers: 1 },
-        S6Job::Schlafli { p: 4, q: 4, r: 4, shells: 2, layers: 2 },
-        S6Job::Euclid { kind: EuclideanKind::BitruncatedCubic, shells: 3 },
+        S6Job::SchlafliGrowth { p: 4, q: 3, r: 4, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 2 },
+        S6Job::SchlafliGrowth { p: 5, q: 3, r: 3, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 6 },
+        S6Job::SchlafliGrowth { p: 3, q: 3, r: 5, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 4 },
+        S6Job::SchlafliGrowth { p: 5, q: 3, r: 5, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 1 },
+        S6Job::SchlafliGrowth { p: 3, q: 5, r: 3, seed: SeedKind::Cell, rule: GrowthRule::FaceShells, layers: 2 },
+        S6Job::ParacompactBall { p: 4, q: 4, r: 4, radius_centi: 120 },
+        S6Job::Euclid { kind: EuclideanKind::BitruncatedCubic, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 3 },
         S6Job::Surface { kind: TpmsKind::G, mode: TpmsMode::Nodal, n: 32, reps: 1 },
         S6Job::Surface { kind: TpmsKind::G, mode: TpmsMode::Nodal, n: 16, reps: 2 },
         S6Job::Net { kind: TpmsKind::G, labyrinths: 2, reps: 2 },
@@ -307,20 +395,25 @@ fn wait_poll(p: &mut Panel, what: &str) {
 }
 
 fn shown_counts(p: &Panel) -> Option<(usize, usize, usize, usize)> {
-    match &p.current()?.core {
-        CoreOut::Complex(cx) => Some(cx.counts()),
-        _ => None,
-    }
+    p.current()?.core.complex().map(|cx| cx.counts())
 }
 
-/// Stale results: {4,3,5} shells 0 is one cube (8, 12, 6, 1). A {4,3,6} job started and abandoned (r back to 5,
-/// a cache hit) is cancelled and never lands under the {4,3,5} controls; a stored result is not shown under changed
-/// inputs; a job pending for another sub-row does not make the shown (cached) sub-row busy.
 #[test]
 fn stale_results_never_shown_under_current_inputs() {
     let app = new_app();
     let cx = WbCtx { item: app.gallery.active_item(), cell: app.gallery.cell(), smoke: false, backend: &app.backend, defect_crystal: None };
-    let mut p = Panel { schlafli: super::honeycomb::SchlafliState { p: 4, q: 3, r: 5, shells: 0, patch_layers: 1 }, ..Default::default() };
+    let mut p = Panel {
+        schlafli: super::honeycomb::SchlafliState {
+            p: 4,
+            q: 3,
+            r: 5,
+            seed: SeedKind::Cell,
+            rule: GrowthRule::Touching,
+            layers: 0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     p.submit(&cx, None);
     wait_poll(&mut p, "{4,3,5}");
     assert_eq!(shown_counts(&p), Some((8, 12, 6, 1)));
@@ -337,17 +430,14 @@ fn stale_results_never_shown_under_current_inputs() {
     }
     assert_eq!(shown_counts(&p), Some((8, 12, 6, 1)), "still the {{4,3,5}} cube");
     assert_eq!(p.built[0].as_ref().map(|(k, _)| k.clone()), Some(format!("{:?}", p.job())));
-    // accept() drops a result whose key is not the wanted one (here a {4,3,6} build arriving under {4,3,5})
-    let stale = S6Job::Schlafli { p: 4, q: 3, r: 6, shells: 0, layers: 1 };
+    let stale = S6Job::ParacompactBall { p: 4, q: 3, r: 6, radius_centi: 100 };
     p.pending = Some((S6Sub::Schlafli, format!("{stale:?}")));
     p.accept(Ok(run_job(stale)));
     assert_eq!(p.built[0].as_ref().map(|(k, _)| k.clone()), Some(format!("{:?}", p.job())), "stale result dropped");
-    // changed inputs, not yet built: nothing is shown (the inspector says "Building…")
     p.schlafli.p = 5;
     assert!(p.current().is_none());
     p.schlafli.p = 4;
     assert!(p.current().is_some());
-    // another sub-row: build SC, start a Schläfli job, return to Voronoi (cached) -> not busy, Schläfli job cancelled
     p.sub = S6Sub::Voronoi;
     p.submit(&cx, None);
     wait_poll(&mut p, "SC cell");
@@ -360,18 +450,20 @@ fn stale_results_never_shown_under_current_inputs() {
     assert!(p.pending.is_none() && !p.is_busy() && p.current().is_some(), "the cached sub-row is shown at once");
 }
 
-/// {6,3,3}, shells 0, one patch ring: the central horospherical cell cut to a flower of 7 hexagons. Each outer hexagon
-/// has 4 vertices off the centre, one of them shared with each ring neighbour: V = 6 + 6·4 − 6 = 24; it has 5 edges
-/// off the centre, one shared with each ring neighbour: E = 6 + 6·5 − 6 = 30; F = 7, C = 1, so V − E + F − C = 0
-/// (also asserted by the core's paracompact patch test). No χ(B³) = 1 expectation may be stamped.
 #[test]
-fn truncated_infinite_cells_carry_no_ball_test() {
-    let b = run_job(S6Job::Schlafli { p: 6, q: 3, r: 3, shells: 0, layers: 1 }).unwrap();
-    let CoreOut::Complex(cx) = &b.core else { panic!("cell complex") };
-    assert_eq!((cx.counts(), cx.euler()), ((24, 30, 7, 1), 0));
+fn paracompact_balls_carry_no_ball_euler_claim() {
+    let b = run_job(S6Job::ParacompactBall { p: 6, q: 3, r: 3, radius_centi: 80 }).unwrap();
     assert!(!b.notes.iter().any(|n| n.contains("χ(B³)")), "{:?}", b.notes);
     assert!(b.notes.iter().any(|n| n.starts_with("No 3-ball test")), "{:?}", b.notes);
-    let cube = run_job(S6Job::Schlafli { p: 4, q: 3, r: 4, shells: 1, layers: 1 }).unwrap();
+    let cube = run_job(S6Job::SchlafliGrowth {
+        p: 4,
+        q: 3,
+        r: 4,
+        seed: SeedKind::Cell,
+        rule: GrowthRule::Touching,
+        layers: 1,
+    })
+    .unwrap();
     assert!(cube.notes.iter().any(|n| n.contains("[PROVED: χ(B³) = 1]")), "compact cells keep the ball test");
 }
 
@@ -384,7 +476,6 @@ fn tpms_notes_describe_what_is_drawn() {
     let exact = note(TpmsMode::PetrieCoxeter, 0);
     assert!(exact.starts_with("heat map of the nodal approximation only") && !exact.contains("the surface meets"), "{exact}");
     assert!(note(TpmsMode::Nodal, 12).contains("the surface meets this slice"));
-    // second gyroid labyrinth: the core inverts all three coordinates
     let g = build_net(TpmsKind::G, 2, 1).unwrap();
     assert!(g.notes.iter().any(|n| n.contains("G inverted through the origin, r ↦ −r")), "{:?}", g.notes);
     assert!(!g.notes.iter().any(|n| n.contains("x ↦ −x")));

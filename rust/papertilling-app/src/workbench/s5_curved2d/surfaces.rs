@@ -1,18 +1,24 @@
 //! An H² {p,q} patch placed on a surface in R³ (`embed_tiling_on_surface`) and the papercraft net of the placed
-//! mesh (`unfold_papercraft_net`), with an SVG export of the net. Only the hyperboloid bowl is an isometric
-//! embedding (for the Minkowski metric); the inspector says so for every other surface.
+//! mesh (`unfold_papercraft_net`), with an SVG export of the net, 0-based seeded layer growth, and stop banners.
+//! Only the hyperboloid bowl is an isometric embedding (for the Minkowski metric); the inspector says so for every
+//! other surface.
 
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::path::Path;
 
 use papertilling_core::dsymbol::GeometryKind;
+use papertilling_core::growth::SeedKind;
+use papertilling_core::hyperbolic::{HyperbolicStyle, build_hyperbolic_tiling_seeded};
 use papertilling_core::noneuclidean2d::{
-    H2SurfaceKind, build_unified_pq, embed_tiling_on_surface, surface_point, unfold_papercraft_net,
+    H2SurfaceKind, build_unified_pq_seeded, embed_tiling_on_surface, surface_point, unfold_papercraft_net,
 };
 use serde_json::{Value, json};
 
 use super::draw::{Picture, mesh_with_arcs};
+use super::growth_table::{
+    GROWTH_HEADERS, non_disk_flags, parse_seed_2d, patch_layer_stats, seed_controls, seed_label_2d, stats_to_rows,
+};
 use super::pq::layer_range;
 use super::{MAX_PQ, S5Out, check_symbol, delta_badge, geom_label, get_usize, pq_controls};
 use crate::workbench::WbCtx;
@@ -111,6 +117,7 @@ pub(crate) struct SurfJob {
     pub(crate) p: usize,
     pub(crate) q: usize,
     pub(crate) layers: usize,
+    pub(crate) seed: SeedKind,
     pub(crate) surface: usize,
     pub(crate) twist: f64,
 }
@@ -119,6 +126,7 @@ pub(crate) struct SurfState {
     pub(crate) p: usize,
     pub(crate) q: usize,
     pub(crate) layers: usize,
+    pub(crate) seed: SeedKind,
     pub(crate) surface: usize,
     pub(crate) twist: f64,
     pub(crate) status: String,
@@ -126,21 +134,35 @@ pub(crate) struct SurfState {
 
 impl Default for SurfState {
     fn default() -> Self {
-        Self { p: 7, q: 3, layers: 2, surface: 0, twist: 0.2, status: String::new() }
+        Self { p: 7, q: 3, layers: 2, seed: SeedKind::Vertex, surface: 0, twist: 0.2, status: String::new() }
     }
 }
 
 impl SurfState {
     pub(crate) fn job(&self) -> SurfJob {
-        SurfJob { p: self.p, q: self.q, layers: self.layers, surface: self.surface, twist: self.twist }
+        let (_, hi) = layer_range(GeometryKind::Hyperbolic);
+        SurfJob {
+            p: self.p,
+            q: self.q,
+            layers: self.layers.min(hi),
+            seed: self.seed,
+            surface: self.surface,
+            twist: self.twist,
+        }
     }
 
     pub(super) fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
         let mut rebuild = pq_controls(ui, &mut self.p, &mut self.q, 3);
         ui.label(delta_badge(self.p, self.q));
+        rebuild |= seed_controls(ui, &mut self.seed);
+        let (lo, hi) = layer_range(GeometryKind::Hyperbolic);
+        let mut lay = self.layers.clamp(lo, hi);
         ui.horizontal(|ui| {
             ui.label("Layers:");
-            rebuild |= ui.add(egui::DragValue::new(&mut self.layers).range(1..=4)).changed();
+            if ui.add(egui::Slider::new(&mut lay, lo..=hi)).changed() {
+                self.layers = lay;
+                rebuild = true;
+            }
         });
         ui.horizontal(|ui| {
             ui.label("Surface:");
@@ -178,7 +200,14 @@ impl SurfState {
     }
 
     pub(super) fn save(&self) -> Value {
-        json!({ "p": self.p, "q": self.q, "layers": self.layers, "surface": self.surface, "twist": self.twist })
+        json!({
+            "p": self.p,
+            "q": self.q,
+            "layers": self.layers,
+            "seed": format!("{:?}", self.seed),
+            "surface": self.surface,
+            "twist": self.twist,
+        })
     }
 
     pub(super) fn restore(&mut self, v: &Value) {
@@ -188,8 +217,12 @@ impl SurfState {
         if let Some(x) = get_usize(v, "q", 3, MAX_PQ) {
             self.q = x;
         }
-        if let Some(x) = get_usize(v, "layers", 1, 4) {
+        let (_, hi) = layer_range(GeometryKind::Hyperbolic);
+        if let Some(x) = get_usize(v, "layers", 0, hi) {
             self.layers = x;
+        }
+        if let Some(s) = v.get("seed").and_then(Value::as_str).and_then(parse_seed_2d) {
+            self.seed = s;
         }
         if let Some(x) = get_usize(v, "surface", 0, SURFACES.len() - 1) {
             self.surface = x;
@@ -246,7 +279,16 @@ pub(crate) fn build(j: &SurfJob) -> Result<S5Out, String> {
         return Err(String::from("Dini twist must be finite"));
     }
     let surf = surface_kind(j.surface, j.twist).ok_or_else(|| format!("unknown surface #{}", j.surface))?;
-    let t = build_unified_pq(j.p, j.q, j.layers)?;
+    let h = build_hyperbolic_tiling_seeded(j.p, j.q, HyperbolicStyle::RegularPQ, j.layers, 0, j.seed)?;
+    let t = build_unified_pq_seeded(j.p, j.q, j.layers, j.seed)?;
+    let stats = patch_layer_stats(&h.faces, &h.face_shell, h.complete_through_shell);
+    let stopped = (h.complete_through_shell < j.layers).then(|| {
+        format!(
+            "Stopped at layer {} (requested {}): {} [COMPUTATIONAL EVIDENCE]",
+            h.complete_through_shell, j.layers, h.growth_rule
+        )
+    });
+
     let m = embed_tiling_on_surface(&t.coords_2d, &t.faces, surf)?;
     let mut pts = m.positions_3d.clone();
     let unwrap = matches!(surf, H2SurfaceKind::Dini { .. }) && j.twist.abs() > 0.0;
@@ -261,7 +303,6 @@ pub(crate) fn build(j: &SurfJob) -> Result<S5Out, String> {
     let mesh = mesh_with_arcs(&pts, &faces, None);
     let net = unfold_papercraft_net(&pts, &faces)?;
     let title = format!("S5 net of {{{},{}}} on the {}", j.p, j.q, SURFACES[j.surface]);
-    // the canvas clips at CLIP_R: draw the net uniformly scaled to fit (the SVG keeps true units)
     let extent = net.pieces.iter().flatten().filter(|p| p[0].is_finite() && p[1].is_finite()).fold(0.0_f64, |m, p| m.max(p[0].abs()).max(p[1].abs()));
     let scale = if extent > 10.0 { 10.0 / extent } else { 1.0 };
     let note = format!("papercraft net (BFS spanning tree of the dual graph), drawn at scale {scale:.3}");
@@ -273,6 +314,7 @@ pub(crate) fn build(j: &SurfJob) -> Result<S5Out, String> {
     let rows = vec![
         (String::from("Surface"), m.kind_name.clone()),
         curvature_row(j.surface, m.expected_gaussian_curvature),
+        (String::from("Seed / Layers"), format!("{} / {} (complete 0..={})", seed_label_2d(j.seed), j.layers, h.complete_through_shell)),
         (String::from("Faces placed"), faces.len().to_string()),
         (String::from("Net pieces / glued edges / cut edges"), format!("{} / {} / {}", net.pieces.len(), net.tree_edges.len(), net.cut_pairings.len())),
         (String::from("Max edge-length error of the net"), format!("{:.2e}", net.max_edge_length_error)),
@@ -281,6 +323,10 @@ pub(crate) fn build(j: &SurfJob) -> Result<S5Out, String> {
         placement_note(j.surface).to_string(),
         String::from("Faces are flattened by a fan from their first vertex; the residual above measures how far the placed faces are from planar [COMPUTATIONAL EVIDENCE]."),
     ];
+    if let Some(s) = &stopped {
+        notes.push(s.clone());
+    }
+    notes.extend(non_disk_flags(&stats, None));
     if winding > 0 {
         notes.push(format!(
             "{winding} face(s) wind around the origin of the disk: on the Dini surface the height b·u grows by 2πb per turn of u (b = twist/√(1 + twist²) ≠ 0), so no placement closes them; they are left out [PROVED]"
@@ -292,8 +338,9 @@ pub(crate) fn build(j: &SurfJob) -> Result<S5Out, String> {
         ));
     }
     if dropped > 0 {
-        notes.push(format!("{dropped} net piece(s) outside the 2D clip window were not drawn."));
+        notes.push(format!("{dropped} net piece(s) outside the 2D clip window were not drawn [COMPUTATIONAL EVIDENCE]."));
     }
+    let table = (!stats.is_empty()).then(|| (GROWTH_HEADERS.to_vec(), stats_to_rows(&stats)));
     let caption = format!("{{{},{}}} placed on the {}", j.p, j.q, SURFACES[j.surface]);
-    Ok(S5Out { scene2d, mesh, caption, rows, notes, table: None, svg: Some(net_svg(&net.pieces)) })
+    Ok(S5Out { scene2d, mesh, caption, rows, notes, stopped, table, extra_table: None, svg: Some(net_svg(&net.pieces)) })
 }
