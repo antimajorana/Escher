@@ -104,6 +104,7 @@ impl Space3dPanelState {
             .show_ui(ui, |ui| {
                 for n in CanonicalNet3d::ALL {
                     if ui.selectable_value(&mut self.selected_net, n, n.label()).changed() {
+                        self.set_catalogue(None); // C1 WP-U4: a canonical net replaces the catalogue entry
                         dirty = true;
                     }
                 }
@@ -140,7 +141,7 @@ impl Space3dPanelState {
         }
         ui.separator();
         ui.strong("Active 3D Crystal Net");
-        ui.small(format!("Net: {}", self.selected_net.label()));
+        self.show_net_line(ui);
         if !self.pristine_only {
             ui.small("Line defect: none (3D line defects are hidden)");
         }

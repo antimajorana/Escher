@@ -4,6 +4,7 @@
 
 use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d, Net3dPatch, build_net_3d};
 
+use super::points3d_ui::CatalogueView;
 use super::space3d_geom::{NetFrame, coordination, net_frame, slab_mask, z_fractions};
 use super::space3d_ui::Space3dPanelState;
 use crate::canvas2d::CanvasInteraction;
@@ -30,6 +31,10 @@ pub struct Space3dView {
     /// A view option or the pick changed: the scenes need a refresh (without resetting the 2D view).
     pub changed: bool,
     net: Option<((CanonicalNet3d, LineDefect3d), Net3dPatch)>,
+    /// The grown points-catalogue entry drawn instead of the canonical net (C1 WP-U4; `points3d_ui`).
+    pub(crate) catalogue: Option<CatalogueView>,
+    /// The last catalogue refusal, shown under the entries.
+    pub(crate) catalogue_error: Option<String>,
     /// Rotation the current mesh's depth cue was computed for.
     depth_rot_used: Option<Mat4>,
 }
@@ -45,6 +50,8 @@ impl Default for Space3dView {
             hovered: None,
             changed: false,
             net: None,
+            catalogue: None,
+            catalogue_error: None,
             depth_rot_used: None,
         }
     }
@@ -65,19 +72,20 @@ pub fn pick_xy(positions: &[[f64; 3]], visible: &[bool], world: [f64; 2], radius
     best.map(|b| b.0)
 }
 
-fn species_label(net: CanonicalNet3d, kind: u8) -> &'static str {
+pub(crate) fn species_label(net: CanonicalNet3d, kind: u8) -> &'static str {
     match (net, kind) {
         (CanonicalNet3d::Rutile136, 0) => "Ti (cation)",
         (CanonicalNet3d::Rutile136, _) => "O (anion)",
-        (CanonicalNet3d::Perovskite, 0) => "A site",
-        (CanonicalNet3d::Perovskite, 1) => "B site",
+        // motif table (`space3d::motifs`): kind 0 at the origin is the octahedral B site, kind 1 the A site
+        (CanonicalNet3d::Perovskite, 0) => "B site (octahedral)",
+        (CanonicalNet3d::Perovskite, 1) => "A site",
         (CanonicalNet3d::Perovskite, _) => "X (anion)",
-        (CanonicalNet3d::Diamond, 0) => "sublattice A (fcc)",
-        (CanonicalNet3d::Diamond, _) => "sublattice B (fcc + 1/4)",
-        (CanonicalNet3d::BCC | CanonicalNet3d::Tetragonal123, 0) => "corner",
-        (CanonicalNet3d::BCC | CanonicalNet3d::Tetragonal123, _) => "body centre",
-        (CanonicalNet3d::Pyrochlore, 0) => "tetrahedron vertex",
-        (CanonicalNet3d::Pyrochlore, _) => "body centre",
+        (CanonicalNet3d::Tetragonal123, 0) => "corner",
+        (CanonicalNet3d::Tetragonal123, _) => "body centre",
+        // one kind each since C1 WP-N1 (a second kind would change the group)
+        (CanonicalNet3d::Diamond, _) => "site (Fd-3m 8a)",
+        (CanonicalNet3d::BCC, _) => "site (Im-3m 2a)",
+        (CanonicalNet3d::Pyrochlore, _) => "tetrahedron vertex (Fd-3m 16c)",
         _ => "site",
     }
 }
@@ -87,8 +95,15 @@ impl Space3dPanelState {
         (self.selected_net, self.effective_defect())
     }
 
-    /// The net of the current (net, defect) choice, rebuilt (and the pick cleared) when the choice changed.
+    /// The drawn net: the chosen catalogue entry of the selected group, else the current (net, defect) choice,
+    /// rebuilt (and the pick cleared) when the choice changed.
     pub fn ensure_net(&mut self) -> &Net3dPatch {
+        if self.view.catalogue.as_ref().is_some_and(|c| c.choice.sg != self.selected_sg) {
+            self.set_catalogue(None);
+        }
+        if let Some(c) = &self.view.catalogue {
+            return &c.growth.patch;
+        }
         let key = self.net_key();
         if self.view.net.as_ref().is_none_or(|(k, _)| *k != key) {
             self.view.net = None;
@@ -99,6 +114,9 @@ impl Space3dPanelState {
     }
 
     pub fn frame(&self) -> NetFrame {
+        if let Some(c) = &self.view.catalogue {
+            return NetFrame { lat: c.growth.lattice, origin: c.growth.origin };
+        }
         net_frame(self.selected_net, self.effective_defect())
     }
 
@@ -208,16 +226,20 @@ impl Space3dPanelState {
             ui.small("None: click a site in the 2D projection or the 3D view.");
             return;
         };
+        let zf = z_fractions(&self.ensure_net().positions);
         let frame = self.frame();
         let (net_kind, defect) = self.net_key();
-        let zf = z_fractions(&self.ensure_net().positions);
         let net = self.ensure_net();
         let Some(&p) = net.positions.get(i) else { return };
         let kind = net.site_kinds.get(i).copied().unwrap_or(0);
         let coord = coordination(net.positions.len(), &net.bonds)[i];
         let f = frame.fractional(p);
         let tag = if picked == Some(i) { "picked" } else { "hover" };
-        ui.colored_label(tokens.status_ok, format!("Site #{i} ({tag}) | species {kind}: {}", species_label(net_kind, kind)));
+        let species = match &self.view.catalogue {
+            Some(c) => c.orbit_label(kind),
+            None => species_label(net_kind, kind).to_string(),
+        };
+        ui.colored_label(tokens.status_ok, format!("Site #{i} ({tag}) | species {kind}: {species}"));
         ui.small(format!("Cartesian: ({:+.4}, {:+.4}, {:+.4})", p[0], p[1], p[2]));
         let nominal = if defect == LineDefect3d::None { "" } else { " (nominal: defect-warped)" };
         ui.small(format!("Fractional: ({:.4}, {:.4}, {:.4}){nominal}", f[0], f[1], f[2]));

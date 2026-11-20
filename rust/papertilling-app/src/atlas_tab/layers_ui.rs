@@ -1,7 +1,6 @@
 //! All 80 ITE Vol. E Layer groups panel with live Bieberbach cohomology & 3D slab preview.
 
 use papertilling_core::bieberbach::BieberbachSummary;
-use papertilling_core::space3d::nets3d::build_layer_slab_patch;
 use papertilling_core::space3d::{analyze_layer_group, list_layer_groups};
 
 use crate::mesh3d::atlas_mesh::mesh_from_net3d;
@@ -13,6 +12,8 @@ pub struct LayersPanelState {
     pub filter: String,
     pub selected_num: u8,
     pub summary: Option<BieberbachSummary>,
+    /// In-plane growth and stacking (C1 WP-U4, `layers_growth`).
+    pub growth: super::layers_growth::LayerGrowthState,
     cached_num: u8,
 }
 
@@ -22,6 +23,7 @@ impl Default for LayersPanelState {
             filter: String::new(),
             selected_num: 1,
             summary: analyze_layer_group(1).ok(),
+            growth: super::layers_growth::LayerGrowthState::default(),
             cached_num: 1,
         }
     }
@@ -90,7 +92,7 @@ impl LayersPanelState {
 
     pub fn build_scenes(&mut self) -> (Scene2D, GpuMeshData, String) {
         self.ensure_cached();
-        let patch = build_layer_slab_patch(self.selected_num).unwrap();
+        let patch = self.growth.patch(self.selected_num);
         let mesh = mesh_from_net3d(&patch);
         let circles: Vec<CirclePrim> = patch
             .positions
