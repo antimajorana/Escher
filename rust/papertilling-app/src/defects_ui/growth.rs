@@ -285,7 +285,7 @@ pub(crate) fn build_grown(
             let seed = nearest_site_seed(&out.crystal, &cc, core);
             let line = format!("Seed: {} face(s) at the site(s) nearest the core", seed.len());
             let g = grow_complete(&mut cc, seed, req.layers);
-            let rim_msg = match g.stopped {
+            let stop_msg = match g.stopped {
                 Some(Stopped::Rim { layer }) if layer <= req.layers => {
                     let shown = if layer == 0 {
                         String::from("no complete layer")
@@ -297,10 +297,13 @@ pub(crate) fn build_grown(
                         out.radius, out.rebuilds
                     )
                 }
+                Some(Stopped::CellCap { layer, .. }) if layer <= req.layers => {
+                    format!("layer {layer} needs more than {DEFECT_MAX_CELLS} faces (cap {DEFECT_MAX_CELLS})")
+                }
                 _ => String::new(),
             };
             let sizing_msg = format!("crystal sized at radius {:.2}", out.radius);
-            let mut parts = vec![rim_msg.as_str(), sizing_msg.as_str()];
+            let mut parts = vec![stop_msg.as_str(), sizing_msg.as_str()];
             parts.extend(out.note.split("; ").filter(|p| !p.is_empty() && !p.starts_with("layer ")));
             let note = parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("; ");
             GrowthView::from_growth(&out.crystal, &cc, &g, req.layers, out.radius, line, note)

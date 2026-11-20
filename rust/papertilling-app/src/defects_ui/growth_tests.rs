@@ -91,11 +91,25 @@ fn nearest_site_seed_is_offered_under_more() {
     assert_eq!(got, vec![11, 31, 61]);
     assert!(!v.note.ends_with("; ") && !v.note.is_empty(), "clean Raw note: {:?}", v.note);
 
-    // Asking past the 3-rebuild limit surfaces Stopped::Rim in view.note for NearestSites too.
-    let far = GrowthRequest { layers: 35, seed: SeedChoice::NearestSites };
+    // Asking past DEFECT_MAX_CELLS = 20_000 (1 + 5*65*66 = 21_451 > 20_000) stops cleanly at CellCap without printing partial (20001).
+    let far = GrowthRequest { layers: 65, seed: SeedChoice::NearestSites };
     let (_, _, vf) = build_grown(&sq, &DefectSelectionUi::Disclination(i), far, Defect2dMode::Raw).unwrap();
-    assert!(vf.complete < 36 && vf.note.contains("reaches the crystal's rim"), "{}", vf.note);
+    assert!(vf.complete < 66 && vf.note.contains("cap 20000") && !vf.note.contains("20001"), "{}", vf.note);
     assert!(!vf.note.ends_with("; "), "{:?}", vf.note);
+    // And on a small fixed-radius crystal (r = 3.5), grow_complete stops with Stopped::Rim before reaching the outer boundary.
+    let ctx = crate::live_ops::defect_context(&sq).unwrap();
+    let e = &ctx.cat.disclinations[i];
+    let small = papertilling_core::defect::surgery::build_point_defects(
+        &ctx.cell,
+        &[DefectSpec::Disclination { angle_deg: e.angle, at: e.point, cut: None }],
+        Some(3.5),
+        None,
+    )
+    .unwrap();
+    let mut cc = papertilling_core::growth::face_graph::crystal_complex(&small).unwrap();
+    let seed = super::nearest_site_seed(&small, &cc, e.point);
+    let g_rim = super::grow_complete(&mut cc, seed, 6);
+    assert!(matches!(g_rim.stopped, Some(papertilling_core::growth::Stopped::Rim { .. })), "{:?}", g_rim.stopped);
 }
 
 #[test]
