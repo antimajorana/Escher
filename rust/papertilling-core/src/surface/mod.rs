@@ -3,10 +3,14 @@
 
 #[cfg(test)]
 mod audit_tests;
+#[cfg(test)]
+mod bc_tests;
 pub mod alt_polyhedra;
 pub mod checks;
 pub mod elastic3d;
 pub mod flat;
+pub mod flat_bc;
+pub mod glides;
 pub mod genus;
 pub mod obstruction;
 pub mod pieces;
@@ -14,6 +18,7 @@ pub mod pieces_glue;
 pub mod polyhedra;
 pub(crate) mod quotient;
 pub mod report;
+pub mod report_bc;
 pub mod solids;
 
 use std::collections::HashSet;
@@ -29,9 +34,11 @@ pub use elastic3d::{
     face_spoke_lengths, relax_indexed_elastic, relax_surface_3d,
 };
 pub use flat::{
-    GlideAxis, cylinder, default_cylinder, default_klein_bottle, default_mobius_band,
-    default_torus, glides, klein_bottle, mobius_band, torus,
+    GlideAxis, NO_GLIDE, cylinder, default_cylinder, default_klein_bottle, default_mobius_band,
+    default_torus, glide_power, glide_search, glides, klein_bottle, mobius_band, torus,
 };
+pub use flat_bc::{cylinder_wrap, open_patch, torus_hex_domain};
+pub use report_bc::{BcSurface, BoundaryCondition, PairsGluing, build_boundary, pairs_refusal};
 pub use genus::{default_genus_surface, genus_surface, genus_surface_with_options};
 pub use pieces::{
     ConeSurface, LatticeData, Net2D, PairingSpec, PairingTestRow, Piece2D, check_surface_mesh,
@@ -48,7 +55,9 @@ pub use report::{
 pub fn surface_table(group: &str, cell: &Cell2D) -> Vec<SurfaceTableRow> {
     let gl = glides(cell);
     let to_err = |msg: String| {
-        if let Some(rest) = msg.strip_prefix("IMPOSSIBLE: ") {
+        if let Some(rest) = msg.strip_prefix("IMPOSSIBLE (lattice): ") {
+            SurfaceError::impossible_lattice(rest)
+        } else if let Some(rest) = msg.strip_prefix("IMPOSSIBLE: ") {
             SurfaceError::impossible(rest)
         } else {
             SurfaceError::not_found(msg, String::new(), false)

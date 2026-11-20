@@ -291,7 +291,10 @@ where
     FFlat: FnMut(&str, FlatAttempt) -> Result<SurfaceMesh, SurfaceError>,
     FGenus: FnMut(u32, (i32, i32)) -> Result<SurfaceMesh, SurfaceError>,
 {
-    let facts = symmetry_facts(group);
+    // C1: the verdicts come from the symmetry found on the cell, not from the label (a tuned special locus such as
+    // an oblique cell at b = 1, gamma = 90 deg has mirrors its label p2 does not list).
+    let facts = symmetry_facts_of_cell(group, cell);
+    let group = facts.group.as_str();
     SURFACES
         .into_iter()
         .map(|name| match name {
@@ -366,10 +369,12 @@ mod tests {
             |_, _| Err(SurfaceError::not_found("stub", "", false)),
             |_, _| Err(SurfaceError::not_found("stub", "", false)),
         );
+        // C1: the verdicts follow the cell, not the label. A square cell labelled p4 has the mirrors of p4m, so the
+        // Moebius row is not proved impossible (the stub builder refuses it: NOT FOUND) and neither is RP2.
         assert_eq!(rows.len(), 8);
-        assert_eq!(rows[2].status, "IMPOSSIBLE");
+        assert_eq!(rows[2].status, "NOT FOUND");
         assert_eq!(rows[4].status, "OK");
-        assert_eq!(rows[5].status, "IMPOSSIBLE");
+        assert_ne!(rows[5].status, "IMPOSSIBLE");
     }
 
     #[derive(Default, Deserialize)]

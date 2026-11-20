@@ -126,3 +126,11 @@ def no_reversing_reason(group, what):
 def no_rotation_reason(group, what, chi):
     return (f"{group} has no rotation, so no disclination with a positive Frank angle is allowed, and a {what} needs "
             f"Frank angles adding up to 360 x chi = {360 * chi} deg (Gauss-Bonnet)")
+
+
+def no_glide_reason(what):
+    """[PROVED] refusal of a twisted gluing on a decorated lattice with no mirror or glide (the search of _glides.py on the
+    Gauss-reduced cell is complete): the text of Rust's NO_GLIDE without its prefix, plus what was asked."""
+    return ("[PROVED] the decorated lattice (sites, bonds and bond kinds) has no mirror and no glide line (complete search "
+            "over the lattice isometries of the Gauss-reduced cell), and a Moebius band or a Klein bottle must be glued by "
+            f"one (asked: {what})")

@@ -4,134 +4,22 @@ use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
 use crate::surface::checks::check_surface;
+pub use crate::surface::glides::{GlideAxis, glide_power, glide_search, glides};
 use crate::surface::quotient::{
     add2, apply_to_site, arc8_eval, arc8_perimeter, canon_cycle, dom_edge, gcd_i32, mat2_det,
-    mat2_inv, mat2_mul, mat2_vec, mat2i_fvec, mat2i_vec, plane_faces, scale2, sub2,
-    sublattice_complement, vec2_dot, vec2_norm, CellGeom, Dart2D, QuotientRaw, SubTorus,
+    mat2_inv, mat2_mul, mat2_vec, mat2i_vec, plane_faces, scale2, sub2,
+    sublattice_complement, vec2_dot, vec2_norm, CellGeom, QuotientRaw, SubTorus,
 };
 use crate::types::{Cell2D, SurfaceMesh};
 
 const DEFAULT_SITES: f64 = 220.0;
 const K8_HOLE_RATIO: f64 = 2.0;
-
-const HEX_PRIO: [[[i32; 2]; 2]; 6] = [
-    [[0, -1], [-1, 0]], [[-1, 1], [0, 1]], [[1, 0], [1, -1]],
-    [[0, 1], [1, 0]], [[1, -1], [0, -1]], [[-1, 0], [-1, 1]],
-];
-const STD_PRIO: [[[i32; 2]; 2]; 4] = [
-    [[-1, 0], [0, 1]], [[1, 0], [0, -1]], [[0, 1], [1, 0]], [[0, -1], [-1, 0]],
-];
-
-/// Mirror or glide reflection class of a 2D periodic cell usable for non-orientable flat surfaces.
-#[derive(Clone, Debug, PartialEq)]
-pub struct GlideAxis {
-    pub m: [[i32; 2]; 2],
-    pub t: [f64; 2],
-    pub tau: [i32; 2],
-    pub along: [i32; 2],
-    pub across: [i32; 2],
-    pub half: [f64; 2],
-    pub length: f64,
-    pub mirror: bool,
-}
+/// Refusal when [`glide_search`] proves there is no mirror or glide (its module notes hold the proof).
+pub const NO_GLIDE: &str = "IMPOSSIBLE (lattice): [PROVED] the decorated lattice (sites, bonds and bond kinds) has no mirror and no glide line (complete search over the lattice isometries of the Gauss-reduced cell), and a Moebius band or a Klein bottle must be glued by one";
 
 fn odd_int(x: f64) -> i32 {
     let n = (x.round_ties_even() as i32).max(1);
     if n % 2 != 0 { n } else { n + 1 }
-}
-
-fn wrap01(x: f64) -> f64 {
-    let w = x - (x + 1e-7).floor();
-    if w.abs() < 1e-7 { 0.0 } else { w }
-}
-
-/// Discover all orientation-reversing mirror/glide classes of `cell` (matching `flat.py::glides`).
-pub fn glides(cell: &Cell2D) -> Vec<GlideAxis> {
-    let Ok(geom) = CellGeom::from_cell(cell) else { return Vec::new() };
-    let mut dart_set: HashSet<Dart2D> = HashSet::with_capacity(geom.bonds.len() * 2);
-    for &(i, j, n1, n2) in &geom.bonds {
-        dart_set.insert((i, j, n1, n2));
-        dart_set.insert((j, i, -n1, -n2));
-    }
-    let (g00, g01, g11) = (vec2_dot(cell.a1, cell.a1), vec2_dot(cell.a1, cell.a2), vec2_dot(cell.a2, cell.a2));
-    let tol_g = 1e-5 * (g00 + g11);
-    let (l1, l2) = (vec2_norm(cell.a1), vec2_norm(cell.a2));
-    let is_hex = (l1 - l2).abs() <= 1e-5 * l1.max(l2) && (g01 / (l1 * l2) + 0.5).abs() <= 1e-5;
-    let prio: &[[[i32; 2]; 2]] = if is_hex { &HEX_PRIO } else { &STD_PRIO };
-
-    let mut cands: Vec<(usize, [[i32; 2]; 2])> = Vec::new();
-    for m00 in -2..=2 {
-        for m01 in -2..=2 {
-            for m10 in -2..=2 {
-                for m11 in -2..=2 {
-                    if m00 * m11 - m01 * m10 != -1 {
-                        continue;
-                    }
-                    let mf = [[m00, m01], [m10, m11]];
-                    let (c0, c1) = (mat2_vec(geom.a, [m00 as f64, m10 as f64]), mat2_vec(geom.a, [m01 as f64, m11 as f64]));
-                    if (vec2_dot(c0, c0) - g00).abs() <= tol_g
-                        && (vec2_dot(c0, c1) - g01).abs() <= tol_g
-                        && (vec2_dot(c1, c1) - g11).abs() <= tol_g
-                    {
-                        cands.push((prio.iter().position(|&p| p == mf).unwrap_or(100), mf));
-                    }
-                }
-            }
-        }
-    }
-    cands.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    let mut vecs: Vec<[i32; 2]> = (-4..=4)
-        .flat_map(|a| (-4..=4).filter_map(move |b| (a != 0 || b != 0).then_some([a, b])))
-        .collect();
-    vecs.sort_by(|u, v| {
-        vec2_norm(mat2_vec(geom.a, [u[0] as f64, u[1] as f64]))
-            .total_cmp(&vec2_norm(mat2_vec(geom.a, [v[0] as f64, v[1] as f64])))
-    });
-
-    let m_sites = geom.frac_basis.len();
-    let mut out = Vec::new();
-    for (_, mf) in cands {
-        let mf0 = mat2i_fvec(mf, geom.frac_basis[0]);
-        let found_t = (0..m_sites).find_map(|j0| {
-            let t = [wrap01(geom.frac_basis[j0][0] - mf0[0]), wrap01(geom.frac_basis[j0][1] - mf0[1])];
-            let smap: Option<Vec<_>> = (0..m_sites)
-                .map(|k| apply_to_site(mf, t, &geom.frac_basis, k))
-                .collect();
-            let smap = smap?;
-            geom.bonds
-                .iter()
-                .all(|&(i, j, n1, n2)| {
-                    let ((ji, ci), (jj, cj)) = (smap[i], smap[j]);
-                    let mn = mat2i_vec(mf, [n1, n2]);
-                    dart_set.contains(&(ji, jj, mn[0] + cj[0] - ci[0], mn[1] + cj[1] - ci[1]))
-                })
-                .then_some(t)
-        });
-        let Some(mut t) = found_t else { continue };
-        let Some(&along) = vecs.iter().find(|&&v| mat2i_vec(mf, v) == v) else { continue };
-        let Some(&across) = vecs.iter().find(|&&v| mat2i_vec(mf, v) == [-v[0], -v[1]]) else { continue };
-        let mut tau_f = add2(mat2i_fvec(mf, t), t);
-        let along_c = mat2_vec(geom.a, [along[0] as f64, along[1] as f64]);
-        let alpha = vec2_dot(mat2_vec(geom.a, tau_f), along_c) / vec2_dot(along_c, along_c);
-        if alpha.abs() >= 1.5 {
-            let k_even = (0.5 * alpha).round_ties_even();
-            t = sub2(t, [k_even * along[0] as f64, k_even * along[1] as f64]);
-            tau_f = add2(mat2i_fvec(mf, t), t);
-        }
-        let mirror = tau_f[0].abs() < 1e-6 && tau_f[1].abs() < 1e-6;
-        if mirror {
-            t = add2(t, [along[0] as f64, along[1] as f64]);
-            tau_f = add2(mat2i_fvec(mf, t), t);
-        }
-        let tau = [tau_f[0].round_ties_even() as i32, tau_f[1].round_ties_even() as i32];
-        let tau_c = mat2_vec(geom.a, [tau[0] as f64, tau[1] as f64]);
-        out.push(GlideAxis {
-            m: mf, t, tau, along, across,
-            half: scale2(0.5, tau_c), length: 0.5 * vec2_norm(tau_c), mirror,
-        });
-    }
-    out
 }
 
 fn build_quotient(
@@ -377,16 +265,11 @@ struct GlideFrame {
 
 impl GlideFrame {
     fn new(cell: &Cell2D, geom: &CellGeom, glide_idx: usize, n_along: i32, n_across: i32) -> Result<Self, String> {
-        let gl = glides(cell);
+        let gl = glide_search(cell)?;
         if gl.is_empty() {
-            return Err("IMPOSSIBLE: lattice has no mirror or glide symmetry".to_string());
+            return Err(NO_GLIDE.to_string());
         }
-        if n_along < 1 || n_along % 2 == 0 {
-            return Err("n_along must be a positive odd integer".to_string());
-        }
-        let mut g = gl[glide_idx % gl.len()].clone();
-        let k_shift = (n_along - 1) / 2;
-        g.t = [g.t[0] + (k_shift * g.tau[0]) as f64, g.t[1] + (k_shift * g.tau[1]) as f64];
+        let mut g = glide_power(&gl[glide_idx % gl.len()], n_along)?;
         let row0 = [n_along * g.tau[0], n_along * g.tau[1]];
         let row1 = [n_across * g.across[0], n_across * g.across[1]];
         let col0 = mat2_vec(geom.a, [row0[0] as f64, row0[1] as f64]);
@@ -511,9 +394,9 @@ fn try_glide_surfaces(
     what: &str,
     build_one: impl Fn(&CellGeom, &GlideAxis, usize, f64, f64) -> Result<SurfaceMesh, String>,
 ) -> Result<SurfaceMesh, String> {
-    let gl = glides(cell);
+    let gl = glide_search(cell)?;
     if gl.is_empty() {
-        return Err("IMPOSSIBLE: lattice has no mirror or glide symmetry".to_string());
+        return Err(NO_GLIDE.to_string());
     }
     let geom = CellGeom::from_cell(cell)?;
     let sa = mat2_det(geom.a).abs() / (cell.basis.len() as f64);
