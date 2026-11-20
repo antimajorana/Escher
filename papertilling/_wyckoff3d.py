@@ -86,11 +86,14 @@ def orbit(number, p, tol=1e-6):
     """The G-orbit of the fractional point p in the conventional cell (rows in [0,1))."""
     R, t = full_ops(number)
     P = (np.einsum("nij,j->ni", R, np.asarray(p, float)) + t) % 1.0
-    out = []
-    for q in P:
-        if not any(_same_mod1(q, w, tol) for w in out):
-            out.append(q)
-    return np.array(out)
+    return P[unique_mod1(P, tol)]
+
+
+def unique_mod1(P, tol=1e-6):
+    """Indices of the first occurrence of each point of P (rows) mod Z^3."""
+    D = P[:, None, :] - P[None, :, :]
+    close = np.all(np.abs(D - np.round(D)) < tol, axis=2)
+    return np.nonzero(~np.any(np.tril(close, -1), axis=1))[0]
 
 
 def _same_mod1(a, b, tol=1e-6):

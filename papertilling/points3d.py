@@ -55,10 +55,7 @@ def to_primitive(number, X, A):
     """Conventional fractional points X (rows) and cell A (rows, Cartesian) -> primitive (F, A_prim, keep)."""
     B = np.array([[float(x) for x in row] for row in W.primitive_basis(W.group_entry(number))])
     F = (X @ np.linalg.inv(B)) % 1.0
-    keep = []
-    for i, f in enumerate(F):
-        if not any(W._same_mod1(f, F[j], 1e-6) for j in keep):
-            keep.append(i)
+    keep = W.unique_mod1(F)
     return F[keep] % 1.0, B @ A, keep
 
 
