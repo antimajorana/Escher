@@ -1,14 +1,13 @@
-//! Equipping a card: route the app to what the card names, then close the deck. Every route goes through the
+//! Opening a card: route the app to what the card names, then close `All Views`. Every route goes through the
 //! same functions the panels use (`select_lattices_view`, `select_defects_view`, `switch_mode`, ...).
 
-use super::realms::{CardId, IoAction, LatticeRef};
-use crate::analysis_mode::AnalysisTarget;
+use super::realms::{CardId, LatticeRef};
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab, PapertillingApp};
 use crate::gallery_tab::BrowseMode;
 
 impl PapertillingApp {
-    /// Perform card `id` (§4.9 of the M1 plan), then close the deck.
-    pub(crate) fn deck_equip(&mut self, id: CardId, ctx: &egui::Context) {
+    /// Perform card `id`, then close `All Views`.
+    pub(crate) fn deck_equip(&mut self, id: CardId, _ctx: &egui::Context) {
         match id {
             CardId::Plane2D => self.select_lattices_view(LatticesView::Plane2D),
             CardId::WallpaperGroups => self.equip_browse_mode(BrowseMode::ByGroup),
@@ -63,14 +62,13 @@ impl PapertillingApp {
                     }
                 });
             }
-            // C1: Analysis is postponed; no shown realm lists these cards, and equipping one is refused
+            // C1: Analysis is postponed; no shown section lists these cards, and opening one is refused
             CardId::Analysis(_) => self.export_status = String::from("Analysis is postponed"),
             CardId::Preset(i) => {
                 if let Err(e) = self.apply_preset(i) {
                     self.export_status = e;
                 }
             }
-            CardId::Io(a) => self.run_io_action(a, ctx),
         }
         self.deck_close();
     }
@@ -103,36 +101,9 @@ impl PapertillingApp {
         (self.active_mode, self.active_tab, self.lattices_view, self.defects_view)
     }
 
-    /// Stat-card "Open in Defects Forge": select the lattice, open the Defects catalogue on it, close the deck.
+    /// Stat-card "Open in Defects": select the lattice, open the Defects catalogue on it, close `All Views`.
     pub(crate) fn deck_open_in_forge(&mut self, r: LatticeRef) {
         self.select_lattice_then(r, |app| app.select_defects_view(DefectsView::Catalogue2D));
         self.deck_close();
-    }
-
-    /// Stat-card "Open in Analysis Lab": select the lattice, make the 2D lattice the lab's source, close the deck.
-    /// C1: unreachable while Analysis is postponed (its stat-card button is gone).
-    pub(crate) fn deck_open_in_lab(&mut self, r: LatticeRef) {
-        self.select_lattice_then(r, |app| {
-            app.analysis.select_target(AnalysisTarget::PlaneLattice);
-            app.switch_mode(AppMode::Analysis);
-        });
-        self.deck_close();
-    }
-
-    /// Run a Presets & I/O file action. Tests and `--smoke-test` never open a dialog: they get a status line.
-    pub(crate) fn run_io_action(&mut self, a: IoAction, ctx: &egui::Context) {
-        if self.smoke_test || cfg!(test) {
-            self.export_status = format!("{} (dialog skipped)", a.title());
-            return;
-        }
-        match a {
-            IoAction::SaveSession => self.session_save_dialog(),
-            IoAction::OpenSession => self.session_open_dialog(Some(ctx)),
-            IoAction::ExportSvgPng => self.export_svg_png_action(),
-            IoAction::Export3dPng => self.export_3d_png_action(ctx),
-            IoAction::ExportObj => self.export_obj_action(),
-            IoAction::ExportJson => self.export_json_action(),
-            IoAction::ImportJson => self.import_json_action(),
-        }
     }
 }

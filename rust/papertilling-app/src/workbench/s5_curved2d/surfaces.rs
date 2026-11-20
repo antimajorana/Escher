@@ -1,32 +1,39 @@
 //! An H² {p,q} patch placed on a surface in R³ (`embed_tiling_on_surface`) and the papercraft net of the placed
-//! mesh (`unfold_papercraft_net`), with an SVG export of the net, 0-based seeded layer growth, and stop banners.
-//! Only the hyperboloid bowl is an isometric embedding (for the Minkowski metric); the inspector says so for every
-//! other surface.
+//! mesh (`unfold_papercraft_net`), retained for unit tests and session state compatibility (`SurfState`).
 
+#[cfg(test)]
 use std::collections::HashMap;
+#[cfg(test)]
 use std::f64::consts::PI;
+#[cfg(test)]
 use std::path::Path;
 
 use papertilling_core::dsymbol::GeometryKind;
 use papertilling_core::growth::SeedKind;
+#[cfg(test)]
 use papertilling_core::hyperbolic::{HyperbolicStyle, build_hyperbolic_tiling_seeded};
+#[cfg(test)]
 use papertilling_core::noneuclidean2d::{
     H2SurfaceKind, build_unified_pq_seeded, embed_tiling_on_surface, surface_point, unfold_papercraft_net,
 };
 use serde_json::{Value, json};
 
+#[cfg(test)]
 use super::draw::{Picture, mesh_with_arcs};
-use super::growth_table::{
-    GROWTH_HEADERS, non_disk_flags, parse_seed_2d, patch_layer_stats, seed_controls, seed_label_2d, stats_to_rows,
-};
+use super::growth_table::parse_seed_2d;
+#[cfg(test)]
+use super::growth_table::{GROWTH_HEADERS, non_disk_flags, patch_layer_stats, seed_label_2d, stats_to_rows};
 use super::pq::layer_range;
-use super::{MAX_PQ, S5Out, check_symbol, delta_badge, geom_label, get_usize, pq_controls};
-use crate::workbench::WbCtx;
+use super::{MAX_PQ, get_usize};
+#[cfg(test)]
+use super::{S5Out, check_symbol, geom_label};
+#[cfg(test)]
 use crate::workbench::scene_helpers::ring_size_tint;
 
 pub(crate) const SURFACES: [&str; 5] = ["Hyperboloid bowl", "Hemisphere", "Pseudosphere", "Dini surface", "Kuen surface"];
 
 /// The surface for index `k` (Dini with the given twist b/a).
+#[cfg(test)]
 pub(crate) fn surface_kind(k: usize, twist: f64) -> Option<H2SurfaceKind> {
     Some(match k {
         0 => H2SurfaceKind::HyperboloidBowl,
@@ -38,7 +45,8 @@ pub(crate) fn surface_kind(k: usize, twist: f64) -> Option<H2SurfaceKind> {
     })
 }
 
-/// What the placement preserves, per surface (shown in the inspector).
+/// What the placement preserves, per surface.
+#[cfg(test)]
 fn placement_note(k: usize) -> &'static str {
     match k {
         0 => "Isometric embedding of H² as the hyperboloid sheet in Minkowski space R^{2,1} [PROVED]; its Euclidean curvature is not constant.",
@@ -50,6 +58,7 @@ fn placement_note(k: usize) -> &'static str {
 
 /// Curvature row, naming the metric it refers to: the bowl's value is for its Minkowski-induced metric (the H²
 /// metric), every other value for the Euclidean-induced metric of the surface in R³.
+#[cfg(test)]
 pub(crate) fn curvature_row(k: usize, value: f64) -> (String, String) {
     let (label, extra) = match k {
         0 => ("Gaussian curvature of the Minkowski-induced metric (the H² metric)", ""),
@@ -61,6 +70,7 @@ pub(crate) fn curvature_row(k: usize, value: f64) -> (String, String) {
 
 /// Branch offsets k_i (u_i = θ_i + 2π k_i) that unwrap a face's polar angles along its boundary, shifted so the mean
 /// unwrapped angle lies in (−π, π]. `None` when the boundary winds around the origin (no single-valued branch).
+#[cfg(test)]
 pub(crate) fn unwrap_branches(theta: &[f64]) -> Option<Vec<i64>> {
     let tau = 2.0 * PI;
     let wrap = |d: f64| (d + PI).rem_euclid(tau) - PI;
@@ -82,6 +92,7 @@ pub(crate) fn unwrap_branches(theta: &[f64]) -> Option<Vec<i64>> {
 /// Dini placement with the polar angle unwrapped per face: the height term b·u is not 2π-periodic, so a face that
 /// straddles θ = ±π gets its vertices on one branch (vertex copies at u + 2πk), and a face that winds around the
 /// origin, which no branch can place, is left out. Returns the faces (indices into the extended `pts`) and that count.
+#[cfg(test)]
 fn dini_unwrapped(coords: &[[f64; 2]], faces: &[Vec<usize>], pts: &mut Vec<[f64; 3]>, twist: f64) -> (Vec<Vec<usize>>, usize) {
     let mut copies: HashMap<(usize, i64), usize> = HashMap::new();
     let (mut out, mut winding) = (Vec::with_capacity(faces.len()), 0);
@@ -112,6 +123,7 @@ fn dini_unwrapped(coords: &[[f64; 2]], faces: &[Vec<usize>], pts: &mut Vec<[f64;
     (out, winding)
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SurfJob {
     pub(crate) p: usize,
@@ -129,16 +141,16 @@ pub(crate) struct SurfState {
     pub(crate) seed: SeedKind,
     pub(crate) surface: usize,
     pub(crate) twist: f64,
-    pub(crate) status: String,
 }
 
 impl Default for SurfState {
     fn default() -> Self {
-        Self { p: 7, q: 3, layers: 2, seed: SeedKind::Vertex, surface: 0, twist: 0.2, status: String::new() }
+        Self { p: 7, q: 3, layers: 2, seed: SeedKind::Vertex, surface: 0, twist: 0.2 }
     }
 }
 
 impl SurfState {
+    #[cfg(test)]
     pub(crate) fn job(&self) -> SurfJob {
         let (_, hi) = layer_range(GeometryKind::Hyperbolic);
         SurfJob {
@@ -148,54 +160,6 @@ impl SurfState {
             seed: self.seed,
             surface: self.surface,
             twist: self.twist,
-        }
-    }
-
-    pub(super) fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut rebuild = pq_controls(ui, &mut self.p, &mut self.q, 3);
-        ui.label(delta_badge(self.p, self.q));
-        rebuild |= seed_controls(ui, &mut self.seed);
-        let (lo, hi) = layer_range(GeometryKind::Hyperbolic);
-        let mut lay = self.layers.clamp(lo, hi);
-        ui.horizontal(|ui| {
-            ui.label("Layers:");
-            if ui.add(egui::Slider::new(&mut lay, lo..=hi)).changed() {
-                self.layers = lay;
-                rebuild = true;
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Surface:");
-            egui::ComboBox::from_id_salt("wb_s5_surface").selected_text(SURFACES[self.surface.min(4)]).show_ui(ui, |ui| {
-                for (i, s) in SURFACES.iter().enumerate() {
-                    rebuild |= ui.selectable_value(&mut self.surface, i, *s).changed();
-                }
-            });
-        });
-        if self.surface == 3 {
-            ui.horizontal(|ui| {
-                ui.label("Dini twist b/a:");
-                rebuild |= ui.add(egui::DragValue::new(&mut self.twist).range(0.0..=2.0).speed(0.01)).changed();
-            });
-        }
-        ui.small("2D: papercraft net of the placed mesh (BFS spanning tree; pieces may overlap).");
-        rebuild
-    }
-
-    pub(super) fn show_export(&mut self, ui: &mut egui::Ui, cx: &WbCtx, svg: Option<&str>) {
-        ui.separator();
-        if ui.button("Save net as .svg").clicked() {
-            self.status = match svg {
-                None => String::from("refused: build a net first"),
-                Some(_) if cx.smoke || cfg!(test) => String::from("papercraft_net.svg ready; file dialog skipped"),
-                Some(text) => match rfd::FileDialog::new().set_file_name("papercraft_net.svg").save_file() {
-                    Some(path) => export_to(&path, text).unwrap_or_else(|e| e),
-                    None => String::from("export cancelled"),
-                },
-            };
-        }
-        if !self.status.is_empty() {
-            ui.small(self.status.as_str());
         }
     }
 
@@ -234,12 +198,14 @@ impl SurfState {
 }
 
 /// Write `text` to `path`; returns a status line.
+#[cfg(test)]
 pub(crate) fn export_to(path: &Path, text: &str) -> Result<String, String> {
     std::fs::write(path, text).map_err(|e| format!("could not write {}: {e}", path.display()))?;
     Ok(format!("wrote {} ({} bytes)", path.display(), text.len()))
 }
 
 /// The net pieces as an SVG document (y flipped, 1 unit = 100 px, 10 px margin).
+#[cfg(test)]
 pub(crate) fn net_svg(pieces: &[Vec<[f64; 2]>]) -> String {
     let pts = pieces.iter().flatten().filter(|p| p[0].is_finite() && p[1].is_finite());
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
@@ -250,7 +216,7 @@ pub(crate) fn net_svg(pieces: &[Vec<[f64; 2]>]) -> String {
         (lo, hi) = ([0.0; 2], [1.0; 2]);
     }
     let s = 100.0;
-    let (w, h) = ((hi[0] - lo[0]) * s + 20.0, (hi[1] - lo[1]) * s + 20.0);
+    let (w, h) = ((hi[0] - lo[0]) * s + 20.0, (hi[1] - lo[1]) * s + 10.0);
     let mut out = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w:.1}\" height=\"{h:.1}\" viewBox=\"0 0 {w:.1} {h:.1}\">\n");
     for piece in pieces {
         let coords: Vec<String> =
@@ -261,6 +227,7 @@ pub(crate) fn net_svg(pieces: &[Vec<[f64; 2]>]) -> String {
     out
 }
 
+#[cfg(test)]
 pub(crate) fn build(j: &SurfJob) -> Result<S5Out, String> {
     let kind = check_symbol(j.p, j.q)?;
     if kind != GeometryKind::Hyperbolic {

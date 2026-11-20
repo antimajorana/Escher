@@ -1,5 +1,5 @@
-//! "Motion GIF": the crystal moving linearly from its reference positions to its current ones, rendered and encoded
-//! as a looping GIF89a (`export_motion_gif`). The file dialog never opens under `--smoke-test` or in tests.
+//! "Motion GIF" (retained for unit tests): the crystal moving linearly from its reference positions to its current
+//! ones, rendered and encoded as a looping GIF89a (`export_motion_gif`).
 
 use std::path::Path;
 
@@ -18,8 +18,6 @@ pub(crate) struct GifOut {
     pub(crate) ref_pos: Vec<[f64; 2]>,
     pub(crate) edges: Vec<(usize, usize)>,
     pub(crate) max_u: f64,
-    pub(crate) frames: usize,
-    pub(crate) px: u16,
     pub(crate) bytes: Result<Vec<u8>, String>,
 }
 
@@ -43,8 +41,6 @@ pub(crate) fn build(src: &Source, set: &Settings, det: DetectOut) -> Result<GifO
         ref_pos: if has_ref { src.ref_pos.clone() } else { Vec::new() },
         edges: src.edges.clone(),
         max_u,
-        frames: set.gif_frames,
-        px: set.gif_px,
         bytes,
     })
 }
@@ -75,28 +71,4 @@ pub(crate) fn scene(o: &GifOut) -> Scene2D {
         .collect();
     let note = format!("{} displacement arrows (reference -> current), largest {:.4}", arrows.len(), o.max_u);
     with_lines(vector_scene(pos, &o.edges, &[], |_| [0, 0, 0, 0], SCENE_TITLE, &note), arrows)
-}
-
-/// Inspector; returns a status message when the export button was used.
-pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &GifOut, smoke: bool) -> Option<String> {
-    ui.label(format!("Largest displacement reference -> current: {:.4}", o.max_u));
-    match &o.bytes {
-        Ok(b) => {
-            ui.label(format!("GIF89a ready: {} frames, {} x {} px, {} bytes", o.frames, o.px, o.px, b.len()));
-            if ui.button("Export GIF file…").clicked() {
-                if smoke || cfg!(test) {
-                    return Some(String::from("motion.gif ready; file dialog skipped"));
-                }
-                let dialog = rfd::FileDialog::new().set_title("Export motion GIF").set_file_name("motion.gif");
-                return Some(match dialog.save_file() {
-                    Some(path) => export_to(&path, b).unwrap_or_else(|e| e),
-                    None => String::from("export cancelled"),
-                });
-            }
-        }
-        Err(e) => {
-            ui.label(format!("GIF: {e}"));
-        }
-    }
-    None
 }

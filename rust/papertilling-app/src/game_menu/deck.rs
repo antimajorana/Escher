@@ -24,7 +24,7 @@ const CARD_RADIUS: f32 = 6.0;
 const STAT_W: f32 = 300.0;
 const COL_GAP: f32 = 12.0;
 const FOOTER_H: f32 = 20.0;
-const FOOTER: &str = "1–7 / Q E  realm    Arrows / WASD  move    Enter  equip    Esc  resume";
+const FOOTER: &str = "1–5, 7 / Q E  section    Arrows  move    Enter  open    Esc  close";
 
 /// The deck's layer (also raised every frame above the Combine popover and the Core Inspector window).
 fn deck_layer() -> egui::LayerId {
@@ -150,7 +150,7 @@ impl PapertillingApp {
             let tabs_w = (ui.available_width() - FILTER_W - 24.0).max(120.0);
             let wrap = Layout::left_to_right(Align::Center).with_main_wrap(true);
             ui.allocate_ui_with_layout(vec2(tabs_w, 0.0), wrap, |ui| {
-                ui.label(RichText::new("❖ PAPERTILLING CODEX").strong().color(tokens.text_primary));
+                ui.label(RichText::new("All Views").strong().color(tokens.text_primary));
                 ui.add_space(8.0);
                 for r in Realm::SHOWN {
                     let on = self.deck.realm == r;
@@ -286,16 +286,12 @@ impl PapertillingApp {
         }
     }
 
-    /// A stat-card button: Equip, or (lattice cards only) open the lattice in the Defects Forge / Analysis Lab.
+    /// A stat-card button: Open, or (lattice cards only) open the lattice in Defects.
     fn deck_stat_action(&mut self, a: StatAction, id: CardId, ctx: &egui::Context) {
         match (a, id) {
             (StatAction::Equip, _) => self.deck_equip(id, ctx),
             (StatAction::OpenInForge, CardId::Lattice(r)) => {
                 self.deck_open_in_forge(r);
-                self.deck_close();
-            }
-            (StatAction::OpenInLab, CardId::Lattice(r)) => {
-                self.deck_open_in_lab(r);
                 self.deck_close();
             }
             _ => {}

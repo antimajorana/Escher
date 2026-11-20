@@ -1,13 +1,11 @@
 //! "Detect defects": the bond graph rebuilt from bare coordinates (or the crystal's own bonds), per-face Frank charges,
-//! clusters, surrounding loops and Burgers vectors (`detect_defects_from_coords`), plus CNA signature counts and a
-//! Wigner-Seitz occupancy count against the perfect lattice.
+//! clusters, surrounding loops and Burgers vectors (`detect_defects_from_coords`).
 
-use papertilling_core::defect::perfect_disk;
 use papertilling_core::defect_fields::nye_loops::default_cutoff;
-use papertilling_core::defect_fields::{BondGraph, CoordDetection, RefLattice, detect_defects_from_coords, wigner_seitz_occupancy};
+use papertilling_core::defect_fields::{BondGraph, CoordDetection, RefLattice, detect_defects_from_coords};
 use papertilling_core::types::Frame2D;
 
-use super::graph_check::{CnaCounts, check_plane, cna_histogram};
+use super::graph_check::check_plane;
 use super::{SCENE_TITLE, Settings, Source};
 use crate::canvas2d::Scene2D;
 use crate::scene2d::LinePrim;
@@ -18,14 +16,6 @@ pub(crate) const NEG_TINT: [u8; 4] = [52, 152, 219, 120];
 const LOOP_RGBA: [u8; 4] = [192, 57, 43, 255];
 const LOOP_SELECTED_RGBA: [u8; 4] = [120, 20, 20, 255];
 
-/// Wigner-Seitz counts over the reference sites well inside the crystal.
-#[derive(Clone, Debug)]
-pub(crate) struct WsSummary {
-    pub(crate) counted: usize,
-    pub(crate) vacancies: usize,
-    pub(crate) hosts: usize,
-}
-
 pub(crate) struct DetectOut {
     pub(crate) det: CoordDetection,
     pub(crate) pos: Vec<[f64; 2]>,
@@ -34,9 +24,6 @@ pub(crate) struct DetectOut {
     pub(crate) graph_source: String,
     /// Whether the cutoff graph equals the crystal's own bonds (`None` when the own bonds were used).
     pub(crate) graph_matches_crystal: Option<bool>,
-    /// CNA signature counts, or why the longest-chain search was not run.
-    pub(crate) cna: Result<CnaCounts, String>,
-    pub(crate) ws: Result<WsSummary, String>,
 }
 
 /// Longest ideal bond of the source cell (identity frame: `gallery.cell()` already carries the lattice frame).
@@ -76,30 +63,7 @@ pub(crate) fn build(src: &Source, set: &Settings) -> Result<DetectOut, String> {
         ce.dedup();
         ce == det.edges
     });
-    let cna = cna_histogram(&BondGraph::from_edges(&src.pos, &det.edges));
-    let ws = wigner_seitz_summary(src, &det, rl.lmax);
-    Ok(DetectOut { det, pos: src.pos.clone(), lmax: rl.lmax, graph_source, graph_matches_crystal, cna, ws })
-}
-
-/// Occupancy of the perfect lattice's Wigner-Seitz cells inside the crystal's inscribed disk; only reference sites at
-/// least two bonds inside the disk are counted (the disk edge cuts cells).
-fn wigner_seitz_summary(src: &Source, det: &CoordDetection, lmax: f64) -> Result<WsSummary, String> {
-    let n = src.pos.len() as f64;
-    let c = [src.pos.iter().map(|p| p[0]).sum::<f64>() / n, src.pos.iter().map(|p| p[1]).sum::<f64>() / n];
-    let dist = |p: [f64; 2]| (p[0] - c[0]).hypot(p[1] - c[1]);
-    let r_in = (0..src.pos.len()).filter(|&i| det.rim[i]).map(|i| dist(src.pos[i])).fold(f64::INFINITY, f64::min);
-    if !(r_in.is_finite() && r_in > 3.0 * lmax) {
-        return Err(String::from("REFUSED: the crystal's inscribed disk is under three bonds wide"));
-    }
-    let refs = perfect_disk(&src.cell, c, r_in).pos;
-    let actual: Vec<[f64; 2]> = src.pos.iter().copied().filter(|&p| dist(p) < r_in).collect();
-    let ws = wigner_seitz_occupancy(&refs, &actual)?;
-    let inner = |i: usize| dist(refs[i]) < r_in - 2.0 * lmax;
-    Ok(WsSummary {
-        counted: (0..refs.len()).filter(|&i| inner(i)).count(),
-        vacancies: ws.vacancies.iter().filter(|&&i| inner(i)).count(),
-        hosts: ws.interstitial_hosts.iter().filter(|&&i| inner(i)).count(),
-    })
+    Ok(DetectOut { det, pos: src.pos.clone(), lmax: rl.lmax, graph_source, graph_matches_crystal })
 }
 
 /// The picked defect, or (automatic) the first one with a non-zero Burgers vector, else 0.
@@ -191,22 +155,4 @@ pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &DetectOut, selected: usize) 
     for (k, d) in det.defects.iter().enumerate() {
         ui.small(format!("#{k}: {}", d.reason));
     }
-    ui.separator();
-    match &o.cna {
-        Ok(cna) => {
-            let top: Vec<String> = cna.iter().take(6).map(|((a, b, c), n)| format!("({a},{b},{c}) x{n}")).collect();
-            ui.label(format!("CNA bond signatures (n_common, n_bonds, chain): {}", top.join(", ")));
-        }
-        Err(e) => {
-            ui.label(format!("CNA bond signatures: {e}"));
-        }
-    }
-    match &o.ws {
-        Ok(w) => ui.label(format!(
-            "[COMPUTATIONAL EVIDENCE] Wigner-Seitz vs the perfect lattice ({} cells counted): {} empty, {} doubly occupied \
-             (a dislocation's displacement also shifts occupancy along its cut)",
-            w.counted, w.vacancies, w.hosts
-        )),
-        Err(e) => ui.label(format!("Wigner-Seitz: {e}")),
-    };
 }

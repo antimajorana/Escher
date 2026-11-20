@@ -17,6 +17,12 @@ pub(crate) enum FieldKind {
 
 impl FieldKind {
     pub(crate) const ALL: [Self; 5] = [Self::NyeFace, Self::StrainTrace, Self::MaxShear, Self::Vitek, Self::PsiN];
+    /// Shown fields (`|ψ_n|` is hidden from the UI).
+    pub(crate) const SHOWN: [Self; 4] = [Self::NyeFace, Self::StrainTrace, Self::MaxShear, Self::Vitek];
+
+    pub(crate) fn is_shown(self) -> bool {
+        Self::SHOWN.contains(&self)
+    }
 
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -183,55 +189,9 @@ impl Settings {
         let mut ch = false;
         ui.separator();
         egui::ComboBox::from_id_salt("wb_s3_field").selected_text(self.field.label()).show_ui(ui, |ui| {
-            for f in FieldKind::ALL {
+            for f in FieldKind::SHOWN {
                 ch |= ui.selectable_value(&mut self.field, f, f.label()).changed();
             }
-        });
-        if self.field == FieldKind::PsiN {
-            ui.horizontal(|ui| {
-                ui.label("Order n:");
-                ch |= ui.add(egui::DragValue::new(&mut self.psi_n).range(1..=12)).changed();
-            });
-        }
-        ch
-    }
-
-    pub(crate) fn show_elastic(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut ch = false;
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label("Sampling grid (cells per side):");
-            ch |= ui.add(egui::DragValue::new(&mut self.grid).range(GRID_RANGE).speed(2.0)).changed();
-        });
-        ui.horizontal(|ui| {
-            ui.label("Window half-width (bonds):");
-            ch |= ui.add(egui::DragValue::new(&mut self.extent).range(EXTENT_RANGE).speed(0.1)).changed();
-        });
-        ch |= ui.checkbox(&mut self.manual_b, "Manual Burgers vector (instead of the selected defect)").changed();
-        if self.manual_b {
-            ui.horizontal(|ui| {
-                ui.label("b = u a1 + v a2:");
-                ch |= ui.add(egui::DragValue::new(&mut self.manual_uv[0]).range(-4..=4).prefix("u ")).changed();
-                ch |= ui.add(egui::DragValue::new(&mut self.manual_uv[1]).range(-4..=4).prefix("v ")).changed();
-            });
-        }
-        ch
-    }
-
-    pub(crate) fn show_gif(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut ch = false;
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label("Frames:");
-            ch |= ui.add(egui::DragValue::new(&mut self.gif_frames).range(FRAMES_RANGE)).changed();
-        });
-        ui.horizontal(|ui| {
-            ui.label("Size (px):");
-            ch |= ui.add(egui::DragValue::new(&mut self.gif_px).range(PX_RANGE).speed(4.0)).changed();
-        });
-        ui.horizontal(|ui| {
-            ui.label("Frame delay (cs):");
-            ch |= ui.add(egui::DragValue::new(&mut self.gif_delay_cs).range(1..=100)).changed();
         });
         ch
     }
@@ -275,7 +235,7 @@ impl Settings {
         if let Some(s) = v.get("field").and_then(Value::as_str)
             && let Some(k) = FieldKind::ALL.into_iter().find(|k| format!("{k:?}") == s)
         {
-            self.field = k;
+            self.field = if k.is_shown() { k } else { FieldKind::NyeFace };
         }
         if let Some(x) = u("psi_n") {
             self.psi_n = x.clamp(1, 12) as u32;

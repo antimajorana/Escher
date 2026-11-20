@@ -1,10 +1,10 @@
-//! The Codex: a one-row HUD (`hud_bar`) over the viewport and a full-canvas Command Deck overlay (`deck`) that
-//! replace the old mode and sub-view strips. Seven realms group every view, sub-tab and stage sub-row as cards
-//! (`realms`); equipping a card routes the app there (`equip`). Keyboard: Tab / M open and close the deck, 1-7 and
-//! Q / E switch realms, arrows / WASD move, Enter equips, Esc resumes (`keys`). C1: realm 6 (Analysis Lab) is
-//! hidden while Analysis is postponed: the deck shows [`Realm::SHOWN`], key 6 does nothing, Q / E skip it.
+//! `All Views` (`deck`) and the one-row top bar (`hud_bar`). Seven sections group every view, sub-tab and stage
+//! sub-row as cards (`realms`); opening a card routes the app there (`equip`). When `Advanced` is on, `Tab` / `M`
+//! open and close `All Views`, `1-5, 7` and `Q` / `E` switch sections, arrows move, `Enter` opens, `Esc` closes
+//! (`keys`). C1: section 6 (`Analysis Lab`) is hidden while Analysis is postponed: `All Views` shows [`Realm::SHOWN`],
+//! key 6 does nothing, `Q` / `E` skip it.
 //!
-//! The deck only overlays the panels: they keep drawing and polling underneath, so workers never stall.
+//! The overlay sits above the panels: they keep drawing and polling underneath, so workers never stall.
 
 use crate::app::{AppMode, DefectsView, LatticesView, PapertillingApp};
 use crate::session::{name_of, parse_named};
@@ -46,7 +46,7 @@ pub(crate) const ANALYSIS_POSTPONED_NOTE: &str = "Analysis is postponed; restore
 /// Status note when a session in a shown mode had its Command Deck left on the postponed Analysis Lab realm.
 pub(crate) const ANALYSIS_LAB_POSTPONED_NOTE: &str = "Analysis Lab is postponed; deck reset to current view";
 
-/// The seven realms of the Command Deck, in tab order (keys 1-7).
+/// The seven sections of `All Views`, in tab order (keys 1-7; variant names kept for v3 session JSON).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum Realm {
     Geometries,
@@ -70,22 +70,22 @@ impl Realm {
         Self::PresetsIo,
     ];
 
-    /// The realms the deck shows (C1: Analysis Lab is postponed). `ALL` and the `[_; 7]` arrays keep their
+    /// The sections `All Views` shows (C1: Analysis Lab is postponed). `ALL` and the `[_; 7]` arrays keep their
     /// indices, so saved sessions and the number keys 1-5 and 7 are unchanged; key 6 does nothing.
     pub(crate) const SHOWN: [Self; 6] =
         [Self::Geometries, Self::Groups, Self::Tilings, Self::Manifolds, Self::Forge, Self::PresetsIo];
 
-    /// The realm is one the deck shows.
+    /// The section is one `All Views` shows.
     pub(crate) fn is_shown(self) -> bool {
         self != Self::AnalysisLab
     }
 
-    /// 1..=7 (the realm's number key).
+    /// 1..=7 (the section's number key).
     pub(crate) fn number(self) -> usize {
         self as usize + 1
     }
 
-    /// The shown realm of number key `n` (`None` for 6, the hidden Analysis Lab).
+    /// The shown section of number key `n` (`None` for 6, the hidden Analysis Lab).
     pub(crate) fn from_number(n: usize) -> Option<Self> {
         n.checked_sub(1).and_then(|i| Self::ALL.get(i).copied()).filter(|r| r.is_shown())
     }
@@ -93,25 +93,25 @@ impl Realm {
     pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Geometries => "Geometries",
-            Self::Groups => "Groups & Symmetries",
+            Self::Groups => "Symmetry Groups",
             Self::Tilings => "Tilings & Nets",
-            Self::Manifolds => "Manifolds & Surfaces",
-            Self::Forge => "Defects Forge",
+            Self::Manifolds => "Surfaces & Quotients",
+            Self::Forge => "Defects",
             Self::AnalysisLab => "Analysis Lab",
-            Self::PresetsIo => "Presets & I/O",
+            Self::PresetsIo => "Examples",
         }
     }
 
-    /// Label of the realm's tab in the deck header (number + short name).
+    /// Label of the section's tab in the `All Views` header (number + short name).
     pub(crate) fn tab_label(self) -> &'static str {
         match self {
             Self::Geometries => "1 Geometries",
-            Self::Groups => "2 Groups",
-            Self::Tilings => "3 Tilings & Nets",
-            Self::Manifolds => "4 Manifolds",
-            Self::Forge => "5 Defects Forge",
+            Self::Groups => "2 Symmetry Groups",
+            Self::Tilings => "3 Tilings",
+            Self::Manifolds => "4 Surfaces",
+            Self::Forge => "5 Defects",
             Self::AnalysisLab => "6 Analysis Lab",
-            Self::PresetsIo => "7 Presets & I/O",
+            Self::PresetsIo => "7 Examples",
         }
     }
 
@@ -180,8 +180,8 @@ pub(crate) struct DeckState {
     pub equip_request: Option<usize>,
     /// `/` focused the filter from its key event alone; its text event may still arrive in a later frame.
     pub slash_text_pending: bool,
-    /// The realm came from a session file: the next Tab / Codex opens the deck there (once), not at the realm of
-    /// the current view.
+    /// The section came from a session file: the next Tab / All views opens the deck there (once), not at the
+    /// section of the current view.
     pub resume_saved_realm: bool,
     /// How much of the HUD's right cluster is on the row (set each frame).
     pub hud_density: hud_bar::HudDensity,
@@ -286,8 +286,8 @@ impl PapertillingApp {
         }
     }
 
-    /// Realm for Tab / the Codex button: the realm saved in the restored session the first time, else the realm of
-    /// the current view.
+    /// Section for Tab / the All views button: the section saved in the restored session the first time, else the
+    /// section of the current view.
     pub(crate) fn deck_entry_realm(&mut self) -> Realm {
         if std::mem::take(&mut self.deck.resume_saved_realm) { self.deck.realm } else { self.current_realm() }
     }

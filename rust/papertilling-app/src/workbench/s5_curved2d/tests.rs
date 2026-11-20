@@ -305,6 +305,8 @@ fn s5_panel_state_survives_json_roundtrip() {
     assert_eq!(notes.len(), 1);
     assert_eq!((q.sub, q.pq.p, q.large.target), (S5Sub::LargeH2, super::MAX_PQ, large_h2::MAX_TARGET), "junk ignored, sizes clamped");
     assert_eq!(q.large.model, super::draw::DiskModel::UpperHalfPlane);
+    q.restore(&serde_json::json!({"sub": "Surfaces"}), &mut notes);
+    assert_eq!(q.sub, S5Sub::Regular, "hidden Surfaces sub-row snaps to Regular");
 }
 
 #[test]
@@ -312,7 +314,8 @@ fn s5_subrows_quarantine_clean() {
     let mut h = harness();
     goto_lattices_view(&mut h, LatticesView::Curved2D);
     wait_until(&mut h, "S5", |a| !a.workbench_busy() && !a.workbench.dirty);
-    for s in S5Sub::ALL.into_iter().chain([S5Sub::Regular]) {
+    assert!(h.query_by_label(S5Sub::Surfaces.label()).is_none(), "Surfaces & nets is hidden from UI");
+    for s in S5Sub::SHOWN.into_iter().chain([S5Sub::Regular]) {
         h.get_by_label(s.label()).click();
         wait_until(&mut h, s.label(), |a| !a.workbench_busy() && !a.workbench.dirty);
         assert_eq!(h.state().workbench.s5.sub, s);

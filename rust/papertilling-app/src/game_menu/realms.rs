@@ -23,41 +23,6 @@ pub(crate) enum LatticeRef {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum IoAction {
-    SaveSession,
-    OpenSession,
-    ExportSvgPng,
-    Export3dPng,
-    ExportObj,
-    ExportJson,
-    ImportJson,
-}
-
-impl IoAction {
-    pub(crate) const ALL: [Self; 7] = [
-        Self::SaveSession,
-        Self::OpenSession,
-        Self::ExportSvgPng,
-        Self::Export3dPng,
-        Self::ExportObj,
-        Self::ExportJson,
-        Self::ImportJson,
-    ];
-
-    pub(crate) fn title(self) -> &'static str {
-        match self {
-            Self::SaveSession => "Save session…",
-            Self::OpenSession => "Open session…",
-            Self::ExportSvgPng => "Export SVG / PNG…",
-            Self::Export3dPng => "Export 3D PNG…",
-            Self::ExportObj => "Export .obj (3D)…",
-            Self::ExportJson => "Export .json (Notebook 3)…",
-            Self::ImportJson => "Import .json…",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CardId {
     Plane2D,
     HyperbolicAtlas,
@@ -72,7 +37,6 @@ pub(crate) enum CardId {
     Lattice(LatticeRef),
     Analysis(crate::analysis_mode::AnalysisTarget),
     Preset(usize),
-    Io(IoAction),
 }
 
 pub(crate) struct Card {
@@ -93,7 +57,7 @@ impl Card {
         Self { id, realm: card_realm(id), title: title.into(), subtitle: String::new(), badge: None, thumb }
     }
 
-    /// Accessible label of the card (realm number + title), unique within its realm.
+    /// Accessible label of the card (section number + title), unique within its section.
     pub(crate) fn a11y_label(&self) -> String {
         format!("{} · {}", self.realm.number(), self.title)
     }
@@ -104,13 +68,12 @@ pub(crate) fn pills(realm: Realm) -> &'static [&'static str] {
     match realm {
         Realm::Tilings => &["All", "Named 21", "This group", "Custom"],
         Realm::Manifolds => &["All", "Surfaces", "Flat 3D"],
-        Realm::Forge => &["All", "Catalogue", "Combine", "Point, SW & GB", "Detect & Fields"],
-        Realm::PresetsIo => &["All", "Showcase presets", "Session & files"],
-        Realm::Geometries | Realm::Groups | Realm::AnalysisLab => &["All"],
+        Realm::Forge => &["All", "Allowed defects", "Place & fuse", "Point, SW & GB", "Topological detection"],
+        Realm::Geometries | Realm::Groups | Realm::AnalysisLab | Realm::PresetsIo => &["All"],
     }
 }
 
-/// The realm that lists card `id` (total).
+/// The section that lists card `id` (total).
 pub(crate) fn card_realm(id: CardId) -> Realm {
     match id {
         CardId::Plane2D | CardId::HyperbolicAtlas => Realm::Geometries,
@@ -126,7 +89,7 @@ pub(crate) fn card_realm(id: CardId) -> Realm {
             WorkbenchView::S6Honeycombs => Realm::Geometries,
         },
         CardId::Analysis(_) => Realm::AnalysisLab,
-        CardId::Preset(_) | CardId::Io(_) => Realm::PresetsIo,
+        CardId::Preset(_) => Realm::PresetsIo,
     }
 }
 
@@ -204,7 +167,7 @@ impl PapertillingApp {
                 CardId::AtlasDefects(_) => "Atlas · defects".to_owned(),
                 CardId::WallpaperGroups => "Gallery · browse by group".to_owned(),
                 CardId::CustomBuilder => "Gallery · your own recipe".to_owned(),
-                CardId::Combine => "place, fuse and move pins".to_owned(),
+                CardId::Combine => "place, fuse and move defects".to_owned(),
                 CardId::DefectCatalogue(s) => match counts {
                     Some(n) => format!("{} entries", n[s as usize]),
                     None => "catalogue of the selected lattice".to_owned(),
@@ -225,7 +188,6 @@ impl PapertillingApp {
                 CardId::Lattice(r) => self.lattice_ref_item(r).map(lattice_subtitle).unwrap_or_default(),
                 CardId::Analysis(_) => "source for the lab".to_owned(),
                 CardId::Preset(i) => PRESETS.get(i).map(|p| mode_name(p.mode().label()).to_owned()).unwrap_or_default(),
-                CardId::Io(_) => "file dialog".to_owned(),
             };
         }
     }
@@ -297,7 +259,8 @@ impl PapertillingApp {
                     for t in SurfaceTargetUi::EVERY {
                         out.push(Card::new(CardId::Surface(t), capitalised(t.label())));
                     }
-                    out.extend(self.wb_cards(WorkbenchView::S5Curved2d, 3..=4));
+                    // Row 3 (Surfaces & nets: papercraft/Dini/Kuen) is hidden; row 4 is Orbifolds & TG cells.
+                    out.extend(self.wb_cards(WorkbenchView::S5Curved2d, 4..=4));
                 }
                 if pill != 1 {
                     // C1: rows 0-1 (3D slabs, platycosms: embeddings on 3D manifolds) are hidden, rows 2-5 shown
@@ -315,27 +278,21 @@ impl PapertillingApp {
                     }
                 }
                 if matches!(pill, 0 | 2) {
-                    out.push(Card::new(CardId::Combine, "Combine, Fuse & Move"));
+                    out.push(Card::new(CardId::Combine, "Place & fuse defects"));
                 }
                 if matches!(pill, 0 | 3) {
                     out.extend(self.wb_cards(WorkbenchView::S2Defects, 0..=4));
                 }
                 if matches!(pill, 0 | 4) {
-                    out.extend(self.wb_cards(WorkbenchView::S3Detect, 0..=3));
+                    // Rows 2-3 (Elastic & Stroh, Motion GIF) are hidden; rows 0-1 shown.
+                    out.extend(self.wb_cards(WorkbenchView::S3Detect, 0..=1));
                 }
             }
             // C1: Analysis is postponed; the realm is hidden and lists no cards
             Realm::AnalysisLab => {}
             Realm::PresetsIo => {
-                if pill != 2 {
-                    for (i, p) in PRESETS.iter().enumerate().filter(|(_, p)| p.shown()) {
-                        out.push(Card::new(CardId::Preset(i), p.name));
-                    }
-                }
-                if pill != 1 {
-                    for a in IoAction::ALL {
-                        out.push(Card::new(CardId::Io(a), a.title()));
-                    }
+                for (i, p) in PRESETS.iter().enumerate().filter(|(_, p)| p.shown()) {
+                    out.push(Card::new(CardId::Preset(i), p.name));
                 }
             }
         }

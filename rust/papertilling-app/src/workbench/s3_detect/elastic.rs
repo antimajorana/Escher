@@ -1,9 +1,9 @@
-//! "Elastic & Stroh": homogenised GSV moduli of the cell (Cauchy-Born with Born-Huang relaxation), their symmetry
-//! class, the Barnett-Lothe tensor, and the anisotropic Stroh field of a straight dislocation sampled on a grid round
-//! the selected defect (or a manual Burgers vector).
+//! "Elastic & Stroh" (retained for unit tests): homogenised GSV moduli of the cell (Cauchy-Born with Born-Huang
+//! relaxation), their symmetry class, the Barnett-Lothe tensor, and the anisotropic Stroh field of a straight
+//! dislocation sampled on a grid round the selected defect (or a manual Burgers vector).
 
 use papertilling_core::defect_fields::gsv_stroh::Tensor4;
-use papertilling_core::defect_fields::{ElasticClass, barnett_lothe_tensor, cauchy_born_tensor, classify_elastic, dipole_prelog_coeff, stroh_dislocation_field};
+use papertilling_core::defect_fields::{ElasticClass, barnett_lothe_tensor, cauchy_born_tensor, classify_elastic, stroh_dislocation_field};
 
 use super::detect::{DetectOut, fmt_v, resolve};
 use super::fields::selected_burgers;
@@ -22,9 +22,6 @@ pub(crate) struct StrohGrid {
     pub(crate) n: usize,
     pub(crate) b: [f64; 2],
     pub(crate) sigma: Vec<f64>,
-    pub(crate) method: String,
-    pub(crate) log_coeff: [f64; 2],
-    pub(crate) traction: [f64; 2],
 }
 
 pub(crate) struct ElasticOut {
@@ -34,14 +31,11 @@ pub(crate) struct ElasticOut {
     pub(crate) c: Tensor4,
     pub(crate) class: ElasticClass,
     pub(crate) bl: [[f64; 2]; 2],
-    /// Where b came from (and, for a dipole, the chart caveat).
-    pub(crate) b_source: String,
-    pub(crate) prelog: Option<f64>,
     pub(crate) field: Result<StrohGrid, String>,
 }
 
 /// FS/RH Burgers vector fed to the Stroh field (whose displacement jumps by `+b` counter-clockwise) and its centre.
-fn burgers_for_field(src: &Source, set: &Settings, det: &DetectOut, sel: usize) -> Result<([f64; 2], [f64; 2], String), String> {
+fn burgers_for_field(src: &Source, set: &Settings, det: &DetectOut, sel: usize) -> Result<([f64; 2], [f64; 2]), String> {
     let defect = det.det.defects.get(sel);
     if set.manual_b {
         let [u, v] = set.manual_uv.map(f64::from);
@@ -50,15 +44,11 @@ fn burgers_for_field(src: &Source, set: &Settings, det: &DetectOut, sel: usize) 
         let n = src.pos.len() as f64;
         let centroid = [src.pos.iter().map(|p| p[0]).sum::<f64>() / n, src.pos.iter().map(|p| p[1]).sum::<f64>() / n];
         let c = defect.map_or(centroid, |d| d.centre);
-        return Ok((b, c, format!("manual b = {} a1 + {} a2 (FS/RH)", set.manual_uv[0], set.manual_uv[1])));
+        return Ok((b, c));
     }
     let b = selected_burgers(det, sel)?;
     let d = &det.det.defects[sel];
-    let mut why = format!("defect #{sel} ({}): FS/RH vector -b, b in the chart of its loop's first site", d.kind);
-    if d.kind != "dislocation" {
-        why.push_str("; this loop encloses a disclination pair, so that chart may be rotated against the far field");
-    }
-    Ok(([-b[0] + 0.0, -b[1] + 0.0], d.centre, why))
+    Ok(([-b[0] + 0.0, -b[1] + 0.0], d.centre))
 }
 
 pub(crate) fn build(src: &Source, set: &Settings, det: DetectOut) -> Result<ElasticOut, String> {
@@ -69,29 +59,22 @@ pub(crate) fn build(src: &Source, set: &Settings, det: DetectOut) -> Result<Elas
     let class = classify_elastic(&c);
     let bl = barnett_lothe_tensor(&c, N_QUAD);
     let selected = resolve(&det.det, set.selected);
-    let (field, b_source, prelog) = match burgers_for_field(src, set, &det, selected) {
-        Ok((b, centre, why)) => {
-            let half = set.extent * det.lmax;
-            let n = set.grid;
-            let h = 2.0 * half / n as f64;
-            // cell centres: with n even no centre sits on the line (the field is singular there)
-            let rel: Vec<[f64; 2]> =
-                (0..n * n).map(|k| [-half + (k % n) as f64 * h + 0.5 * h, -half + (k / n) as f64 * h + 0.5 * h]).collect();
-            let field = stroh_dislocation_field(&c, b, &rel).map(|f| StrohGrid {
-                centre,
-                half,
-                n,
-                b,
-                sigma: f.stress.iter().map(|s| s.iter().flatten().map(|x| x * x).sum::<f64>().sqrt()).collect(),
-                method: f.method.clone(),
-                log_coeff: f.log_coeff,
-                traction: f.traction,
-            });
-            (field, why, Some(dipole_prelog_coeff(&c, b, N_QUAD)))
-        }
-        Err(e) => (Err(e.clone()), e, None),
-    };
-    Ok(ElasticOut { det, selected, c, class, bl, b_source, prelog, field })
+    let field = burgers_for_field(src, set, &det, selected).and_then(|(b, centre)| {
+        let half = set.extent * det.lmax;
+        let n = set.grid;
+        let h = 2.0 * half / n as f64;
+        // cell centres: with n even no centre sits on the line (the field is singular there)
+        let rel: Vec<[f64; 2]> =
+            (0..n * n).map(|k| [-half + (k % n) as f64 * h + 0.5 * h, -half + (k / n) as f64 * h + 0.5 * h]).collect();
+        stroh_dislocation_field(&c, b, &rel).map(|f| StrohGrid {
+            centre,
+            half,
+            n,
+            b,
+            sigma: f.stress.iter().map(|s| s.iter().flatten().map(|x| x * x).sum::<f64>().sqrt()).collect(),
+        })
+    });
+    Ok(ElasticOut { det, selected, c, class, bl, field })
 }
 
 /// Stress magnitude cells (log colour scale, clamped to the 2-98 % range) under the crystal and the defect loops.
@@ -124,76 +107,4 @@ pub(crate) fn scene(o: &ElasticOut) -> Scene2D {
         primitives.bbox = ([a[0] as f32, a[1] as f32], [b[0] as f32, b[1] as f32]);
     }
     with_lines(s, loops)
-}
-
-fn class_name(c: ElasticClass) -> &'static str {
-    match c {
-        ElasticClass::Isotropic => "isotropic",
-        ElasticClass::SquareCubic => "square (4-fold)",
-        ElasticClass::Orthotropic => "orthotropic (mirror line)",
-        ElasticClass::Monoclinic => "monoclinic (no mirror)",
-    }
-}
-
-pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &ElasticOut) {
-    let c = &o.c;
-    ui.label(
-        "[COMPUTATIONAL EVIDENCE] GSV bond-model moduli, Cauchy-Born with Born-Huang internal relaxation (finite bond sums; \
-         the relaxation of a non-Bravais cell goes through a floating-point pseudoinverse):",
-    );
-    egui::Grid::new("wb_s3_voigt").striped(true).show(ui, |ui| {
-        let v = [
-            ("C11", c[0][0][0][0]),
-            ("C22", c[1][1][1][1]),
-            ("C12", c[0][0][1][1]),
-            ("C66", c[0][1][0][1]),
-            ("C16", c[0][0][0][1]),
-            ("C26", c[1][1][0][1]),
-        ];
-        for (k, (n, x)) in v.iter().enumerate() {
-            ui.label(format!("{n} = {x:.5}"));
-            if k % 3 == 2 {
-                ui.end_row();
-            }
-        }
-    });
-    ui.label(format!("[COMPUTATIONAL EVIDENCE] symmetry class from angular harmonics (tolerance): {}", class_name(o.class)));
-    ui.label(format!(
-        "[COMPUTATIONAL EVIDENCE] Barnett-Lothe B ({N_QUAD}-node angular mean): [[{:.5}, {:.5}], [{:.5}, {:.5}]]",
-        o.bl[0][0], o.bl[0][1], o.bl[1][0], o.bl[1][1]
-    ));
-    if o.class == ElasticClass::Isotropic {
-        let (lam, mu) = (c[0][0][1][1], c[0][1][0][1]);
-        let want = 2.0 * mu * (lam + mu) / (lam + 2.0 * mu);
-        let dev = (o.bl[0][0] - want).abs().max((o.bl[1][1] - want).abs()).max(o.bl[0][1].abs());
-        ui.label(format!("[PROVED] isotropic closed form B = 2μ(λ+μ)/(λ+2μ) I = {want:.5} I (Hirth & Lothe 1982 ch. 3); deviation {dev:.1e}"));
-    }
-    ui.small("Energy per length of one dislocation: b·B·b ln(R/r0) / (4π).");
-    ui.separator();
-    ui.label(format!("Burgers vector: {}", o.b_source));
-    if let Some(k) = o.prelog {
-        ui.label(format!(
-            "Dipole prelogarithmic slope b·B·b / (2π) = {k:.5} (energy per length of a ±b dipole at separation d: this x ln(d/r0); \
-             one dislocation has half of it, as above)"
-        ));
-    }
-    match &o.field {
-        Ok(g) => {
-            ui.label(format!(
-                "[COMPUTATIONAL EVIDENCE] {} on {} x {} cell centres, window ±{:.3} round {}",
-                g.method,
-                g.n,
-                g.n,
-                g.half,
-                fmt_v(g.centre)
-            ));
-            ui.label(format!("ln r coefficient c = {}, radial-line traction T = {}", fmt_v(g.log_coeff), fmt_v(g.traction)));
-            let mx = g.sigma.iter().copied().fold(0.0, f64::max);
-            ui.label(format!("max |σ| on the grid {mx:.3e} (it grows as 1/r towards the line)"));
-            ui.small("Source: Barnett & Lothe (1973); Hirth & Lothe (1982) ch. 13. Displacement jumps by +b counter-clockwise.");
-        }
-        Err(e) => {
-            ui.label(format!("Stroh field: {e}"));
-        }
-    }
 }

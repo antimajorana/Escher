@@ -259,7 +259,7 @@ fn refusals_carry_reasons() {
 
 #[test]
 fn s3_panel_state_survives_json_roundtrip() {
-    let mut p = super::Panel { sub: S3Sub::Elastic, ..Default::default() };
+    let mut p = super::Panel { sub: S3Sub::Fields, ..Default::default() };
     p.set = Settings { own_bonds: true, clearance: 2, field: FieldKind::Vitek, grid: 20, manual_b: true, manual_uv: [1, -1], gif_px: 200, ..Default::default() };
     let v = p.save();
     let back: serde_json::Value = serde_json::from_str(&serde_json::to_string(&v).unwrap()).unwrap();
@@ -267,10 +267,15 @@ fn s3_panel_state_survives_json_roundtrip() {
     let mut notes = Vec::new();
     q.restore(&back, &mut notes);
     assert!(notes.is_empty(), "{notes:?}");
-    assert_eq!((q.sub, &q.set), (S3Sub::Elastic, &p.set));
+    assert_eq!((q.sub, &q.set), (S3Sub::Fields, &p.set));
     q.restore(&serde_json::json!({"sub": "Nope", "settings": {"grid": 99, "clearance": 50, "cutoff_rel": "x", "gif_px": 5}}), &mut notes);
     assert_eq!(notes.len(), 1);
-    assert_eq!((q.sub, q.set.grid, q.set.clearance, q.set.gif_px), (S3Sub::Elastic, 80, 4, 64), "junk ignored, sizes clamped");
+    assert_eq!((q.sub, q.set.grid, q.set.clearance, q.set.gif_px), (S3Sub::Fields, 80, 4, 64), "junk ignored, sizes clamped");
+    for hidden in ["Elastic", "Gif"] {
+        q.sub = S3Sub::Fields;
+        q.restore(&serde_json::json!({"sub": hidden, "settings": {"field": "PsiN"}}), &mut notes);
+        assert_eq!((q.sub, q.set.field), (S3Sub::Detect, FieldKind::NyeFace), "hidden {hidden} and PsiN snap to defaults");
+    }
 }
 
 #[test]
@@ -281,14 +286,20 @@ fn s3_subrows_quarantine_clean() {
     h.run_steps(3);
     goto_defects_view(&mut h, DefectsView::DetectFields);
     wait_until(&mut h, "S3", |a| !a.workbench_busy() && !a.workbench.dirty);
-    for s in S3Sub::ALL.into_iter().chain([S3Sub::Detect]) {
+    for hidden in [S3Sub::Elastic, S3Sub::Gif] {
+        assert!(h.query_by_label(hidden.label()).is_none(), "{hidden:?} is hidden from UI");
+    }
+    assert!(h.query_all_by_label_contains("CNA bond signatures").next().is_none(), "CNA readout is hidden");
+    assert!(h.query_all_by_label_contains("Wigner-Seitz").next().is_none(), "Wigner-Seitz readout is hidden");
+    for s in S3Sub::SHOWN.into_iter().chain([S3Sub::Detect]) {
         h.get_by_label(s.label()).click();
         wait_until(&mut h, s.label(), |a| !a.workbench_busy() && !a.workbench.dirty);
         assert_eq!(h.state().workbench.s3.sub, s);
         assert!(h.state().workbench.s3.error().is_none(), "{s:?}: {:?}", h.state().workbench.s3.error());
         assert_no_forbidden_tokens(&h, s.label());
         if s == S3Sub::Fields {
-            for k in FieldKind::ALL {
+            assert!(h.query_all_by_label_contains("Mean |ψ_").next().is_none(), "|ψ_n| readout is hidden");
+            for k in FieldKind::SHOWN {
                 h.state_mut().workbench.s3.set.field = k;
                 h.state_mut().workbench.dirty = true;
                 h.run_steps(2);

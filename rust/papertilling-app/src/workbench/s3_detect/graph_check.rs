@@ -9,14 +9,18 @@
 //!   always holds: if the common neighbours of bond (i, j) contained a site c bonded to three others x, y, z, then
 //!   {i, j, c} and {x, y, z} would span K_{3,3}; a cycle among them plus i and j contracts to K_5.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::HashSet;
 
+#[cfg(test)]
 use papertilling_core::defect_fields::{BondGraph, CnaSignature, cna_2d};
 
 /// Relative tolerance of the crossing test (orientations below `REL_TOL * scale^2` count as collinear).
 pub(crate) const REL_TOL: f64 = 1e-9;
 
 /// CNA signature counts, most frequent first.
+#[cfg(test)]
 pub(crate) type CnaCounts = Vec<(CnaSignature, usize)>;
 
 fn sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
@@ -122,6 +126,7 @@ pub(crate) fn check_plane(pos: &[[f64; 2]], edges: &[(usize, usize)]) -> Result<
 }
 
 /// CNA signature counts (most frequent first), or the reason the longest-chain search was not run.
+#[cfg(test)]
 pub(crate) fn cna_histogram(g: &BondGraph) -> Result<CnaCounts, String> {
     let sets: Vec<HashSet<usize>> = g.nbrs.iter().map(|l| l.iter().copied().collect()).collect();
     for &(i, j) in &g.edges {

@@ -1,9 +1,8 @@
 //! "Strain / Nye": per-site least-squares strain from the builder's reference positions, the discrete Nye tensor per
-//! face with its telescoping total, Vitek differential displacements for the selected defect's Burgers vector, and the
-//! bond-orientational order |ψ_n|.
+//! face with its telescoping total, and Vitek differential displacements for the selected defect's Burgers vector.
 
 use papertilling_core::defect_fields::strain_vitek_nye::VitekArrow;
-use papertilling_core::defect_fields::{BondGraph, LocalStrain, NyeField, local_deformation_and_strain, nye_tensor, psi_n, vitek_differential};
+use papertilling_core::defect_fields::{LocalStrain, NyeField, local_deformation_and_strain, nye_tensor, vitek_differential};
 use papertilling_core::types::Frame2D;
 
 use super::detect::{DetectOut, fmt_v, loop_lines, ref_lattice, resolve};
@@ -24,8 +23,6 @@ pub(crate) struct FieldsOut {
     pub(crate) max_u: f64,
     pub(crate) nye: Result<NyeField, String>,
     pub(crate) vitek: Result<(Vec<VitekArrow>, [f64; 2]), String>,
-    pub(crate) psi: Vec<f64>,
-    pub(crate) psi_n: u32,
 }
 
 /// The selected defect's Burgers vector (cell frame, chart of `loop_path[0]`), refused with the defect's reason.
@@ -70,9 +67,7 @@ pub(crate) fn build(src: &Source, set: &Settings, det: DetectOut) -> Result<Fiel
         }
         vitek_differential(&src.ref_pos, &src.pos, &det.det.edges, b).map(|a| (a, b))
     });
-    let g = BondGraph::from_edges(&src.pos, &det.det.edges);
-    let psi = psi_n(&g, set.psi_n).iter().map(|z| z[0].hypot(z[1])).collect();
-    Ok(FieldsOut { det, selected, strain, strain_bonds: (kept.len(), cut.len()), max_u, nye, vitek, psi, psi_n: set.psi_n })
+    Ok(FieldsOut { det, selected, strain, strain_bonds: (kept.len(), cut.len()), max_u, nye, vitek })
 }
 
 /// The strain painted and summarised per site: Green-Lagrange `E = (F^T F - I) / 2`, which is zero under a rigid
@@ -143,12 +138,7 @@ pub(crate) fn scene(o: &FieldsOut, set: &Settings) -> Scene2D {
             site_scene(o, &vals, &format!("{} (Green-Lagrange E = (F^T F - I)/2)", set.field.label()))
         }
         FieldKind::Vitek => vitek_scene(o),
-        FieldKind::PsiN => {
-            let vals: Vec<f64> = o.psi.iter().map(|v| 1.0 - v).collect();
-            let rgba: Vec<[u8; 4]> = vals.iter().map(|&v| heat_rgba(v, -1.0, 1.0)).collect();
-            let note = format!("1 - |ψ_{}| per site: white = perfect order, red = disorder", o.psi_n);
-            tint_sites(vector_scene(pos, &o.det.det.edges, &[], |_| [0, 0, 0, 0], SCENE_TITLE, &note), &rgba)
-        }
+        FieldKind::PsiN => vector_scene(pos, &o.det.det.edges, &[], |_| [0, 0, 0, 0], SCENE_TITLE, ""),
     };
     with_lines(s, loops)
 }
@@ -250,7 +240,5 @@ pub(crate) fn show_inspector(ui: &mut egui::Ui, o: &FieldsOut, set: &Settings) {
             ui.label(format!("Vitek map: {e}"));
         }
     }
-    let mean = if o.psi.is_empty() { 0.0 } else { o.psi.iter().sum::<f64>() / o.psi.len() as f64 };
-    ui.label(format!("Mean |ψ_{}| = {mean:.4} (1 exactly on sites whose bond angles agree mod 360°/{})", o.psi_n, o.psi_n));
-    ui.small("Sources: Vitek, Perrin & Bowen (1970) differential displacement maps; Halperin & Nelson (1978) ψ_6.");
+    ui.small("Source: Vitek, Perrin & Bowen (1970) differential displacement maps.");
 }
