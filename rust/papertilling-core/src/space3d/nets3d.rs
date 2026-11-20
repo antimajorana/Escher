@@ -208,65 +208,10 @@ pub fn build_net_3d(net: CanonicalNet3d, defect: LineDefect3d) -> Net3dPatch {
     }
 }
 
-/// Build a 3D slab patch for any of the 80 layer groups (`num = 1..=80`).
+/// Build a 3D slab patch for any of the 80 layer groups (`num = 1..=80`): a thin wrapper over
+/// [`super::layer_slab::default_slab_patch`] (exact-group sites, shell-rule bonds, grown in-plane), kept
+/// until WP-U4 moves the app to `layer_slab` (C1 WP-L1).
 pub fn build_layer_slab_patch(num: u8) -> Result<Net3dPatch, String> {
-    let e = layer_group_entry(num)?;
-    let (a1, a2): ([f64; 2], [f64; 2]) = match e.system.as_str() {
-        "oblique" => ([1.0, 0.0], [0.22, 1.24]),
-        "rectangular" => ([1.0, 0.0], [0.0, 1.32]),
-        "square" => ([1.0, 0.0], [0.0, 1.0]),
-        _ => ([1.0, 0.0], [-0.5, 0.8660254]),
-    };
-    let seed = [0.17_f64, 0.29, 0.18];
-    let mut cell_pts: Vec<[f64; 3]> = Vec::new();
-    for op in &e.ops {
-        let fx = (op.r[0][0] as f64 * seed[0] + op.r[0][1] as f64 * seed[1] + op.r[0][2] as f64 * seed[2]
-            + (op.t2[0][0] as f64) / (op.t2[0][1] as f64))
-            .rem_euclid(1.0);
-        let fy = (op.r[1][0] as f64 * seed[0] + op.r[1][1] as f64 * seed[1] + op.r[1][2] as f64 * seed[2]
-            + (op.t2[1][0] as f64) / (op.t2[1][1] as f64))
-            .rem_euclid(1.0);
-        let fz = op.r[2][0] as f64 * seed[0] + op.r[2][1] as f64 * seed[1] + op.r[2][2] as f64 * seed[2];
-        let shifts: &[[f64; 2]] = if e.centred { &[[0.0, 0.0], [0.5, 0.5]] } else { &[[0.0, 0.0]] };
-        for &[sx, sy] in shifts {
-            let p_c = [(fx + sx).rem_euclid(1.0), (fy + sy).rem_euclid(1.0), fz];
-            if !cell_pts.iter().any(|&p| (p[0] - p_c[0]).hypot(p[1] - p_c[1]) < 1e-3 && (p[2] - p_c[2]).abs() < 1e-3) {
-                cell_pts.push(p_c);
-            }
-        }
-    }
-    let mut positions = Vec::new();
-    let mut site_kinds = Vec::new();
-    for ix in -1_i32..=0 {
-        for iy in -1_i32..=0 {
-            for &p in &cell_pts {
-                let fx = p[0] + ix as f64;
-                let fy = p[1] + iy as f64;
-                positions.push([fx * a1[0] + fy * a2[0], fx * a1[1] + fy * a2[1], p[2]]);
-                site_kinds.push(u8::from(p[2] < 0.0));
-            }
-        }
-    }
-    let mut bonds = Vec::new();
-    for i in 0..positions.len() {
-        for j in (i + 1)..positions.len() {
-            let d = ((positions[j][0] - positions[i][0]).powi(2)
-                + (positions[j][1] - positions[i][1]).powi(2)
-                + (positions[j][2] - positions[i][2]).powi(2))
-            .sqrt();
-            if d > 0.05 && d < 0.88 {
-                bonds.push((i, j, 0_u8));
-            }
-        }
-    }
-    Ok(Net3dPatch {
-        name: format!("Layer #{} {} ({})", e.number, e.symbol, e.pointgroup),
-        space_group_num: u16::from(e.number),
-        defect_label: format!("System: {}, |P|={}", e.system, e.point_order),
-        positions,
-        bonds,
-        site_kinds,
-        defect_axis: None,
-        info: format!("Layer #{} {}: {} atoms in 2x2 slab", e.number, e.symbol, cell_pts.len() * 4),
-    })
+    layer_group_entry(num)?;
+    super::layer_slab::default_slab_patch(num)
 }
