@@ -108,7 +108,7 @@ impl PapertillingApp {
                 if sub != AtlasSubTab::HyperbolicH2 {
                     self.atlas.last_pristine_3d_subtab = sub;
                 }
-                if sub != AtlasSubTab::Layers80 {
+                if crate::atlas_tab::AtlasTabState::DEFECT_SUBTABS.contains(&sub) {
                     self.atlas.last_defect_subtab = sub;
                 }
                 self.atlas.dirty = true;

@@ -103,7 +103,7 @@ impl WorkbenchView {
         match self {
             Self::S2Defects => "Defects Forge › point defects, Stone-Wales, grain boundaries",
             Self::S3Detect => "Defects Forge › detection and elastic fields",
-            Self::S4Flat3d => "Manifolds › flat 3D slabs, tubes, flakes, platycosms",
+            Self::S4Flat3d => "Manifolds › nanotubes, nanoribbons, flakes, torsion-free groups",
             Self::S5Curved2d => "Geometries › {p,q} tilings on S², E² and H²",
             Self::S6Honeycombs => "Geometries › 3D honeycombs, TPMS and Dirichlet cells",
         }

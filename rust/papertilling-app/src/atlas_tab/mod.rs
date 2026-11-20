@@ -77,10 +77,9 @@ impl AtlasTabState {
         AtlasSubTab::Layers80,
         AtlasSubTab::SpaceGroups3D,
     ];
-    pub const DEFECT_SUBTABS: [AtlasSubTab; 3] = [
-        AtlasSubTab::SpaceGroups3D,
-        AtlasSubTab::HyperbolicH2,
+    pub const DEFECT_SUBTABS: [AtlasSubTab; 2] = [
         AtlasSubTab::Subperiodic,
+        AtlasSubTab::HyperbolicH2,
     ];
 
     pub fn new() -> Self {
@@ -127,7 +126,7 @@ impl AtlasTabState {
                 self.hyperbolic.wedge_delta = -1;
             }
         }
-        if from_outside || self.sub_tab == AtlasSubTab::Layers80 {
+        if from_outside || !Self::DEFECT_SUBTABS.contains(&self.sub_tab) {
             self.sub_tab = self.last_defect_subtab;
             self.dirty = true;
         }
@@ -182,7 +181,7 @@ impl AtlasTabState {
         self.space3d.pristine_only = self.pristine_only;
         self.hyperbolic.pristine_only = self.pristine_only;
         let title = if !self.pristine_only {
-            "3D, Hyperbolic H² & Subperiodic Defects"
+            "Subperiodic (0D/1D) & Hyperbolic H² Defects"
         } else if self.sub_tab == AtlasSubTab::HyperbolicH2 && offered_tabs.len() <= 1 {
             "Non-Euclidean Hyperbolic H² Tilings"
         } else {

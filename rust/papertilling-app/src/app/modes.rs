@@ -84,7 +84,7 @@ impl LatticesView {
             Self::ThreeDAndSubperiodic => "3D & Subperiodic",
             Self::NonEuclidean => "Non-Euclidean",
             Self::Manifolds => "Manifolds & Surfaces",
-            Self::Flat3D => "Flat 3D: Slabs, Tubes, Flakes",
+            Self::Flat3D => "Flat 3D: Tubes, Ribbons, Flakes",
             Self::Curved2D => "{p,q} on S² / E² / H²",
             Self::Honeycombs3D => "Honeycombs & TPMS",
         }
@@ -122,7 +122,7 @@ impl DefectsView {
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue2D => "Catalogue (2D)",
-            Self::AtlasDefects => "3D / H² / 0D–1D Defects",
+            Self::AtlasDefects => "0D–1D & H² Defects",
             Self::CombineAndFuse => "Combine, Fuse & Move",
             Self::PointAndBoundary => "Point, Stone-Wales & GB",
             Self::DetectFields => "Detect & Fields",

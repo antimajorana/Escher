@@ -310,7 +310,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
 
     // Workbench Lattices views (stage S4..S6 panels).
     for (lbl, v) in [
-        ("Flat 3D: Slabs, Tubes, Flakes", LatticesView::Flat3D),
+        ("Flat 3D: Tubes, Ribbons, Flakes", LatticesView::Flat3D),
         ("{p,q} on S² / E² / H²", LatticesView::Curved2D),
         ("Honeycombs & TPMS", LatticesView::Honeycombs3D),
     ] {
@@ -351,7 +351,8 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     equip_defects_view(&mut h, DefectsView::AtlasDefects);
     h.run_steps(2);
     assert!(!h.state().atlas.pristine_only);
-    for st_lbl in ["3D Line Defects", "H² Wedge Disclinations", "0D/1D Subperiodic Defects"] {
+    assert!(h.query_by_label("3D Line Defects").is_none(), "3D Line Defects sub-tab must stay hidden");
+    for st_lbl in ["0D/1D Subperiodic Defects", "H² Wedge Disclinations"] {
         h.get_by_label(st_lbl).click();
         h.run_steps(2);
         assert_no_forbidden_tokens(&h, st_lbl);
