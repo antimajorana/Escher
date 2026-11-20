@@ -106,14 +106,18 @@ def wrap_complement(A, c):
     return t - k * np.array(p, int)
 
 
-def wigner_seitz(v1, v2):
-    """Wigner-Seitz cell of span(v1, v2) (Cartesian): (vertices counter-clockwise, edges [(p, q, pair 1..3)], rectangle)."""
+def _obtuse_reduced(v1, v2):
+    """A Gauss-reduced basis w1, w2 of span(v1, v2) with w1 . w2 <= 0 (flat_bc.rs::obtuse_reduced)."""
     from ._glides import gauss_reduce
     v1, v2 = np.asarray(v1, float), np.asarray(v2, float)
     U = gauss_reduce(np.column_stack([v1, v2]))
     w1, w2 = U[0, 0] * v1 + U[1, 0] * v2, U[0, 1] * v1 + U[1, 1] * v2
-    if w1 @ w2 > 0:
-        w2 = -w2
+    return (w1, -w2) if w1 @ w2 > 0 else (w1, w2)
+
+
+def wigner_seitz(v1, v2):
+    """Wigner-Seitz cell of span(v1, v2) (Cartesian): (vertices counter-clockwise, edges [(p, q, pair 1..3)], rectangle)."""
+    w1, w2 = _obtuse_reduced(v1, v2)
     w12 = w1 + w2
     rect = abs(w1 @ w2) <= 1e-9 * max(w1 @ w1, w2 @ w2)
     facets = [(w1, 1), (w12, 3), (w2, 2), (-w1, 1), (-w12, 3), (-w2, 2)]
@@ -139,6 +143,7 @@ def torus_hex_domain(lattice, t1, t2):
     S = torus(L, tuple(t1), tuple(t2))
     v1, v2 = A @ np.array(t1, float), A @ np.array(t2, float)
     verts, edges, rect = wigner_seitz(v1, v2)
+    v1, v2 = _obtuse_reduced(v1, v2)                               # the +-2 window is safe only in a reduced basis
     Vinv = np.linalg.inv(np.column_stack([v1, v2]))
     uv = []
     for p in S.uv:

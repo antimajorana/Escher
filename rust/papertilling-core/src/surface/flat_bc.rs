@@ -127,15 +127,19 @@ fn circumcentre(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     [(ra * b[1] - rb * a[1]) / det, (a[0] * rb - b[0] * ra) / det]
 }
 
+/// A Gauss-reduced basis `w1, w2` of `span(v1, v2)` with `w1 . w2 <= 0` (so `w1, w2, -(w1 + w2)` is an obtuse
+/// superbase: the Wigner-Seitz facets are among `+-w1, +-w2, +-(w1 + w2)`).
+fn obtuse_reduced(v1: [f64; 2], v2: [f64; 2]) -> ([f64; 2], [f64; 2]) {
+    let u = gauss_reduce([[v1[0], v2[0]], [v1[1], v2[1]]]);
+    let cart = |k: usize| add2([v1[0] * u[0][k] as f64, v1[1] * u[0][k] as f64], [v2[0] * u[1][k] as f64, v2[1] * u[1][k] as f64]);
+    let (w1, w2) = (cart(0), cart(1));
+    if vec2_dot(w1, w2) > 0.0 { (w1, [-w2[0], -w2[1]]) } else { (w1, w2) }
+}
+
 /// Wigner-Seitz cell of the 2D lattice spanned by the Cartesian `v1, v2`: its vertices (counter-clockwise), the
 /// edges as `(p, q, pair label 1..3)`, and `true` when it is a rectangle (the third pair has length 0).
 pub fn wigner_seitz(v1: [f64; 2], v2: [f64; 2]) -> (Vec<[f64; 2]>, Vec<([f64; 2], [f64; 2], usize)>, bool) {
-    let u = gauss_reduce([[v1[0], v2[0]], [v1[1], v2[1]]]);
-    let cart = |k: usize| add2([v1[0] * u[0][k] as f64, v1[1] * u[0][k] as f64], [v2[0] * u[1][k] as f64, v2[1] * u[1][k] as f64]);
-    let (w1, mut w2) = (cart(0), cart(1));
-    if vec2_dot(w1, w2) > 0.0 {
-        w2 = [-w2[0], -w2[1]];
-    }
+    let (w1, w2) = obtuse_reduced(v1, v2);
     let w12 = add2(w1, w2);
     let rect = vec2_dot(w1, w2).abs() <= 1e-9 * vec2_dot(w1, w1).max(vec2_dot(w2, w2));
     // Facet normals in angular order (w1 and w2 are at least 90 degrees apart, w1 + w2 lies between them).
@@ -163,6 +167,9 @@ pub fn torus_hex_domain(cell: &Cell2D, t1: [i32; 2], t2: [i32; 2]) -> Result<(Su
     let geom = CellGeom::from_cell(cell)?;
     let (v1, v2) = (mat2_vec(geom.a, [t1[0] as f64, t1[1] as f64]), mat2_vec(geom.a, [t2[0] as f64, t2[1] as f64]));
     let (poly, edges, rect) = wigner_seitz(v1, v2);
+    // Nearest superlattice point by a +-2 window in the reduced basis (Babai rounding in a reduced basis is within one
+    // step of the nearest point, so the window cannot miss it; the caller's basis may be arbitrarily skewed).
+    let (v1, v2) = obtuse_reduced(v1, v2);
     let det = v1[0] * v2[1] - v1[1] * v2[0];
     let inv = [[v2[1] / det, -v2[0] / det], [-v1[1] / det, v1[0] / det]];
     let nearest = |p: [f64; 2]| -> [f64; 2] {

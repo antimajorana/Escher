@@ -154,7 +154,7 @@ pub fn pairs_refusal(pairs: u32, gluing: PairsGluing) -> Option<SurfaceError> {
              rectangular domains (user decision Q7)",
         )),
         (_, PairsGluing::Translations) => Some(SurfaceError::invalid(format!(
-            "{pairs} pairs are not offered: {flat_chi0}; and a convex polygon whose translates tile the plane is a parallelogram (2 pairs) or a centrally symmetric hexagon (3 pairs) [CITED: Fedorov 1885, as stated by Yang and Zong, arXiv:1711.02514; primary source not checked]"
+            "{pairs} pairs are not offered: {flat_chi0}; and a convex domain that tiles the plane by a lattice is a parallelogram (2 pairs) or a centrally symmetric hexagon (3 pairs) [CITED: Fedorov 1885, as stated by Yang and Zong, arXiv:1711.02514; primary source not checked]"
         ))),
         (_, _) => Some(SurfaceError::invalid(format!(
             "{pairs} pairs are not offered: {flat_chi0}; a gluing that gives any other closed surface carries the lattice only with cone points (a cone metric, never flat)"

@@ -191,7 +191,9 @@ fn run_poly_table(group: &str, cell: &Cell2D, projective: bool) -> SurfaceTableR
 /// the corners restricted to the centre classes matching `centre` (`None`: every usable class, as in the table).
 pub fn try_poly_for_table_with_centre(group: &str, cell: &Cell2D, projective: bool, centre: Option<&str>) -> SurfaceTableRow {
     let name = if projective { "projective plane" } else { "sphere" };
-    let facts = symmetry_facts(group);
+    // C1: facts and group from the cell (the label can miss the symmetry of a tuned special locus).
+    let facts = symmetry_facts_of_cell(group, cell);
+    let group = facts.group.as_str();
     if let Some(reason) = facts.impossible_reason(name) {
         return SurfaceTableRow::impossible(name, reason, "group", vec!["default".into()]);
     }

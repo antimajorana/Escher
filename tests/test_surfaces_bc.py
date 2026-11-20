@@ -146,6 +146,10 @@ def test_hex_domain_same_torus_on_wigner_seitz_cell():
         assert len(poly) == 6 and abs(area - abs(v1[0] * v2[1] - v1[1] * v2[0])) < 1e-9
         near = [a * v1 + b * v2 for a in range(-2, 3) for b in range(-2, 3) if (a, b) != (0, 0)]
         assert all(p @ p <= (p - t) @ (p - t) + 1e-9 for p in H.uv for t in near)
+    # skewed generators (3,0), (9,3) of the superlattice (3,0), (0,3): its six shortest vectors (hand) bound the hexagon
+    H = boundary_surface(tri, "torus_hex", t1=(3, 0), t2=(9, 3))
+    six = [A @ np.array(t, float) for t in [(3, 0), (0, 3), (3, 3), (-3, 0), (0, -3), (-3, -3)]]
+    assert len(H.sites) == 9 and all(p @ p <= (p - t) @ (p - t) + 1e-9 for p in H.uv for t in six)
     H = boundary_surface(pt.named("square"), "torus_hex", t1=(3, 0), t2=(0, 3))
     assert len(H.domain["edges"]) == 4 and any("3 pairs reduce to 2" in r for r in H.readout)
 

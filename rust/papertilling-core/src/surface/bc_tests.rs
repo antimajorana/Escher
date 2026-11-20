@@ -191,6 +191,18 @@ fn hex_domain_is_the_same_torus_on_the_wigner_seitz_cell() {
             assert!(mids.iter().any(|n| (n[0] + m[0]).abs() < 1e-9 && (n[1] + m[1]).abs() < 1e-9));
         }
     }
+    // skewed generators (3,0), (9,3) of the same superlattice as (3,0), (0,3): the six shortest vectors of that
+    // triangular superlattice are +-3 a1, +-3 a2, +-3 (a1 + a2) (hand), and they bound its Wigner-Seitz hexagon
+    let skew = build_boundary(&tri, &Bc::TorusHex { t1: [3, 0], t2: [9, 3] }).unwrap();
+    let six: Vec<[f64; 2]> = [[3, 0], [0, 3], [3, 3], [-3, 0], [0, -3], [-3, -3]]
+        .iter()
+        .map(|t: &[i32; 2]| [t[0] as f64 * tri.a1[0] + t[1] as f64 * tri.a2[0], t[0] as f64 * tri.a1[1] + t[1] as f64 * tri.a2[1]])
+        .collect();
+    assert_eq!((skew.mesh.sites.len(), skew.mesh.domain_polygons[0].len()), (9, 6));
+    for p in &skew.mesh.uv {
+        let r0 = p[0] * p[0] + p[1] * p[1];
+        assert!(six.iter().all(|t| r0 <= (p[0] - t[0]).powi(2) + (p[1] - t[1]).powi(2) + 1e-9), "skewed {p:?}");
+    }
     // square supercell (3,0),(0,3): its Wigner-Seitz cell is a square, so the 3 pairs reduce to 2
     let hex = build_boundary(&named("square"), &Bc::TorusHex { t1: [3, 0], t2: [0, 3] }).unwrap();
     assert_eq!(hex.mesh.domain_edges.len(), 4);
