@@ -213,7 +213,7 @@ pub fn offset_keeps_group(num: u8, s: [f64; 2], layers: u32) -> Result<bool, Str
         let h = (layers - 1) as f64 / 2.0;
         need.push(([[r[0][0], r[0][1]], [r[1][0], r[1][1]]], lam.map(|x| h * x)));
     }
-    if (layers - 1) % 2 == 0 {
+    if (layers - 1).is_multiple_of(2) {
         return Ok(true);
     }
     const DEN: u32 = 48;
