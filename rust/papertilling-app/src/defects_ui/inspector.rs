@@ -10,6 +10,7 @@ impl DefectsTabState {
         active_item: &CatalogueItemUi,
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
+        #[allow(unused_variables)] advanced: bool,
     ) {
         if self.initializing {
             return;

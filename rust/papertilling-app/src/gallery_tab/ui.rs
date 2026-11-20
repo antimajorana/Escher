@@ -52,7 +52,7 @@ impl GalleryTabState {
             } else {
                 String::from("Give this lattice a persistent custom name")
             };
-            if ui.small_button("✎ Rename").on_hover_text(tip).clicked() {
+            if ui.small_button("Rename").on_hover_text(tip).clicked() {
                 self.begin_rename();
             }
             if custom
@@ -72,10 +72,19 @@ impl GalleryTabState {
     /// Draw the full side panel (browsing + inspector) for legacy callers/tests.
     #[cfg(test)]
     pub fn show_side_panel(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
-        let lattice_changed = self.show_left_panel(ui, backend, canvas);
+        let lattice_changed = self.show_left_panel(ui, backend, canvas, true);
         ui.separator();
-        self.show_inspector_panel(ui, backend, canvas, &crate::theme::ThemeTokens::paper());
+        self.show_inspector_panel(ui, backend, canvas, &crate::theme::ThemeTokens::paper(), true);
         lattice_changed
+    }
+
+    /// Leave the Custom Wyckoff builder when `Advanced` is turned off; returns `true` when the lattice changed.
+    pub(crate) fn exit_custom_builder(&mut self, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
+        if self.mode == BrowseMode::CustomBuilder {
+            self.set_browse_mode(BrowseMode::ByGroup, backend, canvas)
+        } else {
+            false
+        }
     }
 
     /// Switch the browse mode as its left-rail tab does (also used by the Command Deck); true = the lattice changed.
@@ -97,15 +106,24 @@ impl GalleryTabState {
     }
 
     /// Left rail: browse mode tabs, group/catalogue/named tables, live search, and custom builder.
-    pub fn show_left_panel(&mut self, ui: &mut egui::Ui, backend: &AppBackend, canvas: &mut Canvas2D) -> bool {
+    pub fn show_left_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        backend: &AppBackend,
+        canvas: &mut Canvas2D,
+        #[allow(unused_variables)] advanced: bool,
+    ) -> bool {
         let mut lattice_changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.strong("Browse:");
             for (m, label) in [
-                (BrowseMode::ByGroup, "17 Groups"),
+                (BrowseMode::ByGroup, "By group (17)"),
                 (BrowseMode::Named21, "Named (21)"),
                 (BrowseMode::CustomBuilder, "+ Custom"),
             ] {
+                if m == BrowseMode::CustomBuilder && !advanced {
+                    continue;
+                }
                 if ui.selectable_label(self.mode == m, label).clicked() {
                     lattice_changed |= self.set_browse_mode(m, backend, canvas);
                 }

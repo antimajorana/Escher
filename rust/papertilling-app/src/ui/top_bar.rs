@@ -1,12 +1,12 @@
-//! The HUD "Export" menu (`crate::game_menu::hud_bar`) and its actions, which the Command Deck's Presets & I/O
-//! realm also calls. Every action skips its file dialog in `--smoke-test` mode.
+//! The HUD "Save figure" menu (`crate::game_menu::hud_bar`) and its actions. Every action skips its file dialog in
+//! `--smoke-test` mode.
 
 use crate::app::{NavTab, PapertillingApp};
 
 impl PapertillingApp {
     pub(crate) fn show_export_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Export", |ui| {
-            if ui.button("Export SVG / PNG...").clicked() && !self.smoke_test {
+        ui.menu_button("Save figure", |ui| {
+            if ui.button("Save 2D figure (SVG / PNG)...").clicked() && !self.smoke_test {
                 ui.close();
                 self.export_svg_png_action();
             }
@@ -17,37 +17,40 @@ impl PapertillingApp {
                         .on_hover_text(format!("PNG export at {s}x pixel density (2D: {tip}; 3D: the viewport's on-screen pixels x {s}), same composition"));
                 }
             });
-            if ui
-                .button("Export 3D PNG...")
-                .on_hover_text("The 3D view as on screen (caption, legend), at the PNG scale")
-                .clicked()
+            if (self.advanced || self.active_tab == NavTab::Surfaces)
+                && ui
+                    .button("Save 3D image (PNG)...")
+                    .on_hover_text("The 3D view as on screen (caption, legend), at the PNG scale")
+                    .clicked()
                 && !self.smoke_test
             {
                 ui.close();
                 self.export_3d_png_action(&ui.ctx().clone());
             }
-            if ui.button("Export .obj (3D)...").clicked() && !self.smoke_test {
-                ui.close();
-                self.export_obj_action();
-            }
-            ui.separator();
-            if ui
-                .button("Export .json (Notebook 3)...")
-                .on_hover_text("Export current Combine defect configuration (.json)")
-                .clicked()
-                && !self.smoke_test
-            {
-                ui.close();
-                self.export_json_action();
-            }
-            if ui
-                .button("Import .json...")
-                .on_hover_text("Import a Notebook 3 defect configuration (.json)")
-                .clicked()
-                && !self.smoke_test
-            {
-                ui.close();
-                self.import_json_action();
+            if self.advanced {
+                if ui.button("Export 3D mesh (.obj)...").clicked() && !self.smoke_test {
+                    ui.close();
+                    self.export_obj_action();
+                }
+                ui.separator();
+                if ui
+                    .button("Save defect config (.json)...")
+                    .on_hover_text("Save current defect configuration (.json)")
+                    .clicked()
+                    && !self.smoke_test
+                {
+                    ui.close();
+                    self.export_json_action();
+                }
+                if ui
+                    .button("Load defect config (.json)...")
+                    .on_hover_text("Load a saved defect configuration (.json)")
+                    .clicked()
+                    && !self.smoke_test
+                {
+                    ui.close();
+                    self.import_json_action();
+                }
             }
         });
     }

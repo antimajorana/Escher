@@ -165,6 +165,7 @@ impl CombineTabState {
         }
     }
 
+    #[cfg(test)]
     pub fn request_sheet3d_only(&mut self, gallery_item: &CatalogueItemUi) {
         if self.lattice_unavailable() {
             return;

@@ -31,6 +31,7 @@ impl PapertillingApp {
                             &self.backend,
                             &mut self.canvas2d,
                             &tokens,
+                            self.advanced,
                         );
                     }
                     NavTab::Surfaces => {
@@ -48,6 +49,7 @@ impl PapertillingApp {
                             &item,
                             &mut self.canvas2d,
                             &tokens,
+                            self.advanced,
                         );
                     }
                     NavTab::Combine => {
@@ -57,6 +59,7 @@ impl PapertillingApp {
                             &item,
                             &mut self.canvas2d,
                             &tokens,
+                            self.advanced,
                         );
                     }
                     NavTab::Atlas => {

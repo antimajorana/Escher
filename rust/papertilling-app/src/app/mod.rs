@@ -85,6 +85,8 @@ pub struct PapertillingApp {
     pub(crate) lattices_view: LatticesView,
     pub(crate) defects_view: DefectsView,
     pub(crate) active_tab: NavTab,
+    /// Top-bar `Advanced` toggle: off by default in interactive runs; enabled in `--smoke-test` so all 3D stages run.
+    pub(crate) advanced: bool,
     pub(crate) export_status: String,
     /// Pixel scale of a 2D PNG export (1, 2 or 4: 1024, 2048 or 4096 px a side), chosen in the Export menu.
     pub(crate) png_scale: u8,
@@ -180,6 +182,7 @@ impl PapertillingApp {
             lattices_view,
             defects_view,
             active_tab,
+            advanced: smoke_test,
             export_status: String::from("Ready (SVG / high-DPI PNG)"),
             png_scale: 2,
             offscreen_gpu: None,

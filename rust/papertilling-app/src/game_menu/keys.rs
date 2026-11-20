@@ -60,6 +60,12 @@ const NUM_KEYS: [Key; 7] = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num
 impl PapertillingApp {
     /// Deck keys; true = the frame's remaining global shortcuts are blocked (the deck is open or just opened).
     pub(crate) fn handle_deck_keys(&mut self, ctx: &egui::Context) -> bool {
+        if !self.advanced {
+            if self.deck.open {
+                self.deck_close();
+            }
+            return false;
+        }
         if self.switcher.open {
             return false;
         }

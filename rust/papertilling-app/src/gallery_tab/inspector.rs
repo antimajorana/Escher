@@ -17,6 +17,7 @@ impl GalleryTabState {
         backend: &AppBackend,
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
+        #[allow(unused_variables)] advanced: bool,
     ) {
         self.wyckoff_table(ui, backend, tokens);
         ui.separator();

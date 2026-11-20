@@ -23,7 +23,7 @@ use geom::{
 };
 pub use sheet::{
     DefectViewMode, Sheet3dColorMode, Sheet3dViewOpts, mesh_from_sheet3d_with_spectral,
-    sheet3d_caption, show_sheet3d_controls,
+    sheet3d_caption,
 };
 pub use sort::back_to_front_indices;
 pub use surface_elastic::{SurfaceColor3d, elastic_surface_gpu_mesh};

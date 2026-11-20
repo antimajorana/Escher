@@ -306,7 +306,7 @@ fn check_tab(tab: NavTab) {
             }
             _ => {}
         }
-        if want_tab != NavTab::Gallery {
+        if matches!(want_tab, NavTab::Surfaces | NavTab::Atlas | NavTab::Analysis) {
             assert!(app.view3d.mesh_data().vertex_count > 0, "{name}: empty 3D view");
         }
         assert!(app.canvas2d.counts().0 > 0, "{name}: empty 2D view");

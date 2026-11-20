@@ -66,6 +66,14 @@ pub fn ita_number(symbol: &str) -> Option<u8> {
         .and_then(|i| u8::try_from(i + 1).ok())
 }
 
+/// Wallpaper group symbol formatted with its Conway orbifold symbol, e.g. `"p6m (*632)"`.
+pub fn group_with_orbifold(symbol: &str) -> String {
+    match papertilling_core::noneuclidean2d::wallpaper_to_orbifold(symbol) {
+        Ok(orb) => format!("{symbol} ({orb})"),
+        Err(_) => symbol.to_string(),
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BrowseFilter {
     pub query: String,

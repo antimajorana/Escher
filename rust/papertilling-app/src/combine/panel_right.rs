@@ -26,9 +26,9 @@ impl CombineTabState {
         canvas: &mut Canvas2D,
     ) {
         let tokens = ThemeTokens::paper();
-        if self.show_left_panel(ui, gallery_item, backend, canvas, &tokens) {
+        if self.show_left_panel(ui, gallery_item, backend, canvas, &tokens, true) {
             ui.separator();
-            self.show_inspector_panel(ui, gallery_item, canvas, &tokens);
+            self.show_inspector_panel(ui, gallery_item, canvas, &tokens, true);
         }
     }
 
@@ -38,6 +38,7 @@ impl CombineTabState {
         gallery_item: &CatalogueItemUi,
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
+        #[allow(unused_variables)] advanced: bool,
     ) {
         if self.is_initializing() || self.init_error.is_some() {
             return;

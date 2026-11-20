@@ -170,7 +170,7 @@ fn card_grid_builds_previews_only_for_cards_on_screen() {
     for _ in 0..3 {
         let _ = ctx.run_ui(input(), |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let _ = st.show_left_panel(ui, &backend, &mut cv);
+                let _ = st.show_left_panel(ui, &backend, &mut cv, false);
             });
         });
     }

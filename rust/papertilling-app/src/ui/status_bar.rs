@@ -7,12 +7,7 @@ impl PapertillingApp {
                 ui.small(&self.export_status);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let (sites, bonds) = self.canvas2d.counts();
-                    let (prep, paint) = self.view3d.counters.counts();
-                    ui.small(format!(
-                        "2D: {sites} sites, {bonds} lines | GPU ({}) prep={prep} paint={paint} gen={}",
-                        self.backend_name,
-                        self.view3d.mesh_generation()
-                    ));
+                    ui.small(format!("{sites} sites, {bonds} bonds"));
                 });
             });
         });

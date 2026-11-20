@@ -12,7 +12,7 @@ use super::geom::{
 };
 use super::sheet_colors::{diverging_rgba, height_rgba, sequential_heat_rgba, strain_rgba};
 pub use super::sheet_modes::{
-    DefectViewMode, Sheet3dColorMode, Sheet3dViewOpts, sheet3d_caption, show_sheet3d_controls,
+    DefectViewMode, Sheet3dColorMode, Sheet3dViewOpts, sheet3d_caption,
 };
 use super::{GpuMeshData, Vertex3d, face_size_rgba};
 

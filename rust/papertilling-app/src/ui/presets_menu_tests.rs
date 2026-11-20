@@ -21,12 +21,12 @@ fn harness() -> Harness<'static, PapertillingApp> {
         .build_ui_state(|ui, app| { let _ = app.frame_ui(ui); }, app)
 }
 
-/// Close any open menu (Escape), check it is closed, then open the Presets menu by clicking its Top Bar button.
+/// Close any open menu (Escape), check it is closed, then open the Examples menu by clicking its Top Bar button.
 fn open_menu(h: &mut Harness<'static, PapertillingApp>, tab: NavTab) {
     h.key_press(egui::Key::Escape);
     h.run_steps(3);
     assert!(h.query_by_label(PRESETS[0].name).is_none(), "{tab:?}: the menu is closed before the click");
-    h.get_by_label("Presets").click();
+    h.get_by_label("Examples").click();
     h.run_steps(3);
 }
 
@@ -34,24 +34,36 @@ fn open_menu(h: &mut Harness<'static, PapertillingApp>, tab: NavTab) {
 fn presets_menu_lists_every_preset_on_every_tab_and_a_click_applies_it() {
     let mut h = harness();
     h.run_steps(2);
-    for tab in NavTab::ALL {
-        h.state_mut().switch_tab(tab);
+    for adv in [false, true] {
+        h.state_mut().set_advanced(adv);
         h.run_steps(2);
-        open_menu(&mut h, tab);
-        for mode in AppMode::SHOWN {
-            assert!(
-                h.get_all_by_label(mode.label()).count() >= 1,
-                "{tab:?}: menu lists mode heading '{}'",
-                mode.label()
-            );
-        }
-        // C1: the Analysis heading and the hidden presets (Analysis, 3D line defect) are not listed
-        assert!(h.query_by_label(AppMode::Analysis.label()).is_none(), "{tab:?}: no Analysis heading");
-        for p in PRESETS {
-            assert_eq!(h.query_by_label(p.name).is_some(), p.shown(), "{tab:?}: menu lists '{}' iff shown", p.name);
+        for tab in NavTab::ALL {
+            if !adv && !matches!(tab, NavTab::Gallery | NavTab::Surfaces | NavTab::Defects | NavTab::Combine) {
+                continue;
+            }
+            h.state_mut().switch_tab(tab);
+            h.run_steps(2);
+            open_menu(&mut h, tab);
+            for mode in AppMode::SHOWN {
+                assert!(
+                    h.get_all_by_label(mode.label()).count() >= 1,
+                    "{tab:?} adv={adv}: menu lists mode heading '{}'",
+                    mode.label()
+                );
+            }
+            assert!(h.query_by_label(AppMode::Analysis.label()).is_none(), "{tab:?}: no Analysis heading");
+            for p in PRESETS {
+                assert_eq!(
+                    h.query_by_label(p.name).is_some(),
+                    p.shown_for(adv),
+                    "{tab:?} adv={adv}: menu lists '{}' iff shown_for({adv})",
+                    p.name
+                );
+            }
         }
     }
 
+    h.state_mut().set_advanced(false);
     h.state_mut().switch_tab(NavTab::Gallery);
     h.run_steps(2);
     open_menu(&mut h, NavTab::Gallery);

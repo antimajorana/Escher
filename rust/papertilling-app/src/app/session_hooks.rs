@@ -186,6 +186,7 @@ impl PapertillingApp {
             analysis_view: Some(name_of(self.analysis.view_mode)),
             workbench: Some(self.workbench.capture()),
             deck: Some(self.deck.save()),
+            advanced: Some(self.advanced),
         }
     }
 

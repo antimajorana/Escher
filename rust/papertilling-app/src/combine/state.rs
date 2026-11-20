@@ -143,7 +143,7 @@ impl CombineTabState {
             cut_edit_anchor: None,
             #[cfg(test)]
             last_popover_rect: None,
-            view_mode: DefectViewMode::Split2D3D,
+            view_mode: DefectViewMode::Planar2D,
             sheet_opts,
             last_build,
             last_sheet3d,

@@ -49,6 +49,7 @@ impl Sheet3dColorMode {
         Self::SpectralCharge,
     ];
 
+    #[cfg(test)]
     pub const NON_SPECTRAL: [Self; 6] = [
         Self::FaceRingSize,
         Self::ElasticEnergyGsv,
@@ -57,19 +58,6 @@ impl Sheet3dColorMode {
         Self::GaussianCurvature,
         Self::HeightZ,
     ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::FaceRingSize => "Face ring size",
-            Self::ElasticEnergyGsv => "Elastic energy (stretch+shear+bend)",
-            Self::BondStrain => "Signed bond strain",
-            Self::BondShearStrain => "Bond-angle shear strain",
-            Self::GaussianCurvature => "Gaussian curvature Ω_v",
-            Self::HeightZ => "Height z",
-            Self::SpectralLdos => "LDOS |ψ|² (multiplet)",
-            Self::SpectralCharge => "Spectral charge δρ(μ)",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,55 +134,4 @@ pub fn sheet3d_caption(title: &str, sheet: &Sheet3DResult, opts: &Sheet3dViewOpt
         };
         format!("{title}{tag} | Δz/a={dz_a:.3}{flat} | max|ε|={max_eps:.2}%{color_note}")
     }
-}
-
-/// Compact inline UI strip for 3D sheet controls (shared by `Defects` and `Combine`).
-pub fn show_sheet3d_controls(
-    ui: &mut egui::Ui,
-    opts: &mut Sheet3dViewOpts,
-    id_salt: &str,
-) -> (bool, bool) {
-    let mut kappa_changed = false;
-    let mut visual_changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.small("κ_b:");
-        if ui
-            .add(
-                egui::Slider::new(&mut opts.kappa_b, 0.001..=1.5)
-                    .logarithmic(true)
-                    .custom_formatter(|x, _| format!("{x:.3}")),
-            )
-            .on_hover_text("Bending stiffness κ_b: small = sharp isometric cones/ridges; large = smooth stiff buckling")
-            .changed()
-        {
-            kappa_changed = true;
-        }
-        ui.small("Z×:");
-        if ui
-            .add(egui::Slider::new(&mut opts.z_exag, 1.0..=3.0).step_by(0.1).suffix("×"))
-            .on_hover_text("Vertical Z-exaggeration (1.0× = true metric geometry)")
-            .changed()
-        {
-            visual_changed = true;
-        }
-        ui.small("Color:");
-        egui::ComboBox::from_id_salt(id_salt)
-            .selected_text(opts.color_mode.label())
-            .show_ui(ui, |ui| {
-                for cm in Sheet3dColorMode::NON_SPECTRAL {
-                    if ui.selectable_value(&mut opts.color_mode, cm, cm.label()).changed() {
-                        visual_changed = true;
-                    }
-                }
-            });
-        if ui
-            .selectable_label(opts.show_flat_baseline, "Flat plane baseline")
-            .on_hover_text("Compare directly against the defect-free flat z = 0 plane of this lattice")
-            .clicked()
-        {
-            opts.show_flat_baseline = !opts.show_flat_baseline;
-            visual_changed = true;
-        }
-    });
-    (kappa_changed, visual_changed)
 }

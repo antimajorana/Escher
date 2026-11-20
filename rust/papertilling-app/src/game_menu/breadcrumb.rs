@@ -41,16 +41,16 @@ fn atlas_geometry(sub: AtlasSubTab) -> &'static str {
     }
 }
 
-/// Hover line shared by every segment: what a click does.
+/// Hover line shared by every segment in Advanced mode: what a click does.
 fn click_hint(realm: Realm) -> String {
-    format!("Click: open the Codex at realm {} {}", realm.number(), realm.title())
+    format!("Click: open All views at {} {}", realm.number(), realm.title())
 }
 
 impl PapertillingApp {
-    /// Text of the mode segment (`Lattices: 2D Plane`, `Defects: …`, `Analysis: …`).
+    /// Text of the mode segment (`Lattice: 2D Plane`, `Defects: …`, `Analysis: …`).
     pub(crate) fn mode_segment_text(&self) -> String {
         match self.active_mode {
-            AppMode::Lattices => format!("Lattices: {}", self.lattices_view.label()),
+            AppMode::Lattices => format!("Lattice: {}", self.lattices_view.label()),
             AppMode::Defects => format!("Defects: {}", self.defects_view.label()),
             AppMode::Analysis => format!("Analysis: {}", self.analysis.target.label()),
         }

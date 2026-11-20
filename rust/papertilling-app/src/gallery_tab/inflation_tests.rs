@@ -147,7 +147,7 @@ fn kittest_more_drawer_reveals_seed_rule_and_periodic_grid_toggle() {
         .build_ui_state(
             move |ui, e: &mut Env| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    e.st.show_inspector_panel(ui, &e.backend, &mut e.cv, &tokens);
+                    e.st.show_inspector_panel(ui, &e.backend, &mut e.cv, &tokens, false);
                 });
             },
             env,

@@ -48,9 +48,9 @@ impl AppMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Lattices => "1. Lattices",
-            Self::Defects => "2. Defects",
-            Self::Analysis => "3. Analysis",
+            Self::Lattices => "Lattice",
+            Self::Defects => "Defects",
+            Self::Analysis => "Analysis",
         }
     }
 }
@@ -77,6 +77,11 @@ impl LatticesView {
         Self::Curved2D,
         Self::Honeycombs3D,
     ];
+
+    /// Views reachable in the two-mode Default view (`Advanced` off).
+    pub fn is_default(self) -> bool {
+        matches!(self, Self::Plane2D | Self::Manifolds)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -119,6 +124,11 @@ impl DefectsView {
         Self::DetectFields,
     ];
 
+    /// Views reachable in the two-mode Default view (`Advanced` off).
+    pub fn is_default(self) -> bool {
+        matches!(self, Self::Catalogue2D | Self::CombineAndFuse)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue2D => "Catalogue (2D)",
@@ -140,6 +150,36 @@ impl DefectsView {
 }
 
 impl PapertillingApp {
+    /// Set the `Advanced` toggle; turning it off closes `All Views`, exits the Custom Wyckoff builder, and snaps any
+    /// Advanced-only view back to the corresponding Default view (`Plane2D` or `Catalogue2D`).
+    pub fn set_advanced(&mut self, on: bool) {
+        self.advanced = on;
+        if on {
+            return;
+        }
+        self.deck_close();
+        if self.gallery.exit_custom_builder(&self.backend, &mut self.canvas2d)
+            && self.active_tab != NavTab::Gallery
+        {
+            self.resync_active_tab_for_lattice();
+        }
+        if !self.lattices_view.is_default() {
+            self.lattices_view = LatticesView::Plane2D;
+            if self.active_mode == AppMode::Lattices {
+                self.select_lattices_view(LatticesView::Plane2D);
+            }
+        }
+        if !self.defects_view.is_default() {
+            self.defects_view = DefectsView::Catalogue2D;
+            if self.active_mode == AppMode::Defects {
+                self.select_defects_view(DefectsView::Catalogue2D);
+            }
+        }
+        if self.active_mode == AppMode::Analysis {
+            self.select_lattices_view(LatticesView::Plane2D);
+        }
+    }
+
     pub(crate) fn atlas_offered_tabs(&self) -> &'static [AtlasSubTab] {
         match (self.active_mode, self.lattices_view) {
             (AppMode::Lattices, LatticesView::NonEuclidean) => &[AtlasSubTab::HyperbolicH2],

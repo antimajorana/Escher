@@ -81,8 +81,8 @@ fn combine_undo_redo_delete_and_priority_ordered_escape_chain() {
     }
     h.run_steps(2);
 
-    // Open Presets menu: Escape #0 must close the popup WITHOUT touching popover_open, tool_mode, or selected_pin.
-    h.get_by_label("Presets").click();
+    // Open Examples menu: Escape #0 must close the popup WITHOUT touching popover_open, tool_mode, or selected_pin.
+    h.get_by_label("Examples").click();
     h.run_steps(3);
     assert!(h.query_by_label(PRESETS[0].name).is_some());
     h.key_press(Key::Escape);

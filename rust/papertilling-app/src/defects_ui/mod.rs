@@ -26,7 +26,7 @@ impl DefectsTabState {
         let tokens = ThemeTokens::paper();
         if self.show_left_panel(ui, active_item, backend, canvas, &tokens) {
             ui.separator();
-            self.show_inspector_panel(ui, active_item, canvas, &tokens);
+            self.show_inspector_panel(ui, active_item, canvas, &tokens, true);
         }
     }
 
@@ -41,22 +41,13 @@ impl DefectsTabState {
     ) {
         self.poll_worker(ui.ctx(), canvas);
         let busy = self.is_busy();
-        let (kc, vc) = show_defect_viewport_header(
-            ui,
-            &mut self.view_mode,
-            &mut self.sheet_opts,
-            busy,
-            &mut self.view3d_dirty,
-            "def_top_col",
-        );
-        if vc {
-            self.view3d_dirty = true;
-        }
-        if kc {
-            self.rebuild_sheet3d_only(active_item);
-        }
-        if self.view3d_dirty && self.view_mode.uses_3d() {
-            self.sync_view3d(view3d);
+        show_defect_viewport_header(ui, busy);
+        if self.view3d_dirty {
+            if self.view_mode.uses_3d() {
+                self.sync_view3d(view3d);
+            } else {
+                self.view3d_dirty = false;
+            }
         }
         ui.add_space(2.0);
 

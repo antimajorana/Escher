@@ -1,16 +1,20 @@
-//! "Presets" menu of the Top Bar (shown on every tab): the curated showcase presets, grouped by mode.
+//! "Examples" menu of the Top Bar (shown on every tab): the curated showcase presets, grouped by mode.
 
 use crate::app::{AppMode, PapertillingApp};
 use crate::presets::PRESETS;
 
 impl PapertillingApp {
     pub(crate) fn show_presets_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Presets", |ui| {
+        let adv = self.advanced;
+        ui.menu_button("Examples", |ui| {
             let mut picked = None;
             let mut first_section = true;
             for mode in AppMode::SHOWN {
-                let mut rows =
-                    PRESETS.iter().enumerate().filter(|(_, p)| p.shown() && p.mode() == mode).peekable();
+                let mut rows = PRESETS
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.shown_for(adv) && p.mode() == mode)
+                    .peekable();
                 if rows.peek().is_none() {
                     continue;
                 }
@@ -33,6 +37,6 @@ impl PapertillingApp {
             }
         })
         .response
-        .on_hover_text("Curated showcase configurations: lattice, mode and settings in one click");
+        .on_hover_text("Example lattices, surfaces, and defect configurations");
     }
 }

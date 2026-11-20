@@ -121,6 +121,7 @@ pub(crate) fn sample_state() -> SessionState {
         analysis_view: Some("Split2D3D".into()),
         workbench: Some(serde_json::json!({"view": "S5Curved2d"})),
         deck: Some(serde_json::json!({"realm": "Forge"})),
+        advanced: Some(true),
     }
 }
 

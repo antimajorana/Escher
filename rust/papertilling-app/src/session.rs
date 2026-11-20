@@ -116,6 +116,9 @@ pub struct SessionState {
     /// Command Deck: `{"realm": "<Realm>"}` (added in schema 3; optional, the deck always loads closed).
     #[serde(default, deserialize_with = "lenient")]
     pub deck: Option<serde_json::Value>,
+    /// Whether the `Advanced` toggle in the top bar is enabled (`None` in sessions written before simple-by-default).
+    #[serde(default, deserialize_with = "lenient")]
+    pub advanced: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -18,9 +18,12 @@ impl PapertillingApp {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| match self.active_tab {
                     NavTab::Gallery => {
-                        let _ = self
-                            .gallery
-                            .show_left_panel(ui, &self.backend, &mut self.canvas2d);
+                        let _ = self.gallery.show_left_panel(
+                            ui,
+                            &self.backend,
+                            &mut self.canvas2d,
+                            self.advanced,
+                        );
                     }
                     NavTab::Surfaces => {
                         let item = self.gallery.active_item().clone();
@@ -65,6 +68,7 @@ impl PapertillingApp {
                             &self.backend,
                             &mut self.canvas2d,
                             &tokens,
+                            self.advanced,
                         );
                     }
                     NavTab::Atlas => {

@@ -39,23 +39,14 @@ impl CombineTabState {
         });
 
         let busy = self.is_building();
-        let (kc, vc) = show_defect_viewport_header(
-            ui,
-            &mut self.view_mode,
-            &mut self.sheet_opts,
-            busy,
-            &mut self.view3d_dirty,
-            "comb_top_col",
-        );
-        if vc {
-            self.view3d_dirty = true;
-        }
-        if kc {
-            self.request_sheet3d_only(gallery_item);
-        }
+        show_defect_viewport_header(ui, busy);
         self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
-        if self.view3d_dirty && self.view_mode.uses_3d() {
-            self.sync_view3d(gallery_item, view3d);
+        if self.view3d_dirty {
+            if self.view_mode.uses_3d() {
+                self.sync_view3d(gallery_item, view3d);
+            } else {
+                self.view3d_dirty = false;
+            }
         }
         ui.add_space(2.0);
 

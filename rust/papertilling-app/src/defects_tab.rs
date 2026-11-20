@@ -112,7 +112,7 @@ impl DefectsTabState {
             radius,
             relaxed,
             draw_mode: Defect2dMode::RelaxedDrawing,
-            view_mode: DefectViewMode::Split2D3D,
+            view_mode: DefectViewMode::Planar2D,
             sheet_opts,
             inspectors: DefectInspectors::new(),
             growth: GrowthUi::default(),
@@ -252,6 +252,7 @@ impl DefectsTabState {
         canvas.set_scene(scene, reset_view);
     }
 
+    #[cfg(test)]
     pub fn rebuild_sheet3d_only(&mut self, item: &CatalogueItemUi) {
         let reuse = (!self.is_busy() && !self.initializing && !self.last_crystal.pos.is_empty()).then(|| {
             (self.catalogue.clone(), self.last_crystal.clone(), self.readout.clone())

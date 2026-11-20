@@ -193,6 +193,17 @@ impl PapertillingApp {
             self.deck.resume_saved_realm = false;
         }
         self.deck.open = false;
+        match st.advanced {
+            Some(on) => self.set_advanced(on),
+            None => {
+                // Legacy v1-v3 session written before `advanced`: keep Advanced on iff the restored view requires it.
+                self.advanced = match self.active_mode {
+                    AppMode::Lattices => !self.lattices_view.is_default(),
+                    AppMode::Defects => !self.defects_view.is_default(),
+                    AppMode::Analysis => false,
+                };
+            }
+        }
     }
 
     /// C1: a session saved in Analysis opens the Lattices 2D Plane, with a note (the internal

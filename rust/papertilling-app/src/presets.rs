@@ -85,14 +85,30 @@ pub struct Preset {
 }
 
 impl Preset {
-    /// Listed in the Presets menu and the deck. C1 hides the Analysis preset (Analysis is postponed) and the 3D
-    /// line-defect preset (hidden until a real cut-and-reglue exists); both stay in `PRESETS` at their indices.
+    /// Listed in the Examples menu and All Views when `Advanced` is on. C1 hides the Analysis preset (Analysis is
+    /// postponed) and the 3D line-defect preset (hidden until a real cut-and-reglue exists); both stay in `PRESETS`.
     pub fn shown(&self) -> bool {
         match self.settings {
             PresetSettings::Analysis { .. } => false,
             PresetSettings::Atlas(AtlasScene::SpaceGroup { defect, .. }) => defect == LineDefect3d::None,
             _ => true,
         }
+    }
+
+    /// True when the preset targets one of the two Default modes (`Gallery`, `Surfaces`, `Defects`, `Combine`).
+    pub fn is_default(&self) -> bool {
+        matches!(
+            self.settings,
+            PresetSettings::Gallery { .. }
+                | PresetSettings::Surfaces { .. }
+                | PresetSettings::Defects { .. }
+                | PresetSettings::Combine { .. }
+        )
+    }
+
+    /// Listed in the Examples menu for the current `advanced` setting.
+    pub fn shown_for(&self, advanced: bool) -> bool {
+        self.shown() && (advanced || self.is_default())
     }
 
     pub fn mode(&self) -> AppMode {
@@ -175,21 +191,21 @@ pub const PRESETS: &[Preset] = &[
     },
     Preset {
         name: "Edge dislocation, triangular lattice",
-        description: "Shortest Burgers vector (|b| = a) dislocation in the triangular lattice, relaxed, 2D + 3D sheet.",
+        description: "Shortest Burgers vector (|b| = a) dislocation in the triangular lattice, relaxed 2D patch.",
         lattice: named("triangular"),
-        settings: defect(DefectSubTab::Dislocations, 0, DefectViewMode::Split2D3D, Sheet3dColorMode::FaceRingSize),
+        settings: defect(DefectSubTab::Dislocations, 0, DefectViewMode::Planar2D, Sheet3dColorMode::FaceRingSize),
     },
     Preset {
         name: "Honeycomb +60 deg disclination",
-        description: "A single +60 deg wedge disclination at a hexagon centre (6-fold) of the honeycomb, 2D + 3D sheet.",
+        description: "A single +60 deg wedge disclination at a hexagon centre (6-fold) of the honeycomb.",
         lattice: named("honeycomb"),
-        settings: defect(DefectSubTab::Disclinations, 3, DefectViewMode::Split2D3D, Sheet3dColorMode::FaceRingSize),
+        settings: defect(DefectSubTab::Disclinations, 3, DefectViewMode::Planar2D, Sheet3dColorMode::FaceRingSize),
     },
     Preset {
         name: "Kagome twin wall Wb1",
         description: "The first twin domain wall (Wb1) of the kagome catalogue across the whole patch.",
         lattice: named("kagome"),
-        settings: defect(DefectSubTab::Walls, 0, DefectViewMode::Split2D3D, Sheet3dColorMode::FaceRingSize),
+        settings: defect(DefectSubTab::Walls, 0, DefectViewMode::Planar2D, Sheet3dColorMode::FaceRingSize),
     },
     Preset {
         name: "Analysis: -60 deg honeycomb eigenmodes",
@@ -209,13 +225,13 @@ pub const PRESETS: &[Preset] = &[
         name: "Combine: square dislocation dipole",
         description: "Two edge dislocations +b and -b three cells apart in the square lattice (net Burgers vector 0).",
         lattice: named("square"),
-        settings: PresetSettings::Combine { pins: CombinePins::DislocationDipole { cells: 3 }, view: DefectViewMode::Split2D3D },
+        settings: PresetSettings::Combine { pins: CombinePins::DislocationDipole { cells: 3 }, view: DefectViewMode::Planar2D },
     },
     Preset {
         name: "Combine: honeycomb 5-7 pair",
         description: "+60 deg and -60 deg disclinations at neighbouring hexagon centres: a 5-7 pair, i.e. a dislocation.",
         lattice: named("honeycomb"),
-        settings: PresetSettings::Combine { pins: CombinePins::NeighbourDisclinationPair, view: DefectViewMode::Split2D3D },
+        settings: PresetSettings::Combine { pins: CombinePins::NeighbourDisclinationPair, view: DefectViewMode::Planar2D },
     },
     Preset {
         name: "Atlas: rutile #136 screw dispiration",

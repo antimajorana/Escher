@@ -17,8 +17,8 @@ impl StudioTheme {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Paper => "Paper",
-            Self::Studio => "Studio",
+            Self::Paper => "Light",
+            Self::Studio => "Dark",
         }
     }
 

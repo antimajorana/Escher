@@ -32,7 +32,7 @@ fn app_harness(theme: StudioTheme) -> Harness<'static, PapertillingApp> {
 fn toggle_inspector_via_view_menu(harness: &mut Harness<'static, PapertillingApp>) {
     harness.get_by_label("View").click();
     harness.run_steps(2);
-    harness.get_by_label("Inspector (Ctrl+I)").click();
+    harness.get_by_label("Right panel (Ctrl+I)").click();
     harness.run_steps(2);
     if egui::Popup::is_any_open(&harness.ctx) {
         harness.key_press(egui::Key::Escape);
@@ -89,8 +89,9 @@ fn right_inspector_collapses_widens_center_and_still_polls_background_tabs() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert!(
-        harness.state().view3d.has_geometry(),
-        "3D mesh must still sync on Combine when Right Inspector is collapsed"
+        !harness.state().combine.last_build.crystal.pos.is_empty()
+            && harness.state().canvas2d.counts().0 > 0,
+        "2D crystal must still sync on Combine when Right Inspector is collapsed"
     );
 
     toggle_inspector_via_view_menu(&mut harness);
@@ -266,12 +267,12 @@ fn theme_toggle_updates_visuals_and_tokens_meet_wcag_contrast_across_all_painter
     assert_eq!(harness.state().theme, StudioTheme::Paper);
     assert!(!harness.ctx.style_of(harness.ctx.theme()).visuals.dark_mode);
 
-    harness.get_by_label("Theme: Paper").click();
+    harness.get_by_label("Theme: Light").click();
     harness.run();
     assert_eq!(harness.state().theme, StudioTheme::Studio);
     assert!(harness.ctx.style_of(harness.ctx.theme()).visuals.dark_mode);
 
-    harness.get_by_label("Theme: Studio").click();
+    harness.get_by_label("Theme: Dark").click();
     harness.run();
     assert_eq!(harness.state().theme, StudioTheme::Paper);
     assert!(!harness.ctx.style_of(harness.ctx.theme()).visuals.dark_mode);
@@ -328,7 +329,7 @@ fn export_menu_offers_the_png_scale_and_choosing_4x_sets_it() {
     let mut harness = app_harness(StudioTheme::Paper);
     harness.run();
     assert_eq!(harness.state().png_scale, 2, "default 2x (2048 px)");
-    harness.get_by_label("Export").click();
+    harness.get_by_label("Save figure").click();
     harness.run();
     let _ = harness.get_by_label("PNG scale:");
     for label in ["1x", "2x", "4x"] {
@@ -338,7 +339,7 @@ fn export_menu_offers_the_png_scale_and_choosing_4x_sets_it() {
     harness.run();
     assert_eq!(harness.state().png_scale, 4);
     if harness.query_by_label("1x").is_none() {
-        harness.get_by_label("Export").click();
+        harness.get_by_label("Save figure").click();
         harness.run();
     }
     harness.get_by_label("1x").click();

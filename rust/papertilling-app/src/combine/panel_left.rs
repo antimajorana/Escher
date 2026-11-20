@@ -12,6 +12,7 @@ impl CombineTabState {
         backend: &AppBackend,
         canvas: &mut Canvas2D,
         tokens: &ThemeTokens,
+        #[allow(unused_variables)] advanced: bool,
     ) -> bool {
         self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
         if self.is_initializing() {
