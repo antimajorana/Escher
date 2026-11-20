@@ -104,7 +104,9 @@ pub fn develop_face(crystal: &BuiltCrystal, walk: &[usize], base: usize) -> Opti
         p = add2(p, dm.apply_linear(e.vec));
         dm = dm.compose(&e.seam.unwrap_or(Isometry2::IDENTITY).inverse());
     }
-    Some(out)
+    let closed = (p[0] - out[0][0]).hypot(p[1] - out[0][1]) <= 1e-5
+        && crate::defect::cone_geometry::same_iso(&dm, &Isometry2::IDENTITY, 1e-5);
+    closed.then_some(out)
 }
 
 /// The boundary of a set of bounded faces, as one closed site loop in the face-walk direction (counter-clockwise in

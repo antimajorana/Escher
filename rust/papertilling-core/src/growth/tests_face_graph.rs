@@ -349,3 +349,31 @@ fn stone_wales_core_grows_like_the_bond_star_of_the_honeycomb() {
     assert_eq!(cg.complete_layers(), 6, "{:?}", cg.growth.stopped);
     assert_eq!(counts(&cg), (0..=5usize).map(|n| (3 * n + 4) * (n + 1)).collect::<Vec<_>>());
 }
+
+#[test]
+fn develop_face_rejects_unclosed_dislocation_core_and_defect_core_matches_surgery() {
+    // Hand: a 4-bond walk at ref_pos [(0,1),(0,0),(1,0),(1,1)] with bond vectors (0,-1),(1,0),(0,1),(0,1) and seam
+    // translation (-1,-1) on bond 3 visits the 4 corners of [0,1]^2 before landing at p_4 = (1,2) != (0,1) (Burgers
+    // vector b = (1,1)); develop_face must reject it rather than calling it an uncut unit square.
+    use crate::growth::face_graph::develop_face;
+    use crate::types::{DirectedBondData, Isometry2};
+    let mk = |to, vec, seam: Option<Isometry2>| DirectedBondData { to, vec, kind: 0, across: seam.is_some(), seam, ang: None, ghost_stub: None };
+    let seam = Some(Isometry2 { m: [[1.0, 0.0], [0.0, 1.0]], t: [-1.0, -1.0] });
+    let mut crystal = perfect_disk(&square(), [0.5, 0.5], 2.0);
+    crystal.ref_pos = vec![[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]];
+    crystal.pos = crystal.ref_pos.clone();
+    crystal.adj = vec![
+        vec![mk(1, [0.0, -1.0], None)],
+        vec![mk(2, [1.0, 0.0], None)],
+        vec![mk(3, [0.0, 1.0], None)],
+        vec![mk(0, [0.0, 1.0], seam)],
+    ];
+    for b in 0..4 {
+        assert!(develop_face(&crystal, &[0, 1, 2, 3], b).is_none(), "base {b} must fail closure");
+    }
+    // Multi-defect `at: None` at slot 1 on unit square sits at (0.371 + 3*1, 0.413) = (3.371, 0.413); mean with (10, 0) is (6.6855, 0.2065).
+    let specs = [DefectSpec::disclination(90.0, [10.0, 0.0]), DefectSpec::dislocation([1.0, 0.0], None)];
+    let core = crate::defect::defect_growth::defect_core_in_cell(&square(), &specs).unwrap();
+    assert!((core[0] - 6.6855).abs() < 1e-12 && (core[1] - 0.2065).abs() < 1e-12, "{core:?}");
+}
+
