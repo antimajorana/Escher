@@ -224,11 +224,17 @@ impl SubperiodicPanelState {
             (Scene2D::VectorScene { primitives: prim }, mesh, format!("0D Rosette {}", r.symbol))
         } else {
             let sym = FRIEZE_SYMBOLS[self.frieze_idx];
-            let patch = build_frieze_patch(sym, self.cells, self.topology, self.effective_frieze_defect()).unwrap();
+            let patch = match build_frieze_patch(sym, self.cells, self.topology, self.effective_frieze_defect()) {
+                Ok(p) => p,
+                Err(why) => return frieze_refused_scene(sym, &why),
+            };
+            // Edges across the glued seam are identifications in the flat domain, not segments.
             let lines: Vec<LinePrim> = patch
                 .edges
                 .iter()
-                .map(|&(u, v, ek)| LinePrim {
+                .enumerate()
+                .filter(|(i, _)| !patch.wrap_edges.contains(i))
+                .map(|(_, &(u, v, ek))| LinePrim {
                     a: [patch.pos2d[u][0] as f32, patch.pos2d[u][1] as f32],
                     b: [patch.pos2d[v][0] as f32, patch.pos2d[v][1] as f32],
                     color: match ek {
@@ -262,7 +268,10 @@ impl SubperiodicPanelState {
                 site_circle_indices: Vec::new(),
                 edge_line_indices: Vec::new(),
                 title: format!("1D Frieze {} — {:?}", patch.iucr_name, patch.topology),
-                note: format!("H²={}, Gᵃᵇ={}", patch.summary.h2_label, patch.summary.ab_full_label),
+                note: match &patch.picture_note {
+                    Some(pic) => format!("H²={}, Gᵃᵇ={} · {} · 3D: {pic}", patch.summary.h2_label, patch.summary.ab_full_label, patch.glue_note),
+                    None => format!("H²={}, Gᵃᵇ={} · {}", patch.summary.h2_label, patch.summary.ab_full_label, patch.glue_note),
+                },
                 bbox: compute_bbox(pts.into_iter()),
                 site_count: patch.pos2d.len(),
                 bond_count: patch.edges.len(),
@@ -275,4 +284,22 @@ impl SubperiodicPanelState {
             )
         }
     }
+}
+
+/// A refused frieze quotient (C1 WP-B2): an empty scene whose title carries the [PROVED] reason.
+fn frieze_refused_scene(sym: &str, why: &str) -> (Scene2D, GpuMeshData, String) {
+    let prim = ScenePrimitives {
+        polygons: Vec::new(),
+        lines: Vec::new(),
+        circles: Vec::new(),
+        labels: Vec::new(),
+        site_circle_indices: Vec::new(),
+        edge_line_indices: Vec::new(),
+        title: format!("1D Frieze {sym} — refused"),
+        note: why.to_string(),
+        bbox: ([-1.0, -1.0], [1.0, 1.0]),
+        site_count: 0,
+        bond_count: 0,
+    };
+    (Scene2D::VectorScene { primitives: prim }, GpuMeshData { radius: 1.0, ..Default::default() }, format!("1D Frieze {sym}: {why}"))
 }
