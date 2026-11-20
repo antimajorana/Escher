@@ -19,8 +19,10 @@ use crate::theme::ThemeTokens;
 use crate::workbench::{WbCtx, WbPanel, WbScenes};
 
 mod detect;
+#[cfg(test)]
 mod elastic;
 mod fields;
+#[cfg(test)]
 mod gif;
 mod graph_check;
 mod settings;
@@ -43,6 +45,12 @@ pub(crate) enum S3Sub {
 
 impl S3Sub {
     pub(crate) const ALL: [Self; 4] = [Self::Detect, Self::Fields, Self::Elastic, Self::Gif];
+    /// Shown sub-rows (Elastic & Stroh and Motion GIF are hidden from the UI).
+    pub(crate) const SHOWN: [Self; 2] = [Self::Detect, Self::Fields];
+
+    pub(crate) fn is_shown(self) -> bool {
+        Self::SHOWN.contains(&self)
+    }
 
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -93,7 +101,9 @@ impl Source {
 pub(crate) enum S3Out {
     Detect(Box<detect::DetectOut>),
     Fields(Box<fields::FieldsOut>),
+    #[cfg(test)]
     Elastic(Box<elastic::ElasticOut>),
+    #[cfg(test)]
     Gif(Box<gif::GifOut>),
 }
 
@@ -111,8 +121,12 @@ pub(crate) fn run_job(job: &S3Job) -> Result<S3Out, String> {
     Ok(match job.sub {
         S3Sub::Detect => S3Out::Detect(Box::new(det)),
         S3Sub::Fields => S3Out::Fields(Box::new(fields::build(&job.src, &job.set, det)?)),
+        #[cfg(test)]
         S3Sub::Elastic => S3Out::Elastic(Box::new(elastic::build(&job.src, &job.set, det)?)),
+        #[cfg(test)]
         S3Sub::Gif => S3Out::Gif(Box::new(gif::build(&job.src, &job.set, det)?)),
+        #[cfg(not(test))]
+        S3Sub::Elastic | S3Sub::Gif => S3Out::Detect(Box::new(det)),
     })
 }
 
@@ -124,10 +138,10 @@ pub(crate) struct Panel {
     pub(crate) set: Settings,
     pub(crate) detect: Option<Box<detect::DetectOut>>,
     pub(crate) fields: Option<Box<fields::FieldsOut>>,
+    #[cfg(test)]
     pub(crate) elastic: Option<Box<elastic::ElasticOut>>,
+    #[cfg(test)]
     pub(crate) gif: Option<Box<gif::GifOut>>,
-    /// Status line of the last GIF export.
-    gif_status: String,
     worker: Option<S3Worker>,
     /// Sub-row and input key of the job in flight.
     pending: Option<(S3Sub, String)>,
@@ -165,7 +179,9 @@ impl Panel {
                 match out {
                     S3Out::Detect(o) => self.detect = Some(o),
                     S3Out::Fields(o) => self.fields = Some(o),
+                    #[cfg(test)]
                     S3Out::Elastic(o) => self.elastic = Some(o),
+                    #[cfg(test)]
                     S3Out::Gif(o) => self.gif = Some(o),
                 }
             }
@@ -175,8 +191,12 @@ impl Panel {
                 match sub {
                     S3Sub::Detect => self.detect = None,
                     S3Sub::Fields => self.fields = None,
+                    #[cfg(test)]
                     S3Sub::Elastic => self.elastic = None,
+                    #[cfg(test)]
                     S3Sub::Gif => self.gif = None,
+                    #[cfg(not(test))]
+                    S3Sub::Elastic | S3Sub::Gif => {}
                 }
             }
         }
@@ -187,8 +207,12 @@ impl Panel {
         match self.sub {
             S3Sub::Detect => self.detect.as_deref(),
             S3Sub::Fields => self.fields.as_deref().map(|f| &f.det),
+            #[cfg(test)]
             S3Sub::Elastic => self.elastic.as_deref().map(|e| &e.det),
+            #[cfg(test)]
             S3Sub::Gif => self.gif.as_deref().map(|g| &g.det),
+            #[cfg(not(test))]
+            S3Sub::Elastic | S3Sub::Gif => None,
         }
     }
 }
@@ -204,7 +228,7 @@ impl WbPanel for Panel {
     /// The body of the sub-row click branch in `show_controls`.
     fn select_sub(&mut self, i: usize) -> bool {
         match S3Sub::ALL.get(i) {
-            Some(&s) if self.sub != s => {
+            Some(&s) if self.sub != s && s.is_shown() => {
                 self.sub = s;
                 true
             }
@@ -214,7 +238,7 @@ impl WbPanel for Panel {
     fn show_controls(&mut self, ui: &mut egui::Ui, _cx: &WbCtx) -> bool {
         let mut rebuild = false;
         ui.horizontal_wrapped(|ui| {
-            for s in S3Sub::ALL {
+            for s in S3Sub::SHOWN {
                 if ui.selectable_label(self.sub == s, s.label()).clicked() && self.sub != s {
                     self.sub = s;
                     rebuild = true;
@@ -224,10 +248,8 @@ impl WbPanel for Panel {
         ui.separator();
         rebuild |= self.set.show_common(ui);
         rebuild |= match self.sub {
-            S3Sub::Detect => false,
+            S3Sub::Detect | S3Sub::Elastic | S3Sub::Gif => false,
             S3Sub::Fields => self.set.show_fields(ui),
-            S3Sub::Elastic => self.set.show_elastic(ui),
-            S3Sub::Gif => self.set.show_gif(ui),
         };
         if let Some(e) = self.set.validate(self.sub).err() {
             ui.colored_label(egui::Color32::from_rgb(192, 57, 43), format!("Input refused: {e}"));
@@ -257,21 +279,7 @@ impl WbPanel for Panel {
                     fields::show_inspector(ui, o, &self.set);
                 }
             }
-            S3Sub::Elastic => {
-                if let Some(o) = &self.elastic {
-                    elastic::show_inspector(ui, o);
-                }
-            }
-            S3Sub::Gif => {
-                if let Some(o) = &self.gif
-                    && let Some(msg) = gif::show_inspector(ui, o, cx.smoke)
-                {
-                    self.gif_status = msg;
-                }
-                if !self.gif_status.is_empty() {
-                    ui.small(self.gif_status.as_str());
-                }
-            }
+            S3Sub::Elastic | S3Sub::Gif => {}
         }
     }
 
@@ -318,8 +326,12 @@ impl WbPanel for Panel {
             (_, Some(w)) => placeholder(w),
             (S3Sub::Detect, _) => self.detect.as_deref().map_or_else(|| placeholder("building ..."), |o| detect::scene(o, detect::resolve(&o.det, self.set.selected))),
             (S3Sub::Fields, _) => self.fields.as_deref().map_or_else(|| placeholder("building ..."), |o| fields::scene(o, &self.set)),
+            #[cfg(test)]
             (S3Sub::Elastic, _) => self.elastic.as_deref().map_or_else(|| placeholder("building ..."), elastic::scene),
+            #[cfg(test)]
             (S3Sub::Gif, _) => self.gif.as_deref().map_or_else(|| placeholder("building ..."), gif::scene),
+            #[cfg(not(test))]
+            (S3Sub::Elastic | S3Sub::Gif, _) => placeholder("building ..."),
         };
         WbScenes { scene2d, mesh: None, caption: String::new(), overlay: None }
     }
@@ -339,7 +351,7 @@ impl WbPanel for Panel {
         true
     }
 
-    /// A click selects the detected defect whose centre is nearest (Fields / Elastic then use its Burgers vector).
+    /// A click selects the detected defect whose centre is nearest (Fields uses its Burgers vector).
     fn on_canvas(&mut self, i: &CanvasInteraction, _cx: &WbCtx) -> bool {
         let Some(w) = i.clicked_world else { return false };
         if self.waiting.is_some() {
@@ -365,7 +377,7 @@ impl WbPanel for Panel {
         };
         if let Some(s) = o.get("sub").and_then(Value::as_str) {
             match S3Sub::ALL.into_iter().find(|x| format!("{x:?}") == s) {
-                Some(x) => self.sub = x,
+                Some(x) => self.sub = if x.is_shown() { x } else { S3Sub::Detect },
                 None => notes.push(format!("S3 panel: unknown sub-view {s:?} (kept current)")),
             }
         }

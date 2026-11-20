@@ -97,15 +97,15 @@ impl WorkbenchView {
         }
     }
 
-    /// Realm-native heading of the panel (never equal to a sub-row or card label: kittest `get_by_label` needs those
-    /// unique; never names the internal "Workbench" route).
+    /// Plain heading of the panel (never equal to a sub-row or card label: kittest `get_by_label` needs those unique;
+    /// never names the internal "Workbench" route).
     pub(crate) fn heading(self) -> &'static str {
         match self {
-            Self::S2Defects => "Defects Forge › point defects, Stone-Wales, grain boundaries",
-            Self::S3Detect => "Defects Forge › detection and elastic fields",
-            Self::S4Flat3d => "Manifolds › nanotubes, nanoribbons, flakes, torsion-free groups",
-            Self::S5Curved2d => "Geometries › {p,q} tilings on S², E² and H²",
-            Self::S6Honeycombs => "Geometries › 3D honeycombs, TPMS and Dirichlet cells",
+            Self::S2Defects => "Local Point Defects, Stone–Wales & Grain Boundaries",
+            Self::S3Detect => "Topological Defect Detection & Discrete Strain / Nye",
+            Self::S4Flat3d => "Nanotubes, Nanoribbons, Flakes & Bieberbach Groups",
+            Self::S5Curved2d => "{p,q} Tilings on S², E² & H²",
+            Self::S6Honeycombs => "3D Honeycombs, TPMS & Dirichlet Cells",
         }
     }
 }

@@ -1,6 +1,6 @@
-//! Stat card of the highlighted Command Deck card (right column of the deck): title, realm, subtitle, badge,
-//! a few rows of facts the app already has, and the Equip / Open in Forge / Open in Lab buttons. Every row reads
-//! existing state; nothing here computes a new property (no vertex symbols, no live mini-view: later stages).
+//! Details card of the highlighted `All Views` card (right column): title, section, subtitle, badge, a few rows of
+//! facts the app already has, and the `Open` / `Open in Defects` buttons. Every row reads existing state; nothing
+//! here computes a new property.
 
 use super::badges::{Badge, badge_widget};
 use super::realms::{Card, CardId, LatticeRef, orbifold_of};
@@ -19,8 +19,6 @@ const THUMB_PX: f32 = 120.0;
 pub(crate) enum StatAction {
     Equip,
     OpenInForge,
-    #[allow(dead_code)] // C1 hidden: the "Open in Analysis Lab" button is gone while Analysis is postponed
-    OpenInLab,
 }
 
 /// A non-selectable label (its text stays in the accessibility tree for the quarantine scan).
@@ -52,10 +50,10 @@ impl PapertillingApp {
             ui.separator();
             self.stat_rows(ui, card, &t);
             ui.separator();
-            if ui.button("⏎ Equip").clicked() {
+            if ui.button("Open").clicked() {
                 action = Some(StatAction::Equip);
             }
-            if matches!(card.id, CardId::Lattice(_)) && ui.button("⚒ Open in Defects Forge").clicked() {
+            if matches!(card.id, CardId::Lattice(_)) && ui.button("Open in Defects").clicked() {
                 action = Some(StatAction::OpenInForge);
             }
         });
@@ -70,7 +68,7 @@ impl PapertillingApp {
                 row(ui, t, "Lattice", &self.gallery.active_item().display_with_orig());
                 match self.catalogue_counts() {
                     Some(n) => row(ui, t, "Entries", &n[s as usize].to_string()),
-                    None => row(ui, t, "Entries", "listed once the Forge has built this lattice"),
+                    None => row(ui, t, "Entries", "listed once Defects has built this lattice"),
                 }
             }
             CardId::Wb(v, i) => {
@@ -93,7 +91,6 @@ impl PapertillingApp {
                     text(ui, egui::RichText::new(p.description).color(t.text_secondary));
                 }
             }
-            CardId::Io(_) => text(ui, egui::RichText::new("Equip opens a file dialog.").color(t.text_secondary)),
         }
     }
 

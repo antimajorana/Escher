@@ -47,6 +47,12 @@ pub(crate) enum S5Sub {
 
 impl S5Sub {
     pub(crate) const ALL: [Self; 5] = [Self::Regular, Self::Wythoff, Self::LargeH2, Self::Surfaces, Self::Orbifolds];
+    /// Shown sub-rows (`Surfaces & nets` papercraft/Dini/Kuen is hidden from the UI; `ALL` keeps `Orbifolds` at index 4).
+    pub(crate) const SHOWN: [Self; 4] = [Self::Regular, Self::Wythoff, Self::LargeH2, Self::Orbifolds];
+
+    pub(crate) fn is_shown(self) -> bool {
+        Self::SHOWN.contains(&self)
+    }
 
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -75,7 +81,8 @@ pub(crate) struct S5Out {
     pub(crate) stopped: Option<String>,
     pub(crate) table: Option<(Vec<&'static str>, Vec<Vec<String>>)>,
     pub(crate) extra_table: Option<(Vec<&'static str>, Vec<Vec<String>>)>,
-    /// Papercraft net as SVG text (Surfaces sub-row).
+    /// Papercraft net as SVG text (Surfaces sub-row, checked in unit tests).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) svg: Option<String>,
 }
 
@@ -147,6 +154,7 @@ enum S5Job {
     Regular(pq::PqJob),
     Wythoff(wythoff::WyJob),
     Large(large_h2::LargeJob),
+    #[cfg(test)]
     Surface(surfaces::SurfJob),
     Tg(String),
 }
@@ -156,6 +164,7 @@ fn run_job(job: S5Job) -> Result<S5Out, String> {
         S5Job::Regular(j) => pq::build(&j),
         S5Job::Wythoff(j) => wythoff::build(&j),
         S5Job::Large(j) => large_h2::build(&j),
+        #[cfg(test)]
         S5Job::Surface(j) => surfaces::build(&j),
         S5Job::Tg(name) => orbifolds::build_tg(&name),
     }
@@ -204,7 +213,10 @@ impl Panel {
             S5Sub::Regular => S5Job::Regular(self.pq.job()),
             S5Sub::Wythoff => S5Job::Wythoff(self.wy.job()),
             S5Sub::LargeH2 => S5Job::Large(self.large.job()),
+            #[cfg(test)]
             S5Sub::Surfaces => S5Job::Surface(self.surf.job()),
+            #[cfg(not(test))]
+            S5Sub::Surfaces => S5Job::Regular(self.pq.job()),
             S5Sub::Orbifolds => S5Job::Tg(self.orb.tg_name().to_string()),
         }
     }
@@ -226,7 +238,7 @@ impl Panel {
         }
     }
 
-    fn show_out(&mut self, ui: &mut egui::Ui, cx: &WbCtx, tokens: &ThemeTokens) {
+    fn show_out(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         let i = self.sub.idx();
         let Some(out) = &self.outs[i] else {
             if self.errors[i].is_none() {
@@ -254,10 +266,6 @@ impl Panel {
         if let Some((head, rows)) = &out.extra_table {
             render_grid_table(ui, "wb_s5_extra_table", head, rows);
         }
-        if self.sub == S5Sub::Surfaces {
-            let svg = out.svg.clone();
-            self.surf.show_export(ui, cx, svg.as_deref());
-        }
     }
 }
 
@@ -272,7 +280,7 @@ impl WbPanel for Panel {
     /// The body of the sub-row click branch in `show_controls`.
     fn select_sub(&mut self, i: usize) -> bool {
         match S5Sub::ALL.get(i) {
-            Some(&s) if self.sub != s => {
+            Some(&s) if self.sub != s && s.is_shown() => {
                 self.sub = s;
                 true
             }
@@ -295,7 +303,7 @@ impl WbPanel for Panel {
     fn show_controls(&mut self, ui: &mut egui::Ui, _cx: &WbCtx) -> bool {
         let mut rebuild = false;
         ui.horizontal_wrapped(|ui| {
-            for s in S5Sub::ALL {
+            for s in S5Sub::SHOWN {
                 if ui.selectable_label(self.sub == s, s.label()).clicked() && self.sub != s {
                     self.sub = s;
                     rebuild = true;
@@ -307,18 +315,18 @@ impl WbPanel for Panel {
             S5Sub::Regular => self.pq.show_controls(ui),
             S5Sub::Wythoff => self.wy.show_controls(ui),
             S5Sub::LargeH2 => self.large.show_controls(ui),
-            S5Sub::Surfaces => self.surf.show_controls(ui),
+            S5Sub::Surfaces => false,
             S5Sub::Orbifolds => self.orb.show_controls(ui),
         };
         rebuild
     }
 
-    fn show_inspector(&mut self, ui: &mut egui::Ui, cx: &WbCtx, tokens: &ThemeTokens) {
+    fn show_inspector(&mut self, ui: &mut egui::Ui, _cx: &WbCtx, tokens: &ThemeTokens) {
         if self.sub == S5Sub::Orbifolds {
             self.orb.show_cards(ui);
             ui.separator();
         }
-        self.show_out(ui, cx, tokens);
+        self.show_out(ui, tokens);
     }
 
     fn submit(&mut self, _cx: &WbCtx, repaint: Option<&egui::Context>) {
@@ -389,7 +397,7 @@ impl WbPanel for Panel {
         };
         if let Some(s) = o.get("sub").and_then(Value::as_str) {
             match S5Sub::ALL.into_iter().find(|x| format!("{x:?}") == s) {
-                Some(x) => self.sub = x,
+                Some(x) => self.sub = if x.is_shown() { x } else { S5Sub::Regular },
                 None => notes.push(format!("S5 panel: unknown sub-view {s:?} (kept current)")),
             }
         }

@@ -122,6 +122,7 @@ fn every_workbench_view_builds_from_default_state_without_panic() {
 fn workbench_view_survives_session_roundtrip() {
     let ctx = egui::Context::default();
     let mut app = new_app();
+    app.set_advanced(true);
     for wv in WorkbenchView::ALL {
         route(&mut app, wv);
         settle(&mut app, &ctx, &format!("{wv:?}"));
