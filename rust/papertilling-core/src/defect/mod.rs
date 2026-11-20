@@ -12,6 +12,7 @@ pub mod cone_builder;
 pub mod cone_geometry;
 pub mod core_gallery;
 pub mod core_graph;
+pub mod defect_growth;
 pub mod equivalence;
 pub mod gauge;
 mod gauge_holonomy;

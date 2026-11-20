@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from . import _rust
+from ._net_motifs import NET_MOTIFS
 from ._flat3d_fallback import find_inplane_glide, py_niggli, py_platycosm
 from .bieberbach import SpaceGroupAnalyzer, _det, _snf, _solve_int_linear, fmt_abelian, from_wallpaper_group
 from .groups import ITA_NUMBER
@@ -43,20 +44,7 @@ PLATYCOSMS: list[dict[str, Any]] = [
     {"code": "-a2", "name": "second amphidicosm", "orientable": False, "ita_numbers": [33], "ita_symbols": ["Pna2_1"], "point_order": 4, "crystal_system": "orthorhombic", "h1_label": "Z_4 x Z", "b1": 1, "h1_torsion": [4]},
 ]
 
-_SC = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-_HEX = [[1.0, 0.0, 0.0], [-0.5, math.sqrt(0.75), 0.0], [0.0, 0.0, 1.35]]
-_NET_MOTIFS = {
-    "SimpleCubic": (221, _SC, [([0.0, 0.0, 0.0], 0)], 1.05),
-    "BCC": (229, _SC, [([0.0, 0.0, 0.0], 0), ([0.5, 0.5, 0.5], 1)], 0.92),
-    "FCC": (225, _SC, [([0.0, 0.0, 0.0], 0), ([0.5, 0.5, 0.0], 0), ([0.5, 0.0, 0.5], 0), ([0.0, 0.5, 0.5], 0)], 0.76),
-    "Diamond": (227, _SC, [([0, 0, 0], 0), ([0.5, 0.5, 0], 0), ([0.5, 0, 0.5], 0), ([0, 0.5, 0.5], 0), ([0.25, 0.25, 0.25], 1), ([0.75, 0.75, 0.25], 1), ([0.75, 0.25, 0.75], 1), ([0.25, 0.75, 0.75], 1)], 0.48),
-    "HCP": (194, _HEX, [([1 / 3, 2 / 3, 0.25], 0), ([2 / 3, 1 / 3, 0.75], 0)], 1.02),
-    "Tetragonal123": (123, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.15]], [([0.0, 0.0, 0.0], 0), ([0.5, 0.5, 0.5], 1)], 0.96),
-    "Rutile136": (136, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.72]], [([0, 0, 0], 0), ([0.5, 0.5, 0.5], 0), ([0.3, 0.3, 0], 1), ([0.7, 0.7, 0], 1), ([0.8, 0.2, 0.5], 1), ([0.2, 0.8, 0.5], 1)], 0.48),
-    "Perovskite": (221, _SC, [([0, 0, 0], 0), ([0.5, 0.5, 0.5], 1), ([0.5, 0, 0], 2), ([0, 0.5, 0], 2), ([0, 0, 0.5], 2)], 0.55),
-    "Pyrochlore": (227, _SC, [([0, 0, 0], 0), ([0.25, 0.25, 0], 0), ([0.25, 0, 0.25], 0), ([0, 0.25, 0.25], 0), ([0.5, 0.5, 0.5], 1)], 0.42),
-    "BetaQuartz": (180, _HEX, [([0.5, 0.0, 0.0], 0), ([0.0, 0.5, 1 / 3], 0), ([0.5, 0.5, 2 / 3], 0)], 0.72),
-}
+_NET_MOTIFS = NET_MOTIFS  # the one table: papertilling/_net_motifs.py (mirror of core space3d/motifs.rs)
 
 
 def _coerce_cell2d(cell: Any) -> dict[str, Any]:

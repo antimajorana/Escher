@@ -4,11 +4,11 @@ from __future__ import annotations
 from fractions import Fraction
 from functools import lru_cache
 import json
-import math
 from pathlib import Path
 from typing import Any
 
 from . import _rust
+from ._net_motifs import NET_MOTIFS, build_net_patch
 from .bieberbach import SpaceGroupAnalyzer, fmt_abelian
 
 __all__ = [
@@ -22,18 +22,7 @@ __all__ = [
 
 _DATA_DIR = Path(__file__).resolve().parent / "data"
 
-CANONICAL_NETS_3D = [
-    "SimpleCubic",
-    "BCC",
-    "FCC",
-    "Diamond",
-    "HCP",
-    "Tetragonal123",
-    "Rutile136",
-    "Perovskite",
-    "Pyrochlore",
-    "BetaQuartz",
-]
+CANONICAL_NETS_3D = list(NET_MOTIFS)
 
 
 @lru_cache(maxsize=1)
@@ -115,30 +104,4 @@ def build_net_3d(net: str = "SimpleCubic", defect: str = "None") -> dict[str, An
     rs = _rust.get()
     if rs is not None and hasattr(rs, "build_net_3d_json"):
         return json.loads(rs.build_net_3d_json(net, defect))
-    if net not in CANONICAL_NETS_3D:
-        raise ValueError(f"unknown 3D net {net!r}; choose from {CANONICAL_NETS_3D}")
-    # Pure-Python minimal 2x2x2 patch fallback for the 10 canonical nets:
-    basis_map = {
-        "SimpleCubic": (221, [([0, 0, 0], 0)], 1.05, 1.0),
-        "BCC": (229, [([0, 0, 0], 0), ([0.5, 0.5, 0.5], 1)], 0.92, 1.0),
-        "FCC": (225, [([0, 0, 0], 0), ([0.5, 0.5, 0], 0), ([0.5, 0, 0.5], 0), ([0, 0.5, 0.5], 0)], 0.76, 1.0),
-        "Tetragonal123": (123, [([0, 0, 0], 0), ([0.5, 0.5, 0.5], 1)], 0.96, 1.15),
-        "Rutile136": (136, [([0, 0, 0], 0), ([0.5, 0.5, 0.5], 0), ([0.3, 0.3, 0], 1), ([0.7, 0.7, 0], 1)], 0.48, 0.72),
-    }
-    sg_num, motif, cutoff, c_len = basis_map.get(net, basis_map["SimpleCubic"])
-    nxy = 2 if defect == "None" else 3
-    mid = 0.5 * nxy
-    raw_pos, raw_kinds = [], []
-    for ix in range(nxy):
-        for iy in range(nxy):
-            for iz in range(2):
-                for f, k in motif:
-                    raw_pos.append([ix + f[0] - mid, iy + f[1] - mid, (iz + f[2] - 1.0) * c_len])
-                    raw_kinds.append(k)
-    bonds = []
-    for i in range(len(raw_pos)):
-        for j in range(i + 1, len(raw_pos)):
-            d = math.sqrt(sum((raw_pos[j][k] - raw_pos[i][k]) ** 2 for k in range(3)))
-            if 0.01 < d <= cutoff:
-                bonds.append((i, j, 0))
-    return {"name": net, "space_group_num": sg_num, "defect_label": defect, "positions": raw_pos, "bonds": bonds, "site_kinds": raw_kinds}
+    return build_net_patch(net, defect)

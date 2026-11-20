@@ -6,6 +6,7 @@ use std::f64::consts::PI;
 use serde::{Deserialize, Serialize};
 
 use super::layer_group_entry;
+use super::motifs::net_motif;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CanonicalNet3d {
@@ -102,97 +103,10 @@ pub struct Net3dPatch {
     pub info: String,
 }
 
-type NetMotif = ([[f64; 3]; 3], Vec<([f64; 3], u8)>, f64);
-
-fn net_motif(net: CanonicalNet3d) -> NetMotif {
-    let sc = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-    let hex = [[1.0, 0.0, 0.0], [-0.5, 0.8660254, 0.0], [0.0, 0.0, 1.35]];
-    match net {
-        CanonicalNet3d::SimpleCubic => (sc, vec![([0.0, 0.0, 0.0], 0)], 1.05),
-        CanonicalNet3d::BCC => (sc, vec![([0.0, 0.0, 0.0], 0), ([0.5, 0.5, 0.5], 1)], 0.92),
-        CanonicalNet3d::FCC => (
-            sc,
-            vec![
-                ([0.0, 0.0, 0.0], 0),
-                ([0.5, 0.5, 0.0], 0),
-                ([0.5, 0.0, 0.5], 0),
-                ([0.0, 0.5, 0.5], 0),
-            ],
-            0.76,
-        ),
-        CanonicalNet3d::Diamond => (
-            sc,
-            vec![
-                ([0.0, 0.0, 0.0], 0),
-                ([0.5, 0.5, 0.0], 0),
-                ([0.5, 0.0, 0.5], 0),
-                ([0.0, 0.5, 0.5], 0),
-                ([0.25, 0.25, 0.25], 1),
-                ([0.75, 0.75, 0.25], 1),
-                ([0.75, 0.25, 0.75], 1),
-                ([0.25, 0.75, 0.75], 1),
-            ],
-            0.48,
-        ),
-        CanonicalNet3d::HCP => (
-            hex,
-            vec![([1.0 / 3.0, 2.0 / 3.0, 0.25], 0), ([2.0 / 3.0, 1.0 / 3.0, 0.75], 0)],
-            1.02,
-        ),
-        CanonicalNet3d::Tetragonal123 => (
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.15]],
-            vec![([0.0, 0.0, 0.0], 0), ([0.5, 0.5, 0.5], 1)],
-            0.96,
-        ),
-        CanonicalNet3d::Rutile136 => (
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.72]],
-            vec![
-                ([0.0, 0.0, 0.0], 0),
-                ([0.5, 0.5, 0.5], 0),
-                ([0.3, 0.3, 0.0], 1),
-                ([0.7, 0.7, 0.0], 1),
-                ([0.8, 0.2, 0.5], 1),
-                ([0.2, 0.8, 0.5], 1),
-            ],
-            0.48,
-        ),
-        CanonicalNet3d::Perovskite => (
-            sc,
-            vec![
-                ([0.0, 0.0, 0.0], 0),
-                ([0.5, 0.5, 0.5], 1),
-                ([0.5, 0.0, 0.0], 2),
-                ([0.0, 0.5, 0.0], 2),
-                ([0.0, 0.0, 0.5], 2),
-            ],
-            0.55,
-        ),
-        CanonicalNet3d::Pyrochlore => (
-            sc,
-            vec![
-                ([0.0, 0.0, 0.0], 0),
-                ([0.25, 0.25, 0.0], 0),
-                ([0.25, 0.0, 0.25], 0),
-                ([0.0, 0.25, 0.25], 0),
-                ([0.5, 0.5, 0.5], 1),
-            ],
-            0.42,
-        ),
-        CanonicalNet3d::BetaQuartz => (
-            hex,
-            vec![
-                ([0.5, 0.0, 0.0], 0),
-                ([0.0, 0.5, 1.0 / 3.0], 0),
-                ([0.5, 0.5, 2.0 / 3.0], 0),
-            ],
-            0.72,
-        ),
-    }
-}
-
 /// Build a 3D ball-and-stick patch for `net` with optional 3D topological line defect along `z`.
 pub fn build_net_3d(net: CanonicalNet3d, defect: LineDefect3d) -> Net3dPatch {
-    let (lat, motif, bond_cutoff) = net_motif(net);
+    let m = net_motif(net);
+    let (lat, motif, bond_cutoff) = (m.lattice, m.sites, m.bond_cutoff);
     let nx = if defect == LineDefect3d::None { 2 } else { 3 };
     let ny = nx;
     let nz = 2;
@@ -294,65 +208,10 @@ pub fn build_net_3d(net: CanonicalNet3d, defect: LineDefect3d) -> Net3dPatch {
     }
 }
 
-/// Build a 3D slab patch for any of the 80 layer groups (`num = 1..=80`).
+/// Build a 3D slab patch for any of the 80 layer groups (`num = 1..=80`): a thin wrapper over
+/// [`super::layer_slab::default_slab_patch`] (exact-group sites, shell-rule bonds, grown in-plane), kept
+/// until WP-U4 moves the app to `layer_slab` (C1 WP-L1).
 pub fn build_layer_slab_patch(num: u8) -> Result<Net3dPatch, String> {
-    let e = layer_group_entry(num)?;
-    let (a1, a2): ([f64; 2], [f64; 2]) = match e.system.as_str() {
-        "oblique" => ([1.0, 0.0], [0.22, 1.24]),
-        "rectangular" => ([1.0, 0.0], [0.0, 1.32]),
-        "square" => ([1.0, 0.0], [0.0, 1.0]),
-        _ => ([1.0, 0.0], [-0.5, 0.8660254]),
-    };
-    let seed = [0.17_f64, 0.29, 0.18];
-    let mut cell_pts: Vec<[f64; 3]> = Vec::new();
-    for op in &e.ops {
-        let fx = (op.r[0][0] as f64 * seed[0] + op.r[0][1] as f64 * seed[1] + op.r[0][2] as f64 * seed[2]
-            + (op.t2[0][0] as f64) / (op.t2[0][1] as f64))
-            .rem_euclid(1.0);
-        let fy = (op.r[1][0] as f64 * seed[0] + op.r[1][1] as f64 * seed[1] + op.r[1][2] as f64 * seed[2]
-            + (op.t2[1][0] as f64) / (op.t2[1][1] as f64))
-            .rem_euclid(1.0);
-        let fz = op.r[2][0] as f64 * seed[0] + op.r[2][1] as f64 * seed[1] + op.r[2][2] as f64 * seed[2];
-        let shifts: &[[f64; 2]] = if e.centred { &[[0.0, 0.0], [0.5, 0.5]] } else { &[[0.0, 0.0]] };
-        for &[sx, sy] in shifts {
-            let p_c = [(fx + sx).rem_euclid(1.0), (fy + sy).rem_euclid(1.0), fz];
-            if !cell_pts.iter().any(|&p| (p[0] - p_c[0]).hypot(p[1] - p_c[1]) < 1e-3 && (p[2] - p_c[2]).abs() < 1e-3) {
-                cell_pts.push(p_c);
-            }
-        }
-    }
-    let mut positions = Vec::new();
-    let mut site_kinds = Vec::new();
-    for ix in -1_i32..=0 {
-        for iy in -1_i32..=0 {
-            for &p in &cell_pts {
-                let fx = p[0] + ix as f64;
-                let fy = p[1] + iy as f64;
-                positions.push([fx * a1[0] + fy * a2[0], fx * a1[1] + fy * a2[1], p[2]]);
-                site_kinds.push(u8::from(p[2] < 0.0));
-            }
-        }
-    }
-    let mut bonds = Vec::new();
-    for i in 0..positions.len() {
-        for j in (i + 1)..positions.len() {
-            let d = ((positions[j][0] - positions[i][0]).powi(2)
-                + (positions[j][1] - positions[i][1]).powi(2)
-                + (positions[j][2] - positions[i][2]).powi(2))
-            .sqrt();
-            if d > 0.05 && d < 0.88 {
-                bonds.push((i, j, 0_u8));
-            }
-        }
-    }
-    Ok(Net3dPatch {
-        name: format!("Layer #{} {} ({})", e.number, e.symbol, e.pointgroup),
-        space_group_num: u16::from(e.number),
-        defect_label: format!("System: {}, |P|={}", e.system, e.point_order),
-        positions,
-        bonds,
-        site_kinds,
-        defect_axis: None,
-        info: format!("Layer #{} {}: {} atoms in 2x2 slab", e.number, e.symbol, cell_pts.len() * 4),
-    })
+    layer_group_entry(num)?;
+    super::layer_slab::default_slab_patch(num)
 }
