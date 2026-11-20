@@ -118,7 +118,7 @@ fn s5_curved2d_orbifolds_restores_into_the_manifolds_realm() {
     assert_eq!(a.workbench.sub_index(WorkbenchView::S5Curved2d), 4);
     assert_eq!(a.current_realm(), Realm::Manifolds);
     assert_eq!(a.deck.realm, Realm::Manifolds);
-    assert_eq!(a.breadcrumb().mode.text, "Lattices: {p,q} on S² / E² / H²");
+    assert_eq!(a.breadcrumb().mode.text, "Lattice: {p,q} on S² / E² / H²");
 }
 
 #[test]

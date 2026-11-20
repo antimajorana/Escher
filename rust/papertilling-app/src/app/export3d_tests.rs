@@ -26,6 +26,7 @@ fn export_3d_png_is_refused_on_the_gallery_and_while_dirty_or_busy() {
     let msg = app.export_3d_png_refusal(ctx.cumulative_pass_nr()).expect("Gallery has no 3D view");
     assert!(msg.contains("Open Surfaces"), "{msg}");
 
+    app.defects.view_mode = crate::mesh3d::DefectViewMode::Sheet3D;
     let now = shown(&mut app, &ctx, NavTab::Defects);
     app.defects.wait_idle(&mut app.canvas2d);
     assert!(!app.defects.is_busy());
@@ -39,6 +40,7 @@ fn export_3d_png_is_refused_on_the_gallery_and_while_dirty_or_busy() {
     let msg = app.export_3d_png_refusal(now + 5).expect("3D view not shown");
     assert!(msg.contains("Show the 3D view"), "{msg}");
 
+    app.combine.view_mode = crate::mesh3d::DefectViewMode::Sheet3D;
     let now = shown(&mut app, &ctx, NavTab::Combine);
     app.combine.dragging = true;
     let msg = app.export_3d_png_refusal(now).expect("pins moving");

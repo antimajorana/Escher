@@ -35,21 +35,19 @@ fn all_pill_cards(a: &mut PapertillingApp, realm: Realm) -> Vec<Card> {
     (0..pills(realm).len()).flat_map(|p| a.deck_cards(realm, p, "")).collect()
 }
 
-/// Labels the HUD draws (M1 plan section 6.1 T4).
-const HUD_LABELS: [&str; 13] = [
+/// Labels the HUD draws in Advanced mode.
+const HUD_LABELS: [&str; 11] = [
     "Undo",
     "Redo",
-    "2D",
-    "3D",
-    "Split",
-    "Presets",
+    "Examples",
     "Session",
-    "Export",
+    "Save figure",
     "View",
-    "Search (Ctrl+K)",
-    "Theme: Paper",
-    "Theme: Studio",
-    "❖ Codex (Tab)",
+    "Find lattice (Ctrl+K)",
+    "Theme: Light",
+    "Theme: Dark",
+    "All views (Tab)",
+    "Advanced",
 ];
 
 /// Spectral wording beyond `FORBIDDEN_SPECTRAL`, checked case-insensitively on card text only. Bare "band" is not
@@ -111,8 +109,10 @@ fn every_workbench_sub_row_has_exactly_one_card_in_its_realm() {
         for (i, label) in labels.iter().enumerate() {
             let id = CardId::Wb(view, u8::try_from(i).unwrap());
             let hits: Vec<&Card> = all.iter().filter(|c| c.id == id).collect();
-            if view == WorkbenchView::S4Flat3d && i <= 1 {
-                // C1: 3D slabs and platycosms (3D-manifold embeddings) are hidden: no card
+            let hidden = (view == WorkbenchView::S4Flat3d && i <= 1)
+                || (view == WorkbenchView::S3Detect && i >= 2)
+                || (view == WorkbenchView::S5Curved2d && i == 3);
+            if hidden {
                 assert!(hits.is_empty(), "{view:?} row {i} ('{label}') is hidden");
                 continue;
             }
@@ -324,7 +324,7 @@ fn breadcrumb_known_answers() {
     let l = bc.lattice.expect("kagome on the 2D Plane shows the lattice");
     assert_eq!(l.realm, Realm::Tilings);
     assert!(!l.text.is_empty());
-    assert_eq!((bc.mode.text.as_str(), bc.mode.realm), ("Lattices: 2D Plane", Realm::Tilings));
+    assert_eq!((bc.mode.text.as_str(), bc.mode.realm), ("Lattice: 2D Plane", Realm::Tilings));
 
     let ss = a.backend.find_named("shastry_sutherland").expect("shastry_sutherland").clone();
     a.select_lattice_and_sync(ss);
@@ -373,13 +373,13 @@ fn filter_matches_titles_and_lattices() {
     let c = Card {
         id: CardId::Combine,
         realm: Realm::Forge,
-        title: String::from("Combine, Fuse & Move"),
+        title: String::from("Place & fuse defects"),
         subtitle: String::from("only in the subtitle"),
         badge: None,
         thumb: None,
     };
     assert!(filter_matches(&c, None, "FUSE"));
-    assert!(filter_matches(&c, None, "  fuse & move "));
+    assert!(filter_matches(&c, None, "  place & fuse "));
     assert!(filter_matches(&c, None, ""));
     assert!(!filter_matches(&c, None, "subtitle"), "non-lattice cards match on the title only");
 

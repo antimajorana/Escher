@@ -11,9 +11,10 @@ use crate::analysis_mode::tests::{equip_keys, harness, realm_key, settled, wait_
 use crate::app::{LatticesView, NavTab};
 use crate::backend::SurfaceTargetUi;
 
-/// A fresh 1280x800 app (Paper theme) after its first frames.
+/// A fresh 1280x800 app (Paper theme, `Advanced` on for All Views tests) after its first frames.
 pub(super) fn start() -> H {
     let mut h = harness();
+    h.state_mut().set_advanced(true);
     h.run_steps(3);
     h
 }
@@ -163,7 +164,7 @@ fn breadcrumb_click_opens_matching_realm() {
         (String::from("E² Plane"), Realm::Geometries),
         (group, Realm::Groups),
         (lattice, Realm::Tilings),
-        (String::from("Lattices: 2D Plane"), Realm::Tilings),
+        (String::from("Lattice: 2D Plane"), Realm::Tilings),
     ] {
         click_in_hud(&mut h, &label);
         assert!(h.state().deck.open, "'{label}' opens the deck");
@@ -171,7 +172,7 @@ fn breadcrumb_click_opens_matching_realm() {
         press(&mut h, Key::Escape);
         assert!(!h.state().deck.open);
     }
-    equip_keys(&mut h, Realm::Forge, "Combine, Fuse & Move");
+    equip_keys(&mut h, Realm::Forge, "Place & fuse defects");
     click_in_hud(&mut h, "Defects: Combine, Fuse & Move");
     assert_eq!((h.state().deck.open, h.state().deck.realm), (true, Realm::Forge));
     // with the deck open, a segment only switches the realm

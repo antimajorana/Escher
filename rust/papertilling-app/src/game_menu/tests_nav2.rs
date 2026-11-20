@@ -1,15 +1,14 @@
-//! kittest navigation tests N7-N14 (M1 plan section 6.2; written by WP-T). Helpers live in `tests_nav.rs`.
+//! kittest navigation tests N7-N13. Helpers live in `tests_nav.rs`.
 
 use egui::Key;
 use egui_kittest::kittest::Queryable;
 
 use super::Realm;
-use super::realms::{CardId, IoAction, card_realm};
-use super::test_util::{H, equip_state, goto_defects_view, goto_lattices_view, open_deck, press};
+use super::realms::{CardId, card_realm};
+use super::test_util::{H, goto_lattices_view, open_deck, press};
 use super::tests_nav::{click_in_hud, hud_disabled, start};
 use crate::analysis_mode::tests::{equip_keys, realm_key, settled, wait_until};
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab};
-use crate::mesh3d::DefectViewMode;
 use crate::theme::StudioTheme;
 use crate::workbench::WorkbenchView;
 
@@ -19,8 +18,11 @@ fn every_workbench_card_equips_its_panel_and_sub_row() {
     for view in WorkbenchView::ALL {
         let labels = h.state().workbench.sub_labels(view);
         for (i, title) in labels.iter().enumerate() {
-            if view == WorkbenchView::S4Flat3d && i <= 1 {
-                continue; // C1: 3D slabs and platycosms are hidden (no card)
+            let hidden = (view == WorkbenchView::S4Flat3d && i <= 1)
+                || (view == WorkbenchView::S3Detect && i >= 2)
+                || (view == WorkbenchView::S5Curved2d && i == 3);
+            if hidden {
+                continue;
             }
             let realm = card_realm(CardId::Wb(view, u8::try_from(i).unwrap()));
             equip_keys(&mut h, realm, title);
@@ -46,7 +48,7 @@ fn old_strips_are_gone() {
             assert!(h.query_all_by_label(gone).next().is_none(), "{mode:?}: the old strip label '{gone}' is gone");
         }
         if mode == AppMode::Lattices {
-            assert_eq!(h.query_all_by_label_contains("Lattices:").count(), 1, "only the HUD mode segment");
+            assert_eq!(h.query_all_by_label_contains("Lattice:").count(), 1, "only the HUD mode segment");
         }
     }
 }
@@ -69,16 +71,16 @@ fn esc_closes_deck_before_combine_chain() {
 }
 
 #[test]
-fn hud_view_toggle_and_undo_scope() {
+fn hud_mode_switch_and_undo_scope() {
     let mut h = start();
-    goto_defects_view(&mut h, DefectsView::Catalogue2D);
-    wait_until(&mut h, "Defects build", settled);
-    click_in_hud(&mut h, "3D");
-    assert_eq!(h.state().defects.view_mode, DefectViewMode::Sheet3D, "HUD 3D sets the Defects view mode");
-
+    h.state_mut().set_advanced(false);
+    h.run_steps(2);
     goto_lattices_view(&mut h, LatticesView::Plane2D);
-    assert!(hud_disabled(&h, "3D"), "the 2D Plane has a fixed layout");
     assert!(hud_disabled(&h, "Undo"), "Undo is disabled outside Combine");
+    click_in_hud(&mut h, "Defects");
+    assert_eq!(h.state().active_mode, AppMode::Defects, "HUD Defects switches to Defects mode");
+    click_in_hud(&mut h, "Lattice");
+    assert_eq!(h.state().active_mode, AppMode::Lattices, "HUD Lattice switches back to Lattice mode");
 
     h.state_mut().switch_tab(NavTab::Combine);
     wait_until(&mut h, "Combine build", settled);
@@ -121,7 +123,7 @@ fn hud_is_one_row() {
     assert!(top.height() <= 40.0, "800x400: HUD height {}", top.height());
     let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 400.0)).expand(0.5);
     let theme = h
-        .query_all_by_label("Theme: Paper")
+        .query_all_by_label("Theme: Light")
         .find(|n| top.expand(1.0).contains_rect(n.rect()))
         .expect("the right cluster keeps the Theme button in the HUD row")
         .rect();
@@ -143,11 +145,11 @@ fn deck_blocks_underlying_clicks_and_uses_tokens() {
     assert_eq!(h.state().active_tab, tab0);
     assert!(h.state().deck.open, "a click on the deck keeps it open");
 
-    click_in_hud(&mut h, "Theme: Paper");
+    click_in_hud(&mut h, "Theme: Light");
     assert_eq!(h.state().theme, StudioTheme::Studio);
     assert!(h.state().deck.open, "switching the theme keeps the deck open");
     h.run_steps(2);
-    assert!(h.query_all_by_label("⏎ Equip").next().is_some(), "the stat card renders under Studio");
+    assert!(h.query_all_by_label("Open").next().is_some(), "the details card renders under Dark theme");
 }
 
 /// Index of the kagome card in realm 3's Named pill.
@@ -185,9 +187,9 @@ fn stat_card_buttons() {
     h.run_steps(2);
 
     deck_on_kagome(&mut h);
-    h.get_by_label("⚒ Open in Defects Forge").click();
+    h.get_by_label("Open in Defects").click();
     h.run_steps(2);
-    wait_until(&mut h, "Open in Defects Forge", settled);
+    wait_until(&mut h, "Open in Defects", settled);
     let a = h.state();
     assert_eq!((a.active_mode, a.defects_view), (AppMode::Defects, DefectsView::Catalogue2D));
     assert_eq!(a.gallery.base_item().named_key.as_deref(), Some("kagome"));
@@ -196,15 +198,4 @@ fn stat_card_buttons() {
     deck_on_kagome(&mut h);
     assert!(h.query_by_label("ψ Open in Analysis Lab").is_none(), "the lab button is hidden");
     assert!(h.query_all_by_label_contains("Analysis").next().is_none(), "no visible Analysis label");
-}
-
-#[test]
-fn io_cards_never_open_dialogs_in_tests() {
-    let mut h = start();
-    equip_state(&mut h, CardId::Io(IoAction::ExportSvgPng));
-    assert!(h.state().export_status.ends_with("(dialog skipped)"), "{}", h.state().export_status);
-    assert!(!h.state().deck.open);
-    // the same through the keys
-    equip_keys(&mut h, Realm::PresetsIo, "Save session…");
-    assert!(h.state().export_status.ends_with("(dialog skipped)"), "{}", h.state().export_status);
 }

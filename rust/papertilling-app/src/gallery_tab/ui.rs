@@ -18,7 +18,7 @@ impl GalleryTabState {
                 .add(
                     egui::TextEdit::singleline(&mut self.rename_buf)
                         .id_salt(id_salt)
-                        .desired_width(165.0)
+                        .desired_width(140.0)
                         .hint_text(&self.active_item.default_label),
                 )
                 .on_hover_text(format!("Catalogue id: {}", self.active_item.default_label));

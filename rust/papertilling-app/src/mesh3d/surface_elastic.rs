@@ -18,6 +18,7 @@ pub enum SurfaceColor3d {
     #[default]
     FaceRingSize,
     BondStrain,
+    #[cfg_attr(not(test), allow(dead_code))]
     RadialBuckling,
     SpectralLdos,
     SpectralCharge,

@@ -15,12 +15,22 @@ use crate::backend::{CatalogueRuleUi, SurfaceTargetUi};
 use crate::session;
 use crate::theme::StudioTheme;
 
-const CODEX: &str = "❖ Codex (Tab)";
-const RENAME: &str = "✎ Rename";
+const CODEX: &str = "All views (Tab)";
+const RENAME: &str = "Rename";
 /// Every control the right cluster can put on the row, at any density.
-const RIGHT: [&str; 14] = [
-    "Theme: Paper", "Theme: Studio", "Search (Ctrl+K)", "Search", "Menu", "View", "Export", "Session", "Presets", "Redo", "Undo",
-    "Split", "3D", "2D",
+const RIGHT: [&str; 12] = [
+    "Advanced",
+    "Theme: Light",
+    "Theme: Dark",
+    "Find lattice (Ctrl+K)",
+    "Find",
+    "Menu",
+    "View",
+    "Save figure",
+    "Session",
+    "Examples",
+    "Redo",
+    "Undo",
 ];
 
 /// Rect of the node labelled `label` inside the HUD row. AccessKit rects are the widget rects, not clipped: a widget
@@ -42,16 +52,16 @@ fn set_width(h: &mut H, w: f32) {
 }
 
 /// Findings 1 and 2: from 1280 px down to the window minimum, in the view with the widest right cluster
-/// (Combine: Undo / Redo and the view toggles), the Codex button and the rename controls keep their whole width,
+/// (Combine: Undo / Redo), the All views button and the rename controls keep their whole width,
 /// left of the right cluster, and the rename controls are reachable with a real pointer click.
 #[test]
 fn hud_keeps_codex_and_rename_whole() {
     let mut h = start();
     goto_lattices_view(&mut h, LatticesView::Plane2D);
     set_width(&mut h, 1280.0);
-    let codex_w = hud_rect(&h, CODEX).expect("Codex at 1280").width();
+    let codex_w = hud_rect(&h, CODEX).expect("All views at 1280").width();
     let rename_w = hud_rect(&h, RENAME).expect("Rename at 1280").width();
-    assert!(codex_w > 60.0 && rename_w > 40.0, "natural widths {codex_w} / {rename_w}");
+    assert!(codex_w > 60.0 && rename_w > 30.0, "natural widths {codex_w} / {rename_w}");
     let min_w = super::HUD_MIN_WINDOW_WIDTH;
     for (plane, view) in [(true, None), (false, Some(DefectsView::CombineAndFuse))] {
         match view {
@@ -70,11 +80,11 @@ fn hud_keeps_codex_and_rename_whole() {
             };
             assert_eq!(h.state().deck.hud_density, want, "{what}");
             let right = right_cluster_left(&h);
-            let codex = hud_rect(&h, CODEX).unwrap_or_else(|| panic!("{what}: no Codex"));
+            let codex = hud_rect(&h, CODEX).unwrap_or_else(|| panic!("{what}: no All views"));
             let rename = hud_rect(&h, RENAME).unwrap_or_else(|| panic!("{what}: no Rename"));
-            assert!((codex.width() - codex_w).abs() < 0.5, "{what}: Codex cut to {codex:?}");
+            assert!((codex.width() - codex_w).abs() < 0.5, "{what}: All views cut to {codex:?}");
             assert!((rename.width() - rename_w).abs() < 0.5, "{what}: Rename cut to {rename:?}");
-            assert!(codex.left() >= 0.0 && codex.right() <= right, "{what}: Codex {codex:?}, right cluster {right}");
+            assert!(codex.left() >= 0.0 && codex.right() <= right, "{what}: All views {codex:?}, right cluster {right}");
             assert!(rename.right() <= right + 0.5, "{what}: Rename {rename:?} under the right cluster at {right}");
             assert!(right >= rename.right() && right < w, "{what}: right cluster starts at {right}");
         }
@@ -96,7 +106,7 @@ fn hud_keeps_codex_and_rename_whole() {
     }
     // the folded controls are in Menu
     click_in_hud(&mut h, "Menu");
-    for l in ["View", "Export", "Session", "Presets", "Undo", "Redo", "Layout"] {
+    for l in ["View", "Save figure", "Session", "Examples", "Undo", "Redo"] {
         assert!(h.query_by_label(l).is_some(), "Menu holds {l}");
     }
 }
@@ -257,7 +267,7 @@ fn failed_verdicts_are_cached() {
 fn saved_deck_realm_is_used_once() {
     let mut h = start();
     goto_lattices_view(&mut h, LatticesView::Plane2D);
-    let raw = r#"{"schema_version": 3, "active_mode": "Lattices", "lattices_view": "Plane2D",
+    let raw = r#"{"schema_version": 3, "advanced": true, "active_mode": "Lattices", "lattices_view": "Plane2D",
         "deck": {"realm": "PresetsIo"}}"#;
     let st = session::parse_session(raw).unwrap().0;
     let notes = h.state_mut().apply_session(&st, None);

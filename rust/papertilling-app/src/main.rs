@@ -37,6 +37,8 @@ mod view3d;
 mod workbench;
 #[cfg(test)]
 mod features_gate_tests;
+#[cfg(test)]
+mod simple_default_tests;
 
 use std::io::Cursor;
 use std::process::ExitCode;

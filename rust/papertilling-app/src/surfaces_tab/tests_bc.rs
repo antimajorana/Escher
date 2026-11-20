@@ -344,6 +344,7 @@ fn deck_open_and_torus_hex_stat_cards_and_viewport_headers_reflect_bc_verdicts_a
     use crate::game_menu::{CardId, Realm};
 
     let mut h = harness();
+    h.state_mut().set_advanced(true);
     h.run_steps(2);
     let cards = h.state_mut().deck_cards(Realm::Manifolds, 0, "");
     open_deck(&mut h);

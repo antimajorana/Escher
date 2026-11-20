@@ -196,7 +196,7 @@ fn defects_card(a: &PapertillingApp, v: DefectsView) -> (Realm, String) {
     match v {
         DefectsView::Catalogue2D => (Realm::Forge, a.defects.sub_tab.label().to_string()),
         DefectsView::AtlasDefects => (Realm::Forge, a.atlas.last_defect_subtab.defect_label().to_string()),
-        DefectsView::CombineAndFuse => (Realm::Forge, String::from("Combine, Fuse & Move")),
+        DefectsView::CombineAndFuse => (Realm::Forge, String::from("Place & fuse defects")),
         DefectsView::PointAndBoundary | DefectsView::DetectFields => {
             wb_card(a, v.workbench_view().expect("stage panel view"))
         }
@@ -215,7 +215,7 @@ fn equip_defects_view(h: &mut Harness<'static, PapertillingApp>, v: DefectsView)
     assert_eq!((h.state().active_mode, h.state().defects_view), (AppMode::Defects, v), "'{title}'");
 }
 
-/// Pill counts of realms 1-5 (M1 plan section 1.1): Geometries, Groups, Tilings, Manifolds, Defects Forge.
+/// Pill counts of realms 1-5: Geometries, Symmetry Groups, Tilings, Surfaces, Defects.
 const PILLS_1_TO_5: [usize; 5] = [1, 1, 4, 3, 5];
 
 /// Every pill and the first 24 cards of realms 1-5 (cards and stat card on screen), then one representative
@@ -264,12 +264,12 @@ fn scan_deck_realms_1_to_5(h: &mut Harness<'static, PapertillingApp>) {
 #[test]
 fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     let mut h = harness();
+    h.state_mut().set_advanced(true);
     h.run_steps(3);
 
-    // 1. Lattices: visit all 4 sub-views including 0D/1D, 80-layer, 230-SG, H², and Manifolds + "3D Colour:" ComboBox.
-    // Every view is entered through its Command Deck card with real key presses (Tab, 1-7, WASD, Enter).
+    // 1. Lattices: visit all sub-views including 0D/1D, 80-layer, 230-SG, H², and Manifolds.
     equip_lattices_view(&mut h, LatticesView::Plane2D);
-    assert_no_forbidden_tokens(&h, "1. Lattices -> 2D Plane");
+    assert_no_forbidden_tokens(&h, "Lattice -> 2D Plane");
 
     equip_lattices_view(&mut h, LatticesView::ThreeDAndSubperiodic);
     h.run_steps(2);
@@ -288,7 +288,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
     equip_lattices_view(&mut h, LatticesView::NonEuclidean);
     h.run_steps(2);
     assert!(h.state().atlas.pristine_only);
-    assert_no_forbidden_tokens(&h, "1. Lattices -> Non-Euclidean");
+    assert_no_forbidden_tokens(&h, "Lattice -> Non-Euclidean");
     assert!(
         h.query_all_by_label_contains("Central Wedge").next().is_none(),
         "Non-Euclidean pristine view must hide Central Wedge disclination controls"
@@ -296,17 +296,7 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
 
     equip_lattices_view(&mut h, LatticesView::Manifolds);
     wait_until(&mut h, "Manifolds surface build", |a| !a.surfaces.is_building());
-    assert_no_forbidden_tokens(&h, "1. Lattices -> Manifolds");
-    // Open "3D Colour:" ComboBox in inspector and verify ONLY non-spectral modes appear.
-    click_combobox_value(&mut h, "Face ring size");
-    h.run_steps(2);
-    assert!(
-        h.query_all_by_label_contains("Radial buckling").next().is_some(),
-        "Manifolds 3D Colour ComboBox must open to check variants"
-    );
-    assert_no_forbidden_tokens(&h, "1. Lattices -> Manifolds (3D Colour popup open)");
-    h.key_press(egui::Key::Escape);
-    h.run_steps(2);
+    assert_no_forbidden_tokens(&h, "Lattice -> Manifolds");
 
     // Workbench Lattices views (stage S4..S6 panels).
     for (lbl, v) in [
@@ -326,25 +316,17 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
         );
     }
 
-    // 2. Defects: visit all 3 sub-views + open "2D Overlay:" and "Color:" ComboBoxes.
+    // 2. Defects: visit all sub-views + open "Color by:" 2D Overlay ComboBoxes.
     equip_defects_view(&mut h, DefectsView::Catalogue2D);
     wait_until(&mut h, "Defects Catalogue build", |a| !a.defects.is_busy() && !a.defects.initializing);
     assert_eq!((h.state().active_mode, h.state().defects_view), (AppMode::Defects, DefectsView::Catalogue2D));
-    assert_no_forbidden_tokens(&h, "2. Defects -> Catalogue (2D)");
+    assert_no_forbidden_tokens(&h, "Defects -> Catalogue (2D)");
 
-    // Open "Color:" (3D sheet) ComboBox.
-    click_combobox_value(&mut h, "Face ring size");
-    h.run_steps(2);
-    assert!(h.query_all_by_label_contains("Signed bond strain").next().is_some(), "Defects Color ComboBox opened");
-    assert_no_forbidden_tokens(&h, "2. Defects -> Catalogue (2D) Color popup open");
-    h.key_press(egui::Key::Escape);
-    h.run_steps(2);
-
-    // Open "2D Overlay:" ComboBox.
+    // Open "Color by:" ComboBox.
     click_combobox_value(&mut h, "Standard sublattice");
     h.run_steps(2);
-    assert!(h.query_all_by_label_contains("Plaquette flux").next().is_some(), "Defects 2D Overlay ComboBox opened");
-    assert_no_forbidden_tokens(&h, "2. Defects -> Catalogue (2D) 2D Overlay popup open");
+    assert!(h.query_all_by_label_contains("Plaquette flux").next().is_some(), "Defects Color by ComboBox opened");
+    assert_no_forbidden_tokens(&h, "Defects -> Catalogue (2D) Color by popup open");
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
 
@@ -368,27 +350,20 @@ fn spectral_ui_and_overlays_are_quarantined_to_analysis_mode_only() {
 
     equip_defects_view(&mut h, DefectsView::CombineAndFuse);
     wait_until(&mut h, "Combine build", |a| !a.combine.is_building());
-    assert_no_forbidden_tokens(&h, "2. Defects -> Combine");
-
-    click_combobox_value(&mut h, "Face ring size");
-    h.run_steps(2);
-    assert!(h.query_all_by_label_contains("Signed bond strain").next().is_some(), "Combine Color ComboBox opened");
-    assert_no_forbidden_tokens(&h, "2. Defects -> Combine Color popup open");
-    h.key_press(egui::Key::Escape);
-    h.run_steps(2);
+    assert_no_forbidden_tokens(&h, "Defects -> Combine");
 
     click_combobox_value(&mut h, "Standard sublattice");
     h.run_steps(2);
-    assert!(h.query_all_by_label_contains("Plaquette flux").next().is_some(), "Combine 2D Overlay ComboBox opened");
-    assert_no_forbidden_tokens(&h, "2. Defects -> Combine 2D Overlay popup open");
+    assert!(h.query_all_by_label_contains("Plaquette flux").next().is_some(), "Combine Color by ComboBox opened");
+    assert_no_forbidden_tokens(&h, "Defects -> Combine Color by popup open");
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
 
-    // Command Deck: every pill and card of realms 1-5 (and their stat cards), one equip per realm, the HUD after.
+    // All Views: every pill and card of realms 1-5 (and their stat cards), one equip per realm, the HUD after.
     scan_deck_realms_1_to_5(&mut h);
     // back to Combine (built) so the Analysis steps start from the same state as before the deck scan
     equip_defects_view(&mut h, DefectsView::CombineAndFuse);
-    assert_no_forbidden_tokens(&h, "2. Defects -> Combine (after the deck scan)");
+    assert_no_forbidden_tokens(&h, "Defects -> Combine (after the deck scan)");
 
     // 3. Analysis mode: verify Tight-Binding panel appears, compute spectrum, verify LDOS + Peierls + 2D/3D legends.
     // C1: Analysis is postponed and no user input reaches it, so the hidden mode is entered by the internal route

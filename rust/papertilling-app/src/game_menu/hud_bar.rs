@@ -146,12 +146,9 @@ impl PapertillingApp {
         self.hud_rename_bar(ui);
     }
 
-    /// `Advanced` left bar: `All views (Tab)`, direct `Lattice | Defects` switch, clickable breadcrumb, and `Rename`.
-    fn hud_left_advanced(&mut self, ui: &mut egui::Ui, density: HudDensity) {
+    /// `Advanced` left bar: `All views (Tab)`, clickable breadcrumb segments, and `Rename`.
+    fn hud_left_advanced(&mut self, ui: &mut egui::Ui, _density: HudDensity) {
         self.hud_all_views_button(ui);
-        if !(self.gallery.renaming && density == HudDensity::Narrow) {
-            self.hud_mode_switch(ui);
-        }
         let bc = self.breadcrumb();
         let has_lattice = bc.lattice.is_some();
         if !has_lattice && self.gallery.renaming {
