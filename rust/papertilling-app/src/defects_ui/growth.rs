@@ -114,7 +114,8 @@ impl Default for GrowthUi {
 impl GrowthUi {
     /// The request for the current sub-tab (walls are never grown).
     pub(crate) fn request(&self, sub_tab: DefectSubTab) -> Option<GrowthRequest> {
-        (self.on && sub_tab != DefectSubTab::Walls).then_some(GrowthRequest { layers: self.layers, seed: self.seed })
+        (self.on && matches!(sub_tab, DefectSubTab::Dislocations | DefectSubTab::Disclinations))
+            .then_some(GrowthRequest { layers: self.layers, seed: self.seed })
     }
 
     /// The shell colouring, when a grown crystal is shown.

@@ -189,7 +189,7 @@ class _Builder(ff._ConeSafeBuilder):
                 self.alive[i] = False
 
 
-def candidate_cuts_360(d: dict, others: list[dict], disloc: bool) -> list[np.ndarray]:
+def candidate_cuts_360(d: dict, others: list[dict], disloc: bool, lmax: float | None = None) -> list[np.ndarray]:
     """Full-360-deg candidate dislocation cuts (removal + insertion) maximizing clearance from other cores."""
     if not disloc:
         return ff._candidate_cuts(d, others, False)
@@ -215,14 +215,110 @@ def candidate_cuts_360(d: dict, others: list[dict], disloc: bool) -> list[np.nda
     if not other_pts:
         return cand
     strip = [at + t * b for t in (0.0, 0.25, 0.5, 0.75, 1.0)]
+    clr_cap = 2.2 * float(lmax) if lmax is not None and lmax > 0.0 else None
 
     def _score(u: np.ndarray) -> float:
         clr = min(ff._ray_distance(pt, sp, u) for pt in other_pts for sp in strip)
+        eff_clr = min(clr, clr_cap) if clr_cap is not None else clr
         obliq = 1.0 - abs(float(u @ c0))
         away = min(-float((pt - anchor) @ u) / max(_norm(pt - anchor), 1e-9) for pt in other_pts)
-        return clr - 0.05 * obliq + 1e-4 * away
+        return eff_clr - 0.05 * obliq + 1e-4 * away
 
     return sorted(cand, key=_score, reverse=True)
+
+
+def run_eff_with_fallback(make_builder, eff: list[dict], lat) -> object:
+    """Apply `eff` in caller order; if that fails for 2..=4 defects, retry prioritized/reversed orders & bounded cut DFS."""
+    def _cut_lists(ordered: list[dict]) -> list[list[np.ndarray]]:
+        return [
+            [np.asarray(d["cut"], float)] if d.get("cut") is not None
+            else candidate_cuts_360(d, [o for o in ordered if o is not d], d["kind"] == "dislocation", lmax=lat.lmax)
+            for d in ordered
+        ]
+
+    def _apply_one(B, d: dict, cut: np.ndarray) -> None:
+        if d["kind"] == "dislocation":
+            B.add_dislocation(d["b"], d["at"], cut)
+        else:
+            B.add_disclination(d["angle"], d["at"], cut)
+
+    def _try_order(ordered: list[dict]):
+        B = make_builder()
+        cuts_per = _cut_lists(ordered)
+        used = []
+        first_err = None
+        for idx, (d, cuts) in enumerate(zip(ordered, cuts_per), 1):
+            err = None
+            for cut in cuts:
+                snap = B.snapshot()
+                try:
+                    _apply_one(B, d, cut)
+                    used.append(np.asarray(cut, float))
+                    err = None
+                    break
+                except ValueError as e:
+                    B.restore(snap)
+                    err = e
+            if err is not None:
+                first_err = ValueError(f"defect {idx} ({d['kind']}): {err}")
+                break
+        if first_err is None:
+            for d, c in zip(ordered, used):
+                d["cut_used"] = c
+            return B, None
+        # Bounded backtracking fallback (matching Rust surgery.rs)
+        if 2 <= len(ordered) <= 4:
+            B = make_builder()
+            budget = [160]
+            dfs_used: list[np.ndarray] = []
+
+            def _dfs(pos: int) -> bool:
+                if pos == len(ordered):
+                    return True
+                for cut in cuts_per[pos]:
+                    if budget[0] <= 0:
+                        return False
+                    budget[0] -= 1
+                    snap = B.snapshot()
+                    try:
+                        _apply_one(B, ordered[pos], cut)
+                    except ValueError:
+                        B.restore(snap)
+                        continue
+                    dfs_used.append(np.asarray(cut, float))
+                    if _dfs(pos + 1):
+                        return True
+                    dfs_used.pop()
+                    B.restore(snap)
+                return False
+
+            if _dfs(0):
+                for d, c in zip(ordered, dfs_used):
+                    d["cut_used"] = c
+                return B, None
+        return None, first_err
+
+    B, caller_err = _try_order(eff)
+    if caller_err is None:
+        return B
+    if 2 <= len(eff) <= 4:
+        n = len(eff)
+        def _prio(i: int) -> tuple[int, int]:
+            d = eff[i]
+            if d["kind"] == "disclination":
+                return (0 if lat.L.locate(np.asarray(d["at"], float)) is not None else 1, i)
+            return (2, i)
+        orders = [sorted(range(n), key=_prio), list(reversed(range(n)))]
+        seen = {tuple(range(n))}
+        for ord_idx in orders:
+            t = tuple(ord_idx)
+            if t in seen:
+                continue
+            seen.add(t)
+            B2, err2 = _try_order([eff[i] for i in ord_idx])
+            if err2 is None:
+                return B2
+    raise caller_err from None
 
 
 def _resolve_coincident_cuts(grp: list[dict]) -> np.ndarray | None:

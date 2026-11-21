@@ -168,9 +168,20 @@ impl PapertillingApp {
                 CardId::WallpaperGroups => "Gallery · browse by group".to_owned(),
                 CardId::CustomBuilder => "Gallery · your own recipe".to_owned(),
                 CardId::Combine => "place, fuse and move defects".to_owned(),
-                CardId::DefectCatalogue(s) => match counts {
-                    Some(n) => format!("{} entries", n[s as usize]),
-                    None => "catalogue of the selected lattice".to_owned(),
+                CardId::DefectCatalogue(s) => match s {
+                    DefectSubTab::Dislocations => counts
+                        .map_or_else(|| "catalogue of the selected lattice".to_owned(), |n| format!("{} entries", n[0])),
+                    DefectSubTab::Disclinations => counts
+                        .map_or_else(|| "catalogue of the selected lattice".to_owned(), |n| format!("{} entries", n[1])),
+                    DefectSubTab::Walls => counts
+                        .map_or_else(|| "catalogue of the selected lattice".to_owned(), |n| format!("{} entries", n[2])),
+                    DefectSubTab::Combinations => {
+                        if let Some(tbl) = self.defects.combos.table_for_item(self.gallery.active_item()) {
+                            format!("{} built · {} charge groups", tbl.built_count, tbl.charge_groups.len())
+                        } else {
+                            "pairs & triples grouped by charge and core".to_owned()
+                        }
+                    }
                 },
                 CardId::Surface(t) => {
                     let k = SurfaceTargetUi::ALL.iter().position(|&x| x == t);

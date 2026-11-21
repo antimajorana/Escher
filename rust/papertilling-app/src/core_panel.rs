@@ -12,9 +12,8 @@ mod inspector;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use card::compile_core_card;
-use card::paint_card_primitives;
-use inspector::CoreInspectorModal;
+pub(crate) use card::{compile_core_card, paint_card_primitives};
+pub(crate) use inspector::CoreInspectorModal;
 
 pub const CHORD_RGBA: [u8; 4] = [0xd8, 0x1b, 0x60, 255]; // #d81b60 magenta
 pub const UNDER_SITE_RGBA: [u8; 4] = [0xc6, 0x28, 0x28, 255]; // #c62828 red

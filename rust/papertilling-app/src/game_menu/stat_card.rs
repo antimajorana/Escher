@@ -66,9 +66,26 @@ impl PapertillingApp {
             CardId::Surface(s) => self.surface_rows(ui, s, t),
             CardId::DefectCatalogue(s) => {
                 row(ui, t, "Lattice", &self.gallery.active_item().display_with_orig());
-                match self.catalogue_counts() {
-                    Some(n) => row(ui, t, "Entries", &n[s as usize].to_string()),
-                    None => row(ui, t, "Entries", "listed once Defects has built this lattice"),
+                match s {
+                    crate::defects_tab::DefectSubTab::Dislocations => match self.catalogue_counts() {
+                        Some(n) => row(ui, t, "Entries", &n[0].to_string()),
+                        None => row(ui, t, "Entries", "listed once Defects has built this lattice"),
+                    },
+                    crate::defects_tab::DefectSubTab::Disclinations => match self.catalogue_counts() {
+                        Some(n) => row(ui, t, "Entries", &n[1].to_string()),
+                        None => row(ui, t, "Entries", "listed once Defects has built this lattice"),
+                    },
+                    crate::defects_tab::DefectSubTab::Walls => match self.catalogue_counts() {
+                        Some(n) => row(ui, t, "Entries", &n[2].to_string()),
+                        None => row(ui, t, "Entries", "listed once Defects has built this lattice"),
+                    },
+                    crate::defects_tab::DefectSubTab::Combinations => {
+                        if let Some(tbl) = self.defects.combos.table_for_item(self.gallery.active_item()) {
+                            row(ui, t, "Built", &format!("{} ({} charge groups)", tbl.built_count, tbl.charge_groups.len()));
+                        } else {
+                            row(ui, t, "Scope", "pairs & triples grouped by charge and core");
+                        }
+                    }
                 }
             }
             CardId::Wb(v, i) => {

@@ -37,6 +37,11 @@ pub(crate) enum PendingPreset {
         /// Push one undo checkpoint of the replaced pins (they are the user's: Combine kept its lattice).
         checkpoint: bool,
     },
+    CombineSpecs {
+        item_key: super::ItemKey,
+        specs: Vec<DefectSpec>,
+        checkpoint: bool,
+    },
     AnalysisSpectral {
         alias_key: LatticeAliasKey,
     },
@@ -184,6 +189,7 @@ impl PapertillingApp {
                     DefectSubTab::Dislocations => d.selected_disloc = defect_index,
                     DefectSubTab::Disclinations => d.selected_disclin = defect_index,
                     DefectSubTab::Walls => d.selected_wall = defect_index,
+                    DefectSubTab::Combinations => {}
                 }
                 d.submit_rebuild(&it, true);
                 let a = &mut self.analysis;
@@ -243,6 +249,7 @@ impl PapertillingApp {
                 DefectSubTab::Dislocations => d.selected_disloc = index,
                 DefectSubTab::Disclinations => d.selected_disclin = index,
                 DefectSubTab::Walls => d.selected_wall = index,
+                DefectSubTab::Combinations => {}
             }
             let it = self.gallery.active_item().clone();
             d.rebuild_crystal(&it, &self.backend, &mut self.canvas2d, true);
@@ -250,6 +257,26 @@ impl PapertillingApp {
         self.export_status = format!("Preset: {}", preset.name);
         self.pump_preset_pending(None);
         Ok(())
+    }
+
+    /// Open explicit defect specs (from Combinations) in `Place & fuse` (`Combine`).
+    pub(crate) fn open_specs_in_combine(&mut self, specs: Vec<DefectSpec>) {
+        self.session.pending_combine = None;
+        let item = self.gallery.active_item().clone();
+        let key = item_key(&item);
+        let had_override = self.combine.override_item.is_some();
+        if had_override {
+            self.combine_seen = key.clone();
+            self.combine.reload_for_item(&item, &self.backend, &mut self.canvas2d, false);
+        }
+        let checkpoint = !had_override && key == self.combine_seen && !self.combine.is_initializing();
+        self.preset_pending = Some(PendingPreset::CombineSpecs {
+            item_key: key,
+            specs,
+            checkpoint,
+        });
+        self.select_defects_view(DefectsView::CombineAndFuse);
+        self.pump_preset_pending(None);
     }
 
     /// Finish parked preset follow-ups once the active tab's background build/catalogue load completes (every frame).
@@ -291,6 +318,31 @@ impl PapertillingApp {
                 if !checkpoint {
                     self.export_status = format!("Preset: {name} (Combine reloaded its lattice: earlier pins have no undo)");
                 }
+            }
+            PendingPreset::CombineSpecs { item_key: want_key, .. } => {
+                if self.active_tab != NavTab::Combine || item_key(&item) != *want_key || self.combine.override_item.is_some() {
+                    self.preset_pending = None;
+                    return;
+                }
+                if self.combine.is_initializing() {
+                    return;
+                }
+                let Some(PendingPreset::CombineSpecs { specs, checkpoint, .. }) = self.preset_pending.take() else { return };
+                if let Some(err) = &self.combine.init_error {
+                    self.export_status = format!("Open in Place & fuse: lattice load failed ({err})");
+                    return;
+                }
+                let c = &mut self.combine;
+                c.dragging = false;
+                c.clear_kinematic_drag_state(false);
+                c.clear_selection();
+                if c.specs != specs {
+                    if checkpoint {
+                        c.push_undo();
+                    }
+                    c.specs = specs;
+                }
+                c.request_build(&item, false, true, true);
             }
             PendingPreset::AnalysisSpectral { alias_key } => {
                 if self.active_mode != AppMode::Analysis

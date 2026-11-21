@@ -2,9 +2,10 @@
 //! and coincident same-kind pin checks/merges in the Combine studio.
 
 use papertilling_core::defect::surgery::{AppliedCut, DefectSpec};
+use papertilling_core::types::BuiltCrystal;
 
 use crate::canvas2d::CanvasCutRay;
-use crate::live_combine::{CombineLatticeInfo, spec_world_pos};
+use crate::live_combine::{CombineLatticeInfo, map_ref_to_drawn, spec_core_ref_pos, spec_world_pos};
 
 /// Explicit branch-cut or half-wall direction vector stored on `spec`, if any.
 pub fn pin_explicit_cut_vec(spec: &DefectSpec) -> Option<[f64; 2]> {
@@ -15,11 +16,7 @@ pub fn pin_explicit_cut_vec(spec: &DefectSpec) -> Option<[f64; 2]> {
 }
 
 fn spec_cut_anchor(info: &CombineLatticeInfo, idx: usize, spec: &DefectSpec) -> [f64; 2] {
-    let at = spec_world_pos(info, idx, spec);
-    match *spec {
-        DefectSpec::Disclination { .. } | DefectSpec::HalfWall { .. } => at,
-        DefectSpec::Dislocation { b, .. } => [at[0] + 0.5 * b[0], at[1] + 0.5 * b[1]],
-    }
+    spec_core_ref_pos(info, idx, spec)
 }
 
 fn spec_matches_cut_kind(spec: &DefectSpec, ac: &AppliedCut) -> bool {
@@ -202,14 +199,27 @@ pub fn build_fallback_cut_ray_for_spec(
     Some(build_cut_ray(&ac, patch_centre, applied_radius, Some(idx)))
 }
 
+/// Shift a reference-frame `CanvasCutRay` so its origin sits at the deformed drawn defect core.
+pub fn map_cut_ray_to_drawn(crystal: &BuiltCrystal, mut ray: CanvasCutRay) -> CanvasCutRay {
+    let drawn_origin = map_ref_to_drawn(crystal, ray.origin);
+    let dx = drawn_origin[0] - ray.origin[0];
+    let dy = drawn_origin[1] - ray.origin[1];
+    ray.origin = drawn_origin;
+    ray.end = [ray.end[0] + dx, ray.end[1] + dy];
+    if let Some((sa, sb)) = ray.strip {
+        ray.strip = Some(([sa[0] + dx, sa[1] + dy], [sb[0] + dx, sb[1] + dy]));
+    }
+    ray
+}
+
 /// Translate low-level surgical refusal messages into physical/geometric explanations.
 pub fn format_refusal_note(err: &str) -> String {
     if err.contains("two walks disagree") || err.contains("cut runs into") || err.contains("overlaps itself") {
         format!("Atomic-scale core/collar overlap (or blocked branch cut): move defects >= 1 cell apart or adjust cut angle ({err})")
     } else if err.contains("close into a cone") {
-        format!("Gauss-Bonnet limit (defect-free disk shown): {err}")
+        format!("Gauss-Bonnet limit: {err}")
     } else {
-        format!("surgery refused (defect-free disk shown): {err}")
+        format!("surgery refused: {err}")
     }
 }
 

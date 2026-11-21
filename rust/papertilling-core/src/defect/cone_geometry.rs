@@ -135,7 +135,7 @@ impl<'a> ConeBuilder<'a> {
             if self.alive[i] {
                 let r = sub2(self.x_pos[i], core);
                 let frac = 1.0 - (-cross2(dq, r)).atan2(dot2(r, dq)).rem_euclid(TWO_PI) / TWO_PI;
-                self.x_pos[i] = [self.x_pos[i][0] - frac * bq[0], self.x_pos[i][1] - frac * bq[1]];
+                self.x_pos[i] = [self.x_pos[i][0] + (0.5 - frac) * bq[0], self.x_pos[i][1] + (0.5 - frac) * bq[1]];
             }
         }
         self.records.push((gone.len(), 0));
@@ -451,7 +451,8 @@ impl<'a> ConeBuilder<'a> {
             if let Some(&phi_i) = phi.get(&i) {
                 th = phi_i + (th - phi_i + PI).rem_euclid(TWO_PI) - PI;
             }
-            let ang = th * TWO_PI / theta_open + thd;
+            let half_shift = 0.5 * (TWO_PI - theta_open);
+            let ang = th * TWO_PI / theta_open + thd - half_shift;
             self.x_pos[i] = [xc[0] + rad * ang.cos(), xc[1] + rad * ang.sin()];
         }
         self.records.push((gone.len(), fresh.len()));

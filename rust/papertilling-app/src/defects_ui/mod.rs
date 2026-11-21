@@ -4,12 +4,14 @@
 use crate::backend::AppBackend;
 use crate::backend::CatalogueItemUi;
 use crate::canvas2d::Canvas2D;
-use crate::defects_tab::DefectsTabState;
+use crate::defects_tab::{DefectSubTab, DefectsTabState};
 use crate::mesh3d::DefectViewMode;
 use crate::theme::ThemeTokens;
 use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
 use crate::view3d::View3dState;
 
+pub(crate) mod combos;
+mod combos_view;
 pub(crate) mod growth;
 mod inspector;
 mod left;
@@ -40,6 +42,16 @@ impl DefectsTabState {
         tokens: &ThemeTokens,
     ) {
         self.poll_worker(ui.ctx(), canvas);
+        if self.sub_tab == DefectSubTab::Combinations {
+            self.combos.poll(ui.ctx());
+            if !self.initializing {
+                self.combos.ensure_started(active_item, &self.catalogue);
+            }
+            if let Some(specs) = self.combos.show_central(ui, active_item, tokens) {
+                self.open_in_combine = Some(specs);
+            }
+            return;
+        }
         let busy = self.is_busy();
         show_defect_viewport_header(ui, busy);
         if self.view3d_dirty {

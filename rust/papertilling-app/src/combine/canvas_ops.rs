@@ -3,6 +3,7 @@ use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
 use crate::core_panel::show_core_panel;
 use crate::live_combine::cuts::set_pin_cut_angle;
+use crate::live_combine::{map_drawn_to_ref, map_ref_to_drawn};
 use crate::mesh3d::DefectViewMode;
 use crate::theme::ThemeTokens;
 use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
@@ -96,7 +97,11 @@ impl CombineTabState {
         let preview_world = match (self.tool_mode, self.last_hover_world) {
             (ToolMode::PlaceDisclination, Some(hw)) if !self.info.centres.is_empty() => {
                 let (cid, ang) = self.active_centre_and_angle();
-                Some(backend.snap_disclination(self.effective_item(gallery_item), &self.info, ang, cid, hw).0)
+                let ref_hw = map_drawn_to_ref(&self.last_build.crystal, hw);
+                let snapped = backend
+                    .snap_disclination(self.effective_item(gallery_item), &self.info, ang, cid, ref_hw)
+                    .0;
+                Some(map_ref_to_drawn(&self.last_build.crystal, snapped))
             }
             (ToolMode::PlaceDislocation, Some(hw)) | (ToolMode::PlaceHalfWall, Some(hw)) => Some(hw),
             _ => None,
@@ -106,7 +111,8 @@ impl CombineTabState {
         self.last_hover_world = inter.hovered_world;
         if let Some((pin_idx, world)) = inter.dragged_marker {
             self.commit_cut_edit_anchor();
-            self.move_pin_with_mods(pin_idx, world, inter.shift_held, gallery_item, backend, canvas);
+            let ref_at = self.drawn_to_pin_at(pin_idx, world);
+            self.move_pin_with_mods(pin_idx, ref_at, inter.shift_held, gallery_item, backend, canvas);
         }
         let released_elsewhere = self.dragging && !ui.input(|i| i.pointer.any_down());
         if inter.drag_released || released_elsewhere {
@@ -144,7 +150,8 @@ impl CombineTabState {
             self.sync_selection_to_canvas(canvas);
         }
         if let Some(world) = inter.clicked_world {
-            self.place_at_world(world, gallery_item, backend, canvas);
+            let ref_at = self.drawn_to_place_at(world);
+            self.place_at_world(ref_at, gallery_item, backend, canvas);
         }
         if let Some(v0) = inter.clicked_circuit_vertex {
             self.inspectors.circuit.base_v0 = Some(v0);

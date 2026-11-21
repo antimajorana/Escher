@@ -11,17 +11,22 @@ use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use petgraph::graph::UnGraph;
 
+use crate::defect::catalogue::DefectCatalogue;
 use crate::defect::combine_types::{
-    CoreCandidateInfo, CoreGalleryEntry, DislocationScanInfo, EquivalentSingleReport,
+    ClassifiedCharge, CoreCandidateInfo, CoreGalleryEntry, DislocationScanInfo,
+    EquivalentSingleReport,
 };
 use crate::defect::core_gallery::{config_core_entry, gallery_from_bundle, resolve_patch_rim};
 use crate::defect::core_graph::{LatticeCoreInfo, core_graph_with_rim, isomorphic_cores, patch_rim};
 use crate::defect::equivalence::{classify_crystal_charge, fmt_signed_g, fmt_vec2_round4};
-use crate::defect::surgery::{DefectSpec, build_point_defects, patch_centre_and_radius};
+use crate::defect::surgery::{
+    DefectSpec, build_point_defects_with_info, patch_centre_and_radius,
+};
 use crate::defect::sym_helper::round_dec;
 use crate::defect::volterra_patch::wl_hash_labelled;
 use crate::defect::volterra_scan::scan_dislocation_cores;
@@ -102,6 +107,16 @@ fn insert<K, V>(list: &mut VecDeque<(K, Arc<V>)>, capacity: usize, key: K, val: 
     list.push_back((key, val));
 }
 
+/// Outcome of matching one extracted defect core against the cached single-defect core(s) for a charge.
+pub(crate) struct SingleMatchResult {
+    pub match_tier: String,
+    pub matches: Vec<String>,
+    pub volterra_matches: Vec<String>,
+    pub completion_matches: Vec<String>,
+    pub scan: Option<DislocationScanInfo>,
+    pub gallery: Vec<CoreGalleryEntry>,
+}
+
 impl SingleDefectCache {
     pub fn new(capacity: usize) -> Self {
         Self { disloc: VecDeque::new(), discl: VecDeque::new(), capacity, hits: 0, misses: 0, last_match_ms: 0.0 }
@@ -159,12 +174,118 @@ impl SingleDefectCache {
         }
         self.misses += 1;
         let single_spec = [DefectSpec::Disclination { angle_deg, at, cut: None }];
-        let single = build_point_defects(cell, &single_spec, None, None)?;
+        let (single, _, _) = build_point_defects_with_info(lat_info, &single_spec, None, None)?;
         let (s_ctr, s_r) = patch_centre_and_radius(lat_info, &single_spec, None, None)?;
         let rim = patch_rim(&single, lat_info, s_ctr, s_r);
         let h = Arc::new(core_graph_with_rim(&single, &rim, lat_info, radius)?);
         insert(&mut self.discl, self.capacity, key, Arc::clone(&h));
         Ok(h)
+    }
+
+    /// Match an extracted core graph `h_cfg` (with precomputed `wl_hash`) against the single defect(s)
+    /// carrying `charge`, using canonical orbit representatives (`b_rep` and `centre_class_of`) for cache reuse.
+    /// Returns `Ok(None)` if `cancel` is set before a new scan/build is started.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn match_core_against_single(
+        &mut self,
+        lat_info: &LatticeCoreInfo,
+        cat: &DefectCatalogue,
+        cell: &Cell2D,
+        charge: &ClassifiedCharge,
+        h_cfg: &UnGraph<u16, ()>,
+        wl_hash: u64,
+        radius: usize,
+        grid: usize,
+        draw_gallery: bool,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Option<SingleMatchResult>, String> {
+        if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+            return Ok(None);
+        }
+        let mut matches = Vec::new();
+        let mut volterra_matches = Vec::new();
+        let mut completion_matches = Vec::new();
+        let mut match_tier = "none".to_string();
+        let mut scan = None;
+        let mut gallery = Vec::new();
+
+        if charge.kind == "dislocation" {
+            let b = charge.b_rep.or(charge.b).unwrap_or([0.0, 0.0]);
+            let key = DislocKey { cell: cell.clone(), b: [key6(b[0]), key6(b[1])], radius, grid, draw: draw_gallery };
+            let found = if let Some(hit) = touch(&mut self.disloc, &key) {
+                self.hits += 1;
+                hit
+            } else {
+                if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                    return Ok(None);
+                }
+                self.dislocation(cell, b, radius, grid, draw_gallery)?
+            };
+            for (name, wl, graph) in &found.cores {
+                if *wl == wl_hash && isomorphic_cores(h_cfg, graph) {
+                    matches.push(name.clone());
+                }
+            }
+            volterra_matches = matches
+                .iter()
+                .filter(|m| found.candidates.iter().any(|c| c.name == **m && c.volterra == Some(true)))
+                .cloned()
+                .collect();
+            completion_matches = matches
+                .iter()
+                .filter(|m| found.candidates.iter().any(|c| c.name == **m && !c.volterra.unwrap_or(false)))
+                .cloned()
+                .collect();
+            if !volterra_matches.is_empty() {
+                match_tier = "volterra".to_string();
+            } else if !completion_matches.is_empty() {
+                match_tier = "completion".to_string();
+            }
+            scan = Some(found.info.clone());
+            if draw_gallery {
+                gallery = found.gallery.clone();
+            }
+        } else if charge.kind == "disclination"
+            && let Some(DefectSpec::Disclination { angle_deg, at, .. }) = charge.single
+        {
+            let canon_rec = cat.centre_class_of(at);
+            let canon_at = canon_rec.map_or(at, |c| c.point);
+            let key = DisclKey {
+                cell: lat_info.lat.cell.clone(),
+                angle: key6(angle_deg),
+                at: [key6(canon_at[0]), key6(canon_at[1])],
+                radius,
+            };
+            let h_single = if let Some(hit) = touch(&mut self.discl, &key) {
+                self.hits += 1;
+                hit
+            } else {
+                if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                    return Ok(None);
+                }
+                self.disclination_core(lat_info, angle_deg, canon_at, radius)?
+            };
+            if isomorphic_cores(h_cfg, &h_single) {
+                let name = canon_rec.map_or_else(
+                    || format!("single {} deg at {}", fmt_signed_g(angle_deg), fmt_vec2_round4(canon_at)),
+                    |c| format!("D({}, {})", c.label, fmt_signed_g(angle_deg)),
+                );
+                matches.push(name);
+                match_tier = "exact".to_string();
+            }
+        } else if charge.kind == "vacuum" && h_cfg.node_count() == 0 {
+            matches.push("perfect lattice".to_string());
+            match_tier = "exact".to_string();
+        }
+
+        Ok(Some(SingleMatchResult {
+            match_tier,
+            matches,
+            volterra_matches,
+            completion_matches,
+            scan,
+            gallery,
+        }))
     }
 }
 
@@ -284,6 +405,7 @@ pub fn equivalent_single_cached(
 mod tests {
     use super::*;
     use crate::defect::core_gallery::equivalent_single;
+    use crate::defect::surgery::build_point_defects;
 
     fn square() -> Cell2D {
         // Square lattice by hand: one site per cell, bonds along a1 and a2.

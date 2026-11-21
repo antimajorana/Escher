@@ -44,16 +44,23 @@ pub enum DefectSubTab {
     Dislocations,
     Disclinations,
     Walls,
+    Combinations,
 }
 
 impl DefectSubTab {
-    pub const ALL: [Self; 3] = [Self::Dislocations, Self::Disclinations, Self::Walls];
+    pub const ALL: [Self; 4] = [
+        Self::Dislocations,
+        Self::Disclinations,
+        Self::Walls,
+        Self::Combinations,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Dislocations => "Dislocations",
             Self::Disclinations => "Disclinations",
             Self::Walls => "Mirror & glide walls",
+            Self::Combinations => "Combinations",
         }
     }
 }
@@ -72,6 +79,8 @@ pub struct DefectsTabState {
     pub sheet_opts: Sheet3dViewOpts,
     pub inspectors: DefectInspectors,
     pub(crate) growth: GrowthUi,
+    pub(crate) combos: crate::defects_ui::combos::CombosState,
+    pub(crate) open_in_combine: Option<Vec<papertilling_core::defect::surgery::DefectSpec>>,
     pub(crate) last_item: CatalogueItemUi,
     pub readout: DefectReadoutUi,
     pub(crate) stale: bool,
@@ -116,6 +125,8 @@ impl DefectsTabState {
             sheet_opts,
             inspectors: DefectInspectors::new(),
             growth: GrowthUi::default(),
+            combos: crate::defects_ui::combos::CombosState::new(),
+            open_in_combine: None,
             last_item: item.clone(),
             readout,
             stale: false,
@@ -179,10 +190,18 @@ impl DefectsTabState {
 
     pub(crate) fn current_selection(&self) -> DefectSelectionUi {
         match self.sub_tab {
-            DefectSubTab::Dislocations => DefectSelectionUi::Dislocation(self.selected_disloc),
+            DefectSubTab::Dislocations | DefectSubTab::Combinations => {
+                DefectSelectionUi::Dislocation(self.selected_disloc)
+            }
             DefectSubTab::Disclinations => DefectSelectionUi::Disclination(self.selected_disclin),
             DefectSubTab::Walls => DefectSelectionUi::Wall(self.selected_wall),
         }
+    }
+
+    pub(crate) fn take_open_in_combine(
+        &mut self,
+    ) -> Option<Vec<papertilling_core::defect::surgery::DefectSpec>> {
+        self.open_in_combine.take()
     }
 
     pub fn reload_for_item(
@@ -194,6 +213,8 @@ impl DefectsTabState {
     ) {
         self.last_item = item.clone();
         self.inspectors.clear_for_switch();
+        self.combos.clear_and_cancel();
+        self.open_in_combine = None;
         self.selected_disloc = 0;
         self.selected_disclin = 0;
         self.selected_wall = 0;

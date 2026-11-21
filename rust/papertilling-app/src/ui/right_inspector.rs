@@ -51,6 +51,9 @@ impl PapertillingApp {
                             &tokens,
                             self.advanced,
                         );
+                        if let Some(specs) = self.defects.take_open_in_combine() {
+                            self.open_specs_in_combine(specs);
+                        }
                     }
                     NavTab::Combine => {
                         let item = self.gallery.active_item().clone();

@@ -279,7 +279,10 @@ impl CombineTabState {
 
     /// A comparison result that matches the current defects (for the `.json` summary).
     pub(super) fn current_report(&self) -> Option<&EquivalentSingleReport> {
-        let fresh = !self.compare_stale && !self.is_busy() && !self.last_build.preview;
+        let fresh = !self.compare_stale
+            && !self.is_busy()
+            && !self.last_build.preview
+            && self.last_build.refused.is_none();
         self.compare_result.as_ref().filter(|_| fresh).and_then(|r| r.as_ref().ok())
     }
 }

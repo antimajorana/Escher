@@ -3,7 +3,7 @@ use papertilling_core::defect::core_graph::LatticeCoreInfo;
 use papertilling_core::defect::equivalence::CentreSnapper;
 use papertilling_core::defect::surgery::DefectSpec;
 use papertilling_core::plane::family::LatticeFamily;
-use papertilling_core::types::Isometry2;
+use papertilling_core::types::{BuiltCrystal, Isometry2};
 
 use super::{CombineCentreOption, CombineDislocOption, CombineLatticeInfo};
 use crate::backend::CatalogueItemUi;
@@ -204,6 +204,71 @@ pub fn spec_world_pos(info: &CombineLatticeInfo, idx: usize, spec: &DefectSpec) 
             (0.371 + 3.0 * idx as f64) * a1[1] + 0.413 * a2[1],
         ],
     }
+}
+
+pub fn spec_core_ref_pos(info: &CombineLatticeInfo, idx: usize, spec: &DefectSpec) -> [f64; 2] {
+    let at = spec_world_pos(info, idx, spec);
+    match *spec {
+        DefectSpec::Disclination { .. } | DefectSpec::HalfWall { .. } => at,
+        DefectSpec::Dislocation { b, .. } => [at[0] + 0.5 * b[0], at[1] + 0.5 * b[1]],
+    }
+}
+
+fn idw_map(src: &[[f64; 2]], dst: &[[f64; 2]], pt: [f64; 2]) -> [f64; 2] {
+    if src.is_empty() || src.len() != dst.len() {
+        return pt;
+    }
+    const K: usize = 6;
+    let mut best: [(f64, usize); K] = [(f64::INFINITY, 0); K];
+    let mut count = 0usize;
+    for (i, &p) in src.iter().enumerate() {
+        let d2 = (p[0] - pt[0]).powi(2) + (p[1] - pt[1]).powi(2);
+        if count < K {
+            best[count] = (d2, i);
+            count += 1;
+            let mut j = count - 1;
+            while j > 0 && best[j].0 < best[j - 1].0 {
+                best.swap(j, j - 1);
+                j -= 1;
+            }
+        } else if d2 < best[K - 1].0 {
+            best[K - 1] = (d2, i);
+            let mut j = K - 1;
+            while j > 0 && best[j].0 < best[j - 1].0 {
+                best.swap(j, j - 1);
+                j -= 1;
+            }
+        }
+    }
+    let (mut ex, mut ey, mut en) = (0.0, 0.0, 0usize);
+    for &(d2, i) in &best[..count] {
+        if d2 < 1e-12 {
+            ex += dst[i][0];
+            ey += dst[i][1];
+            en += 1;
+        }
+    }
+    if en > 0 {
+        return [ex / en as f64, ey / en as f64];
+    }
+    let (mut wx, mut wy, mut ws) = (0.0, 0.0, 0.0);
+    for &(d2, i) in &best[..count] {
+        let w = 1.0 / (d2 + 1e-6);
+        wx += w * (dst[i][0] - src[i][0]);
+        wy += w * (dst[i][1] - src[i][1]);
+        ws += w;
+    }
+    if ws > 0.0 { [pt[0] + wx / ws, pt[1] + wy / ws] } else { pt }
+}
+
+/// Map a reference-lattice point (`crystal.ref_pos`) into the deformed drawn crystal (`crystal.pos`).
+pub fn map_ref_to_drawn(crystal: &BuiltCrystal, ref_pt: [f64; 2]) -> [f64; 2] {
+    idw_map(&crystal.ref_pos, &crystal.pos, ref_pt)
+}
+
+/// Approximate inverse of `map_ref_to_drawn`: map a drawn canvas point back to `crystal.ref_pos`.
+pub fn map_drawn_to_ref(crystal: &BuiltCrystal, drawn_pt: [f64; 2]) -> [f64; 2] {
+    idw_map(&crystal.pos, &crystal.ref_pos, drawn_pt)
 }
 
 pub fn centre_class_at(info: &CombineLatticeInfo, p: [f64; 2]) -> Option<&CombineCentreOption> {

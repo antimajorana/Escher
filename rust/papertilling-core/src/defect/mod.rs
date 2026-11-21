@@ -6,6 +6,9 @@ pub mod catalogue;
 pub mod charge;
 pub mod circuit;
 mod circuit_auto;
+pub mod combinations;
+mod combinations_gen;
+pub mod combinations_types;
 pub mod combine_api;
 pub mod combine_types;
 pub mod cone_builder;
@@ -29,6 +32,8 @@ mod sheet3d_energy;
 mod sheet3d_opt;
 pub(crate) mod sheet3d_topology;
 pub mod single_cache;
+#[cfg(test)]
+mod consistency_tests;
 #[cfg(test)]
 mod stage2_defect_tests;
 #[cfg(test)]

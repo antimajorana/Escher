@@ -73,6 +73,9 @@
     "matches": [
       "single +90 deg at [0.5, 1.5]"
     ],
+    "volterra_matches": [],
+    "completion_matches": [],
+    "match_tier": "exact",
     "verdict": "equivalent to the single defect (core: single +90 deg at [0.5, 1.5])"
   }
 }

@@ -30,7 +30,7 @@ impl PapertillingApp {
                 let changed = self.defects.sub_tab != s;
                 self.defects.sub_tab = s;
                 self.select_defects_view(DefectsView::Catalogue2D);
-                if was && changed {
+                if was && changed && s != crate::defects_tab::DefectSubTab::Combinations {
                     // activate_nav_tab returns early when nothing changed: rebuild as the left-panel click does
                     let item = self.gallery.active_item().clone();
                     self.defects.rebuild_crystal(&item, &self.backend, &mut self.canvas2d, true);

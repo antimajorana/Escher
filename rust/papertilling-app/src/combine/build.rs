@@ -239,8 +239,26 @@ impl CombineTabState {
     pub(super) fn take_build(&mut self, res: Result<BuildWorkerOutput, String>) {
         match res {
             Ok((out, sheet3d)) => {
-                self.last_build = out;
-                self.last_sheet3d = sheet3d;
+                let preserve_prev = out.refused.is_some()
+                    && !self.last_build.crystal.pos.is_empty()
+                    && self.last_build.lattice_key == out.lattice_key;
+                if preserve_prev {
+                    self.last_build.refused = out.refused;
+                    self.last_build.note = out.note;
+                    self.last_build.charge_label = out.charge_label;
+                    self.last_build.charge_detail = out.charge_detail;
+                    self.last_build.elapsed_ms = out.elapsed_ms;
+                    self.last_build.preview = out.preview;
+                    self.last_build.applied_cuts = out.applied_cuts;
+                    self.last_build.coalesced_count = 0;
+                    self.last_build.core_nodes = 0;
+                    self.last_build.core_edges = 0;
+                    self.last_build.core_summary = out.core_summary;
+                    self.last_build.local_cores = out.local_cores;
+                } else {
+                    self.last_build = out;
+                    self.last_sheet3d = sheet3d;
+                }
             }
             Err(err) => {
                 self.last_build.note = err.clone();

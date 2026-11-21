@@ -1,6 +1,6 @@
 use crate::backend::CatalogueItemUi;
 use crate::canvas2d::Canvas2D;
-use crate::defects_tab::DefectsTabState;
+use crate::defects_tab::{DefectSubTab, DefectsTabState};
 use crate::theme::ThemeTokens;
 
 impl DefectsTabState {
@@ -13,6 +13,13 @@ impl DefectsTabState {
         advanced: bool,
     ) {
         if self.initializing {
+            return;
+        }
+        if self.sub_tab == DefectSubTab::Combinations {
+            self.combos.poll(ui.ctx());
+            if let Some(specs) = self.combos.show_inspector(ui, active_item, tokens) {
+                self.open_in_combine = Some(specs);
+            }
             return;
         }
         ui.strong("Topological Charge & Core");

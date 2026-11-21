@@ -94,7 +94,8 @@ impl CombineTabState {
 
         let spec = &self.specs[idx];
         let pos_w = spec_world_pos(&self.info, idx, spec);
-        let sp = canvas.world_to_screen_at(canvas_rect, [pos_w[0] as f32, pos_w[1] as f32]);
+        let pos_drawn = self.marker_world_pos(idx, spec);
+        let sp = canvas.world_to_screen_at(canvas_rect, [pos_drawn[0] as f32, pos_drawn[1] as f32]);
         let avoid_handle = canvas
             .cut_rays()
             .iter()

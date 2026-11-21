@@ -28,6 +28,8 @@ use crate::live_combine::spec_world_pos;
 #[path = "../combine_tab_tests.rs"]
 mod tests;
 #[cfg(test)]
+mod fixes_tests;
+#[cfg(test)]
 mod stage6_tests;
 
 pub use kinematics::MotionMode;
