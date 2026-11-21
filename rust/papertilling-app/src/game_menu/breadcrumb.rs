@@ -72,6 +72,7 @@ impl PapertillingApp {
             },
             AppMode::Defects => match self.defects_view {
                 DefectsView::AtlasDefects => atlas_geometry(self.atlas.sub_tab),
+                DefectsView::FusionSteps => "Lattice graph",
                 _ => "E² Plane",
             },
             AppMode::Analysis => match self.analysis.target {
@@ -164,7 +165,7 @@ impl PapertillingApp {
                 | LatticesView::Curved2D
                 | LatticesView::Honeycombs3D => false,
             },
-            AppMode::Defects => !matches!(self.defects_view, DefectsView::AtlasDefects),
+            AppMode::Defects => !matches!(self.defects_view, DefectsView::AtlasDefects | DefectsView::FusionSteps),
             AppMode::Analysis => true,
         }
     }

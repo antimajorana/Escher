@@ -82,7 +82,7 @@ pub(crate) fn card_realm(id: CardId) -> Realm {
         CardId::Surface(_) => Realm::Manifolds,
         CardId::Combine | CardId::AtlasDefects(_) | CardId::DefectCatalogue(_) => Realm::Forge,
         CardId::Wb(v, i) => match v {
-            WorkbenchView::S2Defects | WorkbenchView::S3Detect => Realm::Forge,
+            WorkbenchView::S2Defects | WorkbenchView::S3Detect | WorkbenchView::S7Fusion => Realm::Forge,
             WorkbenchView::S4Flat3d => Realm::Manifolds,
             WorkbenchView::S5Curved2d if i <= 2 => Realm::Geometries,
             WorkbenchView::S5Curved2d => Realm::Manifolds,
@@ -279,6 +279,7 @@ impl PapertillingApp {
                 }
                 if matches!(pill, 0 | 2) {
                     out.push(Card::new(CardId::Combine, "Place & fuse defects"));
+                    out.extend(self.wb_cards(WorkbenchView::S7Fusion, 0..=1));
                 }
                 if matches!(pill, 0 | 3) {
                     out.extend(self.wb_cards(WorkbenchView::S2Defects, 0..=4));

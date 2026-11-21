@@ -271,3 +271,44 @@ fn positive_control_square_patch() {
     assert!(c.valences.iter().all(|&(_, k)| k == 4) && c.face_sides.iter().all(|&s| s == 4));
     assert_eq!(c.square_curvature, 0);
 }
+
+#[test]
+fn every_step_is_one_connected_planar_piece() {
+    // Euler: V - E + F = 2 with the outer face. Fig. 8(a) as drawn: 13 vertices, 14 edges, 2 + 1 faces.
+    assert_eq!(fig_8a().euler(), 13 - 14 + 3);
+    for route in [gate_route().unwrap(), hamiltonian_route().unwrap()] {
+        for (k, st) in route.iter().enumerate() {
+            assert_eq!(st.map.euler(), 2, "step {k} ({})", st.title);
+        }
+    }
+    // Two separate edges are not one piece.
+    let b = VertexKind::Boundary;
+    let verts = [("p", [0.0, 0.0], b), ("q", [1.0, 0.0], b), ("r", [0.0, 1.0], b), ("t", [1.0, 1.0], b)];
+    assert!(PlanarMap::from_drawing(&verts, &[(1, 0, 1), (2, 2, 3)], 1).unwrap_err().contains("connected"));
+}
+
+#[test]
+fn merge_and_slide_refusals_and_the_outer_leg() {
+    let m = fig_8a();
+    // Edges 3 and 5 meet at d, which has four edges; 11 and 12 meet at the two-valent s but label 3 is taken.
+    assert!(m.clone().merge_edges(3, 5, 20).unwrap_err().contains("valence 2"));
+    assert!(m.clone().merge_edges(11, 12, 3).unwrap_err().contains("already in use"));
+    assert!(m.clone().merge_edges(11, 11, 20).is_err());
+    // Edge 4 is an external leg: its far end is cut by the picture, so nothing may slide along it.
+    assert!(m.clone().slide(3, 4, D, None).unwrap_err().contains("cut by the edge of the picture"));
+    // A leg L - s - w with w on a triangle; merging the two edges at s must work whichever is named first,
+    // also when the edge that disappears is the leg that marks the outer face.
+    let (c, b) = (VertexKind::Complete, VertexKind::Boundary);
+    let verts = [("L", [-2.0, 0.0], b), ("s", [-1.0, 0.0], c), ("w", [0.0, 0.0], c), ("a", [1.0, 1.0], b), ("b", [1.0, -1.0], b)];
+    let edges = [(1, 0, 1), (2, 1, 2), (3, 2, 3), (4, 3, 4), (5, 4, 2)];
+    for (first, second) in [(1, 2), (2, 1)] {
+        let mut p = PlanarMap::from_drawing(&verts, &edges, 1).unwrap();
+        p.merge_edges(first, second, 9).unwrap();
+        // Left: 4 vertices (L, w, a, b), 4 edges (9, 3, 4, 5), 2 faces (the triangle and the outer one).
+        assert_eq!(p.euler(), 2, "merge({first}, {second})");
+        let census = p.census();
+        assert_eq!((census.vertices, census.edges, census.faces), (1, 4, 1));
+        assert_eq!(census.vertex_ops, vec![vec![3, 5, 9]]);
+        assert_eq!(census.face_ops, vec![vec![3, 4, 5]]);
+    }
+}

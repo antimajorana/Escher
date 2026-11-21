@@ -169,7 +169,7 @@ fn capitalised(s: &str) -> String {
 fn wb_card(a: &PapertillingApp, v: WorkbenchView) -> (Realm, String) {
     let i = a.workbench.sub_index(v);
     let realm = match v {
-        WorkbenchView::S2Defects | WorkbenchView::S3Detect => Realm::Forge,
+        WorkbenchView::S2Defects | WorkbenchView::S3Detect | WorkbenchView::S7Fusion => Realm::Forge,
         WorkbenchView::S4Flat3d => Realm::Manifolds,
         WorkbenchView::S5Curved2d if i <= 2 => Realm::Geometries,
         WorkbenchView::S5Curved2d => Realm::Manifolds,
@@ -197,7 +197,7 @@ fn defects_card(a: &PapertillingApp, v: DefectsView) -> (Realm, String) {
         DefectsView::Catalogue2D => (Realm::Forge, a.defects.sub_tab.label().to_string()),
         DefectsView::AtlasDefects => (Realm::Forge, a.atlas.last_defect_subtab.defect_label().to_string()),
         DefectsView::CombineAndFuse => (Realm::Forge, String::from("Place & fuse defects")),
-        DefectsView::PointAndBoundary | DefectsView::DetectFields => {
+        DefectsView::PointAndBoundary | DefectsView::DetectFields | DefectsView::FusionSteps => {
             wb_card(a, v.workbench_view().expect("stage panel view"))
         }
     }

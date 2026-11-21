@@ -118,7 +118,7 @@ fn every_workbench_sub_row_has_exactly_one_card_in_its_realm() {
             }
             assert_eq!(hits.len(), 1, "{view:?} row {i} ('{label}'): exactly one card");
             let want = match view {
-                WorkbenchView::S2Defects | WorkbenchView::S3Detect => Realm::Forge,
+                WorkbenchView::S2Defects | WorkbenchView::S3Detect | WorkbenchView::S7Fusion => Realm::Forge,
                 WorkbenchView::S4Flat3d => Realm::Manifolds,
                 WorkbenchView::S5Curved2d if i <= 2 => Realm::Geometries,
                 WorkbenchView::S5Curved2d => Realm::Manifolds,
@@ -156,6 +156,7 @@ fn defects_card(v: DefectsView) -> CardId {
         DefectsView::CombineAndFuse => CardId::Combine,
         DefectsView::PointAndBoundary => CardId::Wb(WorkbenchView::S2Defects, 0),
         DefectsView::DetectFields => CardId::Wb(WorkbenchView::S3Detect, 0),
+        DefectsView::FusionSteps => CardId::Wb(WorkbenchView::S7Fusion, 0),
     }
 }
 

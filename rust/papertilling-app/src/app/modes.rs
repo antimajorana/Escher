@@ -113,20 +113,22 @@ pub enum DefectsView {
     CombineAndFuse,
     PointAndBoundary,
     DetectFields,
+    FusionSteps,
 }
 
 impl DefectsView {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Catalogue2D,
         Self::AtlasDefects,
         Self::CombineAndFuse,
         Self::PointAndBoundary,
         Self::DetectFields,
+        Self::FusionSteps,
     ];
 
     /// Views reachable in the two-mode Default view (`Advanced` off).
     pub fn is_default(self) -> bool {
-        matches!(self, Self::Catalogue2D | Self::CombineAndFuse)
+        matches!(self, Self::Catalogue2D | Self::CombineAndFuse | Self::FusionSteps)
     }
 
     pub fn label(self) -> &'static str {
@@ -136,6 +138,7 @@ impl DefectsView {
             Self::CombineAndFuse => "Combine, Fuse & Move",
             Self::PointAndBoundary => "Point, Stone-Wales & GB",
             Self::DetectFields => "Detect & Fields",
+            Self::FusionSteps => "Fusion steps (graphs)",
         }
     }
 
@@ -144,7 +147,7 @@ impl DefectsView {
             Self::Catalogue2D => NavTab::Defects,
             Self::AtlasDefects => NavTab::Atlas,
             Self::CombineAndFuse => NavTab::Combine,
-            Self::PointAndBoundary | Self::DetectFields => NavTab::Workbench,
+            Self::PointAndBoundary | Self::DetectFields | Self::FusionSteps => NavTab::Workbench,
         }
     }
 }

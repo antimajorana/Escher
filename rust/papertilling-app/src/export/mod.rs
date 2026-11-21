@@ -13,7 +13,9 @@ pub(crate) mod text_ttf;
 
 pub use legend::ExportLegend;
 #[cfg(test)]
-use png_out::{encode_prims_png, encode_prims_png_with_legend, encode_scene_png};
+pub(crate) use png_out::encode_scene_png;
+#[cfg(test)]
+use png_out::{encode_prims_png, encode_prims_png_with_legend};
 use png_out::{PngSize, encode_layers_png};
 #[cfg(test)]
 use raster::Raster;

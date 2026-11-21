@@ -361,6 +361,7 @@ impl PapertillingApp {
                 DefectsView::CombineAndFuse => CardId::Combine,
                 DefectsView::PointAndBoundary => wb(WorkbenchView::S2Defects),
                 DefectsView::DetectFields => wb(WorkbenchView::S3Detect),
+                DefectsView::FusionSteps => wb(WorkbenchView::S7Fusion),
             },
             AppMode::Analysis => CardId::Analysis(self.analysis.target),
         })

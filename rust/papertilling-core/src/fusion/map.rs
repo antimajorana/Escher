@@ -140,6 +140,9 @@ impl PlanarMap {
             v.kind == VertexKind::Boundary && v.rot.len() == 1
         });
         map.outer = 2 * e + leaf.ok_or_else(|| format!("edge {outer_leg} is not an external leg"))?;
+        if map.euler() != 2 {
+            return Err(format!("the drawing is not one connected planar piece (V - E + F = {})", map.euler()));
+        }
         Ok(map)
     }
 
@@ -216,6 +219,14 @@ impl PlanarMap {
             out.push(walk);
         }
         out
+    }
+
+    /// V - E + F over every vertex that has an edge, every edge and every face including the outer one.
+    /// It is 2 exactly when the map is connected and planar.
+    pub fn euler(&self) -> i64 {
+        let v = self.verts.iter().filter(|v| v.kind != VertexKind::Removed && !v.rot.is_empty()).count();
+        let e = self.edges.iter().filter(|e| e.alive).count();
+        v as i64 - e as i64 + self.faces().len() as i64
     }
 
     /// The bounded faces (every face except the outer one).

@@ -1,4 +1,4 @@
-//! Host of the five stage panels (S2..S6) behind the [`WbPanel`] trait. `NavTab::Workbench` is only the internal
+//! Host of the stage panels (S2..S7) behind the [`WbPanel`] trait. `NavTab::Workbench` is only the internal
 //! route: the user reaches every sub-row through its Command Deck card (`crate::game_menu`) and never sees the name.
 //!
 //! The shared app files route here once (P0 prewire). After that, each stage only replaces the files inside its own
@@ -32,6 +32,7 @@ mod s3_detect;
 mod s4_flat3d;
 mod s5_curved2d;
 mod s6_honeycombs;
+mod s7_fusion;
 pub(crate) mod scene_helpers;
 #[cfg(test)]
 mod tests;
@@ -39,7 +40,7 @@ mod tests;
 /// Caption of the empty 3D mesh pushed for 2D-only views (so a stale 3D mesh is never exported).
 pub(crate) const CAPTION_2D_ONLY: &str = "2D view only";
 
-/// The five stage panels hosted by the Workbench tab.
+/// The stage panels hosted by the Workbench tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum WorkbenchView {
     #[default]
@@ -48,6 +49,7 @@ pub(crate) enum WorkbenchView {
     S4Flat3d,
     S5Curved2d,
     S6Honeycombs,
+    S7Fusion,
 }
 
 /// The mode sub-view that routes to a workbench view.
@@ -58,7 +60,8 @@ pub(crate) enum ModeView {
 }
 
 impl WorkbenchView {
-    pub(crate) const ALL: [Self; 5] = [Self::S2Defects, Self::S3Detect, Self::S4Flat3d, Self::S5Curved2d, Self::S6Honeycombs];
+    pub(crate) const ALL: [Self; 6] =
+        [Self::S2Defects, Self::S3Detect, Self::S4Flat3d, Self::S5Curved2d, Self::S6Honeycombs, Self::S7Fusion];
 
     pub(crate) fn mode_view(self) -> ModeView {
         match self {
@@ -67,6 +70,7 @@ impl WorkbenchView {
             Self::S4Flat3d => ModeView::Lattices(LatticesView::Flat3D),
             Self::S5Curved2d => ModeView::Lattices(LatticesView::Curved2D),
             Self::S6Honeycombs => ModeView::Lattices(LatticesView::Honeycombs3D),
+            Self::S7Fusion => ModeView::Defects(DefectsView::FusionSteps),
         }
     }
 
@@ -83,6 +87,7 @@ impl WorkbenchView {
             Self::S4Flat3d => "flat3d",
             Self::S5Curved2d => "curved2d",
             Self::S6Honeycombs => "honeycombs",
+            Self::S7Fusion => "fusion_steps",
         }
     }
 
@@ -94,6 +99,7 @@ impl WorkbenchView {
             Self::S4Flat3d => "s4",
             Self::S5Curved2d => "s5",
             Self::S6Honeycombs => "s6",
+            Self::S7Fusion => "s7",
         }
     }
 
@@ -106,6 +112,7 @@ impl WorkbenchView {
             Self::S4Flat3d => "Nanotubes, Nanoribbons, Flakes & Bieberbach Groups",
             Self::S5Curved2d => "{p,q} Tilings on S², E² & H²",
             Self::S6Honeycombs => "3D Honeycombs, TPMS & Dirichlet Cells",
+            Self::S7Fusion => "Defect fusion: step-by-step graphs",
         }
     }
 }
@@ -201,6 +208,7 @@ pub(crate) struct WorkbenchState {
     s4: s4_flat3d::Panel,
     s5: s5_curved2d::Panel,
     s6: s6_honeycombs::Panel,
+    s7: s7_fusion::Panel,
 }
 
 impl WorkbenchState {
@@ -217,6 +225,7 @@ impl WorkbenchState {
             s4: Default::default(),
             s5: Default::default(),
             s6: Default::default(),
+            s7: Default::default(),
         }
     }
 
@@ -227,6 +236,7 @@ impl WorkbenchState {
             WorkbenchView::S4Flat3d => &self.s4,
             WorkbenchView::S5Curved2d => &self.s5,
             WorkbenchView::S6Honeycombs => &self.s6,
+            WorkbenchView::S7Fusion => &self.s7,
         }
     }
 
@@ -237,6 +247,7 @@ impl WorkbenchState {
             WorkbenchView::S4Flat3d => &mut self.s4,
             WorkbenchView::S5Curved2d => &mut self.s5,
             WorkbenchView::S6Honeycombs => &mut self.s6,
+            WorkbenchView::S7Fusion => &mut self.s7,
         }
     }
 

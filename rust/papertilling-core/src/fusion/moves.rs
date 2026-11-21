@@ -38,8 +38,12 @@ impl PlanarMap {
         }
         let c = self.dart_at(control, from)?;
         let to = self.vertex_of(c ^ 1);
-        if self.verts[to].kind == VertexKind::Removed {
-            return Err(format!("edge {control} ends at a removed vertex"));
+        if self.verts[from].kind != VertexKind::Complete || self.verts[to].kind != VertexKind::Complete {
+            // A vertex cut by the edge of the picture has edges the patch does not know: the corner the
+            // sliding end would leave or enter is not defined.
+            return Err(format!(
+                "edge {control} touches a vertex cut by the edge of the picture: a slide needs both of its ends inside the patch"
+            ));
         }
         let te = self.edge_index(target)?;
         let mut options: Vec<(Dart, Side)> = Vec::new();
@@ -132,6 +136,9 @@ impl PlanarMap {
             if *d == far2 {
                 *d = d1;
             }
+        }
+        if self.outer == far2 {
+            self.outer = d1;
         }
         self.edges[e1].ends[d1 % 2] = w;
         self.edges[e1].label = new_label;

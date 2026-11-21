@@ -107,6 +107,7 @@ impl PapertillingApp {
                     for (v, label) in [
                         (DefectsView::Catalogue2D, "Allowed defects"),
                         (DefectsView::CombineAndFuse, "Place & fuse"),
+                        (DefectsView::FusionSteps, "Fusion steps"),
                     ] {
                         if ui.selectable_label(self.defects_view == v, label).clicked() && self.defects_view != v {
                             self.select_defects_view(v);
@@ -115,6 +116,10 @@ impl PapertillingApp {
                 }
                 AppMode::Analysis => {}
             }
+        }
+        if !self.view_is_lattice_driven() {
+            // The view shows no Gallery lattice (Fusion steps): no lattice chip and no Rename.
+            return;
         }
         let sp = ui.spacing().item_spacing.x;
         let reserve = self.rename_reserve(sp);

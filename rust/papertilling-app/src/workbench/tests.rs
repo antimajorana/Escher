@@ -58,7 +58,7 @@ fn mode_and_view(app: &PapertillingApp) -> ModeView {
 fn routing_tables_are_consistent_and_labels_unique() {
     let wb_lat: Vec<_> = LatticesView::ALL.into_iter().filter(|v| v.nav_tab() == NavTab::Workbench).collect();
     let wb_def: Vec<_> = DefectsView::ALL.into_iter().filter(|v| v.nav_tab() == NavTab::Workbench).collect();
-    assert_eq!((wb_lat.len(), wb_def.len()), (3, 2), "S4..S6 are Lattices views, S2 and S3 Defects views");
+    assert_eq!((wb_lat.len(), wb_def.len()), (3, 3), "S4..S6 are Lattices views, S2, S3 and S7 Defects views");
     for v in LatticesView::ALL {
         assert_eq!(v.workbench_view().is_some(), v.nav_tab() == NavTab::Workbench, "{v:?}");
     }

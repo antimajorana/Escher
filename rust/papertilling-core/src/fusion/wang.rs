@@ -75,10 +75,11 @@ fn step(title: &str, operation: &str, explanation: &str, highlight: &[u32], map:
 
 fn start_step(map: &PlanarMap) -> FusionStep {
     step(
-        "Four dislocations inside the loop",
+        "Four dislocations brought together",
         "",
-        "The lattice after the four inner dislocations have been moved together. Vertex s has only two edges \
-         (11 and 12), one face has seven sides and one has five.",
+        "The part of the lattice that is not square after the four inner dislocations have been moved together \
+         inside the Wilson loop of the paper (its Fig. 7; the loop itself lies outside this picture). Vertex s has \
+         only two edges (11 and 12), one face has seven sides and one has five.",
         &[11, 12],
         map,
     )
@@ -98,7 +99,8 @@ pub fn gate_route() -> Result<Vec<FusionStep>, String> {
     out.push(step(
         "Edge 12 slides off the two-valent vertex",
         "CX(11 -> 12)",
-        "The end of edge 12 at s slides along edge 11 to vertex d. Edge 11 is left dangling: s is now a leaf.",
+        "The end of edge 12 at s slides along edge 11 to vertex d. Edge 11 is left dangling: s is now a leaf. \
+         The face round it meets edge 11 on both sides, so the edge counts twice: eight sides.",
         &[11, 12],
         &m,
     ));
@@ -108,7 +110,7 @@ pub fn gate_route() -> Result<Vec<FusionStep>, String> {
         "The dangling edge becomes a loop",
         "H(11)",
         "The leaf vertex s disappears and edge 11 becomes a loop on vertex d. The loop encloses a new face \
-         with one side: one vertex fewer, one face more.",
+         with one side: one vertex fewer, one face more. Both ends of the loop count at d: six edge-ends.",
         &[11],
         &m,
     ));
@@ -140,7 +142,8 @@ pub fn gate_route() -> Result<Vec<FusionStep>, String> {
         "The face grows to a square",
         "CX(9 -> 11)",
         "The end of edge 11 at g slides along edge 9 to vertex h. Every face has four sides and every \
-         vertex four edges again.",
+         vertex four edges again. This is the lattice only: the gates carry the coupling and sign of each \
+         term with it, so the fused state can hold an anyon on this regular lattice.",
         &[11, 9],
         &m,
     ));
@@ -155,8 +158,9 @@ pub fn hamiltonian_route() -> Result<Vec<FusionStep>, String> {
     out.push(step(
         "Edges 11 and 12 are merged",
         "merge 11, 12 -> 15",
-        "The two edges at the two-valent vertex s become one edge, 15, from d to g, and s is removed. \
-         The seven-sided face now has six sides.",
+        "The two edges at the two-valent vertex s become one edge, 15, from d to g, and s is removed: in the \
+         limit of a strong X11 X12 coupling the two qubits act as one. One qubit fewer; the seven-sided face \
+         now has six sides.",
         &[15],
         &m,
     ));
@@ -164,7 +168,7 @@ pub fn hamiltonian_route() -> Result<Vec<FusionStep>, String> {
     out.push(step(
         "Edge 16 is added",
         "add 16",
-        "A new edge from h to c splits the six-sided face into two squares. This step adds a qubit.",
+        "A new edge from h to c splits the six-sided face into two squares. This step adds one qubit back.",
         &[16],
         &m,
     ));
