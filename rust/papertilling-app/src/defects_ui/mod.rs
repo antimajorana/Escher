@@ -4,12 +4,15 @@
 use crate::backend::AppBackend;
 use crate::backend::CatalogueItemUi;
 use crate::canvas2d::Canvas2D;
-use crate::defects_tab::DefectsTabState;
+use crate::defects_tab::{DefectSubTab, DefectsTabState};
 use crate::mesh3d::DefectViewMode;
 use crate::theme::ThemeTokens;
 use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
 use crate::view3d::View3dState;
 
+pub(crate) mod combos;
+mod combos_view;
+pub(crate) mod growth;
 mod inspector;
 mod left;
 
@@ -25,7 +28,7 @@ impl DefectsTabState {
         let tokens = ThemeTokens::paper();
         if self.show_left_panel(ui, active_item, backend, canvas, &tokens) {
             ui.separator();
-            self.show_inspector_panel(ui, active_item, canvas, &tokens);
+            self.show_inspector_panel(ui, active_item, canvas, &tokens, true);
         }
     }
 
@@ -39,34 +42,30 @@ impl DefectsTabState {
         tokens: &ThemeTokens,
     ) {
         self.poll_worker(ui.ctx(), canvas);
-        let busy = self.is_busy();
-        let (kc, vc) = show_defect_viewport_header(
-            ui,
-            &mut self.view_mode,
-            &mut self.sheet_opts,
-            busy,
-            &mut self.view3d_dirty,
-            "def_top_col",
-        );
-        if vc {
-            if self.inspectors.on_sheet_color_changed(self.sheet_opts.color_mode) {
-                self.inspectors
-                    .spectrum
-                    .submit_crystal(&self.last_crystal, Some(&self.last_sheet), Some(ui.ctx()));
+        if self.sub_tab == DefectSubTab::Combinations {
+            self.combos.poll(ui.ctx());
+            if !self.initializing {
+                self.combos.ensure_started(active_item, &self.catalogue);
             }
-            self.view3d_dirty = true;
+            if let Some(specs) = self.combos.show_central(ui, active_item, tokens) {
+                self.open_in_combine = Some(specs);
+            }
+            return;
         }
-        if kc {
-            self.rebuild_sheet3d_only(active_item);
-        }
-        if self.view3d_dirty && self.view_mode.uses_3d() {
-            self.sync_view3d(view3d);
+        let busy = self.is_busy();
+        show_defect_viewport_header(ui, busy);
+        if self.view3d_dirty {
+            if self.view_mode.uses_3d() {
+                self.sync_view3d(view3d);
+            } else {
+                self.view3d_dirty = false;
+            }
         }
         ui.add_space(2.0);
 
         match self.view_mode {
             DefectViewMode::Planar2D => {
-                ui.strong("2D Surgical Crystal Patch (irregular core rings, cones, A|B domains)");
+                ui.strong("2D Defect Patch");
                 ui.add_space(2.0);
                 self.show_2d_patch(ui, active_item, canvas, tokens);
             }
@@ -82,7 +81,7 @@ impl DefectsTabState {
                     "defects_split",
                     tokens,
                     |ui| {
-                        ui.strong("2D Surgical Crystal Patch");
+                        ui.strong("2D Defect Patch");
                         ui.add_space(2.0);
                         self.show_2d_patch(ui, active_item, canvas, tokens);
                     },

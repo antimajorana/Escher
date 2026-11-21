@@ -28,6 +28,17 @@ fn app_harness(theme: StudioTheme) -> Harness<'static, PapertillingApp> {
         )
 }
 
+/// The Inspector toggle lives in the HUD "View" menu: open it, click the checkbox, close the menu with Esc.
+fn toggle_inspector_via_view_menu(harness: &mut Harness<'static, PapertillingApp>) {
+    harness.get_by_label("View").click();
+    harness.run_steps(2);
+    harness.get_by_label("Right panel (Ctrl+I)").click();
+    harness.run_steps(2);
+    if egui::Popup::is_any_open(&harness.ctx) {
+        harness.key_press(egui::Key::Escape);
+    }
+}
+
 #[test]
 fn studio_shell_three_column_layout_bounds_are_valid_and_non_overlapping() {
     let mut harness = app_harness(StudioTheme::Paper);
@@ -58,11 +69,7 @@ fn right_inspector_collapses_widens_center_and_still_polls_background_tabs() {
     let right_w = harness.state().test_rects.right.width();
     assert!(harness.state().right_inspector_open);
 
-    harness
-        .get_all_by_label("Inspector")
-        .next()
-        .expect("Inspector toggle button")
-        .click();
+    toggle_inspector_via_view_menu(&mut harness);
     harness.run();
     assert!(!harness.state().right_inspector_open);
     assert_eq!(harness.state().test_rects.right, egui::Rect::NOTHING);
@@ -82,15 +89,12 @@ fn right_inspector_collapses_widens_center_and_still_polls_background_tabs() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert!(
-        harness.state().view3d.has_geometry(),
-        "3D mesh must still sync on Combine when Right Inspector is collapsed"
+        !harness.state().combine.last_build.crystal.pos.is_empty()
+            && harness.state().canvas2d.counts().0 > 0,
+        "2D crystal must still sync on Combine when Right Inspector is collapsed"
     );
 
-    harness
-        .get_all_by_label("Inspector")
-        .next()
-        .expect("Inspector toggle button")
-        .click();
+    toggle_inspector_via_view_menu(&mut harness);
     harness.run_steps(2);
     assert!(harness.state().right_inspector_open);
     assert!(harness.state().test_rects.right.width() >= 260.0);
@@ -263,12 +267,12 @@ fn theme_toggle_updates_visuals_and_tokens_meet_wcag_contrast_across_all_painter
     assert_eq!(harness.state().theme, StudioTheme::Paper);
     assert!(!harness.ctx.style_of(harness.ctx.theme()).visuals.dark_mode);
 
-    harness.get_by_label("Theme: Paper").click();
+    harness.get_by_label("Theme: Light").click();
     harness.run();
     assert_eq!(harness.state().theme, StudioTheme::Studio);
     assert!(harness.ctx.style_of(harness.ctx.theme()).visuals.dark_mode);
 
-    harness.get_by_label("Theme: Studio").click();
+    harness.get_by_label("Theme: Dark").click();
     harness.run();
     assert_eq!(harness.state().theme, StudioTheme::Paper);
     assert!(!harness.ctx.style_of(harness.ctx.theme()).visuals.dark_mode);
@@ -318,4 +322,27 @@ fn theme_toggle_updates_visuals_and_tokens_meet_wcag_contrast_across_all_painter
             "remapped {dark_rgba:?} -> {remapped:?} contrast {ratio:.2} too low on Studio canvas"
         );
     }
+}
+
+#[test]
+fn export_menu_offers_the_png_scale_and_choosing_4x_sets_it() {
+    let mut harness = app_harness(StudioTheme::Paper);
+    harness.run();
+    assert_eq!(harness.state().png_scale, 2, "default 2x (2048 px)");
+    harness.get_by_label("Save figure").click();
+    harness.run();
+    let _ = harness.get_by_label("PNG scale:");
+    for label in ["1x", "2x", "4x"] {
+        assert_eq!(harness.get_all_by_label(label).count(), 1, "one {label} choice in the open menu");
+    }
+    harness.get_by_label("4x").click();
+    harness.run();
+    assert_eq!(harness.state().png_scale, 4);
+    if harness.query_by_label("1x").is_none() {
+        harness.get_by_label("Save figure").click();
+        harness.run();
+    }
+    harness.get_by_label("1x").click();
+    harness.run();
+    assert_eq!(harness.state().png_scale, 1);
 }

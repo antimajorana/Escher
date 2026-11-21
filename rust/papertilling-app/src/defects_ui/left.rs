@@ -19,11 +19,16 @@ impl DefectsTabState {
             self.rebuild_crystal(active_item, backend, canvas, true);
         }
         self.poll_worker(ui.ctx(), canvas);
+        self.combos.poll(ui.ctx());
 
         let mut dirty = false;
         let mut reset_view = false;
 
-        ui.strong(format!("Active lattice: {} ({})", active_item.display_with_orig(), active_item.group));
+        ui.strong(format!(
+            "Active lattice: {} · {}",
+            active_item.display_with_orig(),
+            crate::gallery_tab::filter::group_with_orbifold(&active_item.group)
+        ));
         if self.initializing {
             ui.spinner();
             ui.label("Preparing the defect catalogue and picture in the background…");
@@ -33,12 +38,14 @@ impl DefectsTabState {
             ui.colored_label(tokens.status_err, err);
         }
         ui.add_space(3.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for st in DefectSubTab::ALL {
-                if ui.selectable_label(self.sub_tab == st, st.label()).clicked() {
+                if ui.selectable_label(self.sub_tab == st, st.label()).clicked() && self.sub_tab != st {
                     self.sub_tab = st;
-                    dirty = true;
-                    reset_view = true;
+                    if st != DefectSubTab::Combinations {
+                        dirty = true;
+                        reset_view = true;
+                    }
                 }
             }
         });
@@ -82,27 +89,44 @@ impl DefectsTabState {
                     ui.small(&w.ending_summary);
                 }
             }
+            DefectSubTab::Combinations => {
+                self.combos.ensure_started(active_item, &self.catalogue);
+                self.combos.show_left_controls(ui, active_item, &self.catalogue, tokens);
+            }
         }
 
-        ui.separator();
-        ui.strong("Patch & 2D Drawing Controls");
-        ui.horizontal(|ui| {
-            ui.label("Radius R:");
-            if ui.add(egui::Slider::new(&mut self.radius, 2.4..=8.0).step_by(0.2)).changed() {
-                dirty = true;
-                reset_view = true;
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.label("2D Drawing:");
-            for dm in Defect2dMode::ALL {
-                if ui.selectable_label(self.draw_mode == dm, dm.label()).clicked() && self.draw_mode != dm {
-                    self.draw_mode = dm;
-                    self.relaxed = dm != Defect2dMode::Raw;
+        if self.sub_tab != DefectSubTab::Combinations {
+            ui.separator();
+            ui.strong("Patch & Drawing");
+            let grow_active = self.growth.request(self.sub_tab).is_some();
+            ui.horizontal(|ui| {
+                ui.label("Radius R:");
+                let slider = egui::Slider::new(&mut self.radius, 2.4..=8.0).step_by(0.2);
+                let resp = ui
+                    .add_enabled(!grow_active, slider)
+                    .on_disabled_hover_text("Sized automatically to hold the requested growth layers.");
+                if resp.changed() && !grow_active {
                     dirty = true;
+                    reset_view = true;
                 }
-            }
-        });
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label("2D Drawing:");
+                for dm in Defect2dMode::ALL {
+                    let plain = match dm {
+                        Defect2dMode::Raw => "Unrelaxed cut",
+                        Defect2dMode::RelaxedDrawing => "Relaxed",
+                        Defect2dMode::ElasticAoMetric => dm.label(),
+                    };
+                    if ui.selectable_label(self.draw_mode == dm, plain).clicked() && self.draw_mode != dm {
+                        self.draw_mode = dm;
+                        self.relaxed = dm != Defect2dMode::Raw;
+                        dirty = true;
+                    }
+                }
+            });
+            dirty |= super::growth::show(ui, self, active_item);
+        }
 
         if dirty {
             self.rebuild_crystal(active_item, backend, canvas, reset_view);

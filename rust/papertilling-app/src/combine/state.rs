@@ -25,6 +25,18 @@ use crate::mesh3d::{DefectViewMode, Sheet3dViewOpts};
 pub(crate) const MANUAL_R_MIN: f64 = 2.4;
 pub(crate) const MANUAL_R_MAX: f64 = 30.0;
 
+/// The build options of a fresh Combine tab (also what a curated preset restores): fast relaxed drawing, automatic
+/// radius (manual radius `r_auto_base` when the user unticks it), core radius 2.
+pub(crate) fn default_build_opts(r_auto_base: f64) -> CombineBuildOptions {
+    CombineBuildOptions {
+        draw_mode: CombineDrawMode::FastRelaxed,
+        full_planar_repair: false,
+        auto_radius: true,
+        manual_radius: r_auto_base,
+        core_radius: 2,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolMode {
     PanAndDrag,
@@ -55,6 +67,14 @@ pub struct CombineTabState {
     pub(crate) pending_disc_step: Option<PendingDiscStep>,
     pub(crate) pending_absorb: Option<AbsorptionPreview>,
     pub(crate) undo_stack: Vec<Vec<DefectSpec>>,
+    pub(crate) redo_stack: Vec<Vec<DefectSpec>>,
+    pub selected_pin: Option<usize>,
+    pub popover_open: bool,
+    pub(crate) cut_dragging: bool,
+    pub(crate) cut_drag_anchor: Option<(usize, Vec<DefectSpec>)>,
+    pub(crate) cut_edit_anchor: Option<(usize, Vec<DefectSpec>)>,
+    #[cfg(test)]
+    pub(crate) last_popover_rect: Option<egui::Rect>,
     pub view_mode: DefectViewMode,
     pub sheet_opts: Sheet3dViewOpts,
     pub(crate) last_build: CombineBuildOutput,
@@ -64,6 +84,7 @@ pub struct CombineTabState {
     /// `compare_result` belongs to an earlier configuration (a newer comparison is pending or due).
     pub(crate) compare_stale: bool,
     pub(crate) compare_ms: f64,
+    #[cfg(test)]
     pub(crate) cache_stats: (usize, usize),
     pub(super) compare_after_build: bool,
     pub(super) reset_view_on_build: bool,
@@ -86,13 +107,7 @@ impl CombineTabState {
     pub fn new(gallery_item: &CatalogueItemUi, backend: &AppBackend) -> Self {
         let info = Arc::new(backend.combine_lattice_info(gallery_item));
         let specs = preset_neighbour_pair(&info);
-        let opts = CombineBuildOptions {
-            draw_mode: CombineDrawMode::FastRelaxed,
-            full_planar_repair: false,
-            auto_radius: true,
-            manual_radius: info.r_auto_base,
-            core_radius: 2,
-        };
+        let opts = default_build_opts(info.r_auto_base);
         let sheet_opts = Sheet3dViewOpts::default();
         let last_build = build_combined_crystal(gallery_item, &info, &[], &opts, false);
         let last_sheet3d = build_sheet_bundle_sync(
@@ -121,7 +136,15 @@ impl CombineTabState {
             pending_disc_step: None,
             pending_absorb: None,
             undo_stack: Vec::new(),
-            view_mode: DefectViewMode::Split2D3D,
+            redo_stack: Vec::new(),
+            selected_pin: None,
+            popover_open: false,
+            cut_dragging: false,
+            cut_drag_anchor: None,
+            cut_edit_anchor: None,
+            #[cfg(test)]
+            last_popover_rect: None,
+            view_mode: DefectViewMode::Planar2D,
             sheet_opts,
             last_build,
             last_sheet3d,
@@ -129,6 +152,7 @@ impl CombineTabState {
             compare_result: None,
             compare_stale: false,
             compare_ms: 0.0,
+            #[cfg(test)]
             cache_stats: (0, 0),
             compare_after_build: false,
             reset_view_on_build: true,
@@ -180,6 +204,7 @@ impl CombineTabState {
 
     pub(super) fn reset_lattice_defaults(&mut self, gallery_item: &CatalogueItemUi, info: CombineLatticeInfo) {
         self.clear_kinematic_drag_state(true);
+        self.clear_selection();
         self.inspectors.clear_for_switch();
         self.half_wall.refresh(gallery_item);
         self.init_error = None;
@@ -211,6 +236,7 @@ impl CombineTabState {
         sync_canvas: bool,
     ) {
         self.clear_kinematic_drag_state(true);
+        self.clear_selection();
         self.inspectors.clear_for_switch();
         self.override_item = None;
         self.init_error = None;
@@ -253,7 +279,10 @@ impl CombineTabState {
 
     /// A comparison result that matches the current defects (for the `.json` summary).
     pub(super) fn current_report(&self) -> Option<&EquivalentSingleReport> {
-        let fresh = !self.compare_stale && !self.is_busy() && !self.last_build.preview;
+        let fresh = !self.compare_stale
+            && !self.is_busy()
+            && !self.last_build.preview
+            && self.last_build.refused.is_none();
         self.compare_result.as_ref().filter(|_| fresh).and_then(|r| r.as_ref().ok())
     }
 }

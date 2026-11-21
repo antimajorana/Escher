@@ -71,6 +71,11 @@
     "matches": [
       "Volterra core 1"
     ],
+    "volterra_matches": [
+      "Volterra core 1"
+    ],
+    "completion_matches": [],
+    "match_tier": "volterra",
     "verdict": "equivalent to the single defect (core: Volterra core 1)"
   }
 }

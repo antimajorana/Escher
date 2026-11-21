@@ -313,8 +313,12 @@ pub fn spawn_build_worker() -> LatestWorker<BuildJob, BuildWorkerOutput> {
             Some(prev) => prev,
             None => build_combined_crystal(&job.item, &job.info, &job.specs, &job.opts, job.preview),
         };
+        if out.refused.is_some() {
+            warm.buckets.clear();
+            return (out, CombineSheet3dBundle::empty());
+        }
         let tag = WarmSheetState::key_of(&job.item, &job.info);
-        let warm_z = if job.preview && !job.specs.is_empty() && out.refused.is_none() {
+        let warm_z = if job.preview && !job.specs.is_empty() {
             warm.lookup_warm_z(&tag, &out.crystal)
         } else {
             None
@@ -325,7 +329,7 @@ pub fn spawn_build_worker() -> LatestWorker<BuildJob, BuildWorkerOutput> {
             grad_tol: if job.preview { 1e-5 } else { 1e-6 },
         };
         let sheet = relax_sheet_3d(&out.crystal, &job.info.cell, &opts, warm_z.as_deref());
-        if !job.specs.is_empty() && out.refused.is_none() {
+        if !job.specs.is_empty() {
             warm.store(tag, &out.crystal, &sheet);
         } else {
             warm.buckets.clear();

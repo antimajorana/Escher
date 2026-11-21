@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use papertilling_core::defect::charge::total_charge;
+use papertilling_core::defect::charge::{total_charge, total_frank};
 use papertilling_core::defect::combine_api::{classify_crystal_charge, inspect_crystal_cores};
 use papertilling_core::defect::combine_types::NotebookConfigJson;
 use papertilling_core::defect::core_graph::core_graph;
@@ -8,6 +8,7 @@ use papertilling_core::defect::surgery::{
     DefectSpec, build_point_defects_with_cuts, patch_centre_and_radius,
 };
 use papertilling_core::dsymbol;
+use papertilling_core::plane::basis_reduce::is_geometrically_chiral;
 use papertilling_core::plane::draw::{ensure_embedded, relax_picture, relax_preview};
 use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::planarity;
@@ -31,12 +32,13 @@ pub fn build_combined_crystal(
     preview: bool,
 ) -> CombineBuildOutput {
     let t0 = Instant::now();
+    let lattice_key = (item.group.clone(), info.cell.clone());
     let base_r = if opts.auto_radius { info.r_auto_base } else { opts.manual_radius };
 
     if specs.is_empty() {
         let crystal = build_pristine_disk(&info.lat_info, base_r);
         return CombineBuildOutput {
-            crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: base_r,
+            lattice_key, crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: base_r,
             charge_label: String::from("vacuum (0 defects)"),
             charge_detail: String::from("Frank = +0.0°, b = (0.000, 0.000)"),
             core_nodes: 0, core_edges: 0, core_summary: String::from("defect-free reference disk"),
@@ -58,7 +60,9 @@ pub fn build_combined_crystal(
         .fold(0.0_f64, f64::max);
 
     let r_target = if opts.auto_radius {
-        base_r.max(max_d + (5.8 * info.lat_info.lmax + max_b).max(3.6 * info.lat_info.scale))
+        let core_margin = ((2 * info.lat_info.r_det + opts.core_radius + 4) as f64 * info.lat_info.lmax + max_b)
+            .max(5.0 * info.lat_info.scale);
+        base_r.max(max_d + core_margin)
     } else {
         opts.manual_radius
     };
@@ -73,6 +77,7 @@ pub fn build_combined_crystal(
     if !estimated_sites.is_finite() || estimated_sites > 20_000.0 {
         let reason = String::from("desktop live-view budget exceeded (~20,000 sites); move pins closer or use a smaller manual patch. No equivalence was computed.");
         return CombineBuildOutput {
+            lattice_key,
             crystal: build_pristine_disk(&info.lat_info, base_r.min(info.r_auto_base)),
             elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
             applied_radius: base_r.min(info.r_auto_base),
@@ -98,6 +103,7 @@ pub fn build_combined_crystal(
             }
             Err(err) => {
                 return CombineBuildOutput {
+                    lattice_key,
                     crystal: build_pristine_disk(&info.lat_info, base_r),
                     elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
                     applied_radius: base_r,
@@ -122,6 +128,7 @@ pub fn build_combined_crystal(
 
     if opts.draw_mode == CombineDrawMode::FastRelaxed && preview {
         relax_preview_picture(&mut crystal);
+        align_crystal_orientation(&mut crystal);
     } else if opts.draw_mode == CombineDrawMode::FastRelaxed {
         relax_picture(&mut crystal);
         if opts.full_planar_repair {
@@ -136,9 +143,10 @@ pub fn build_combined_crystal(
                 notes.push(format!("fast relax has {bad} crossing/fold(s) — toggle Full Planar Repair"));
             }
         }
-    } else if opts.draw_mode == CombineDrawMode::ElasticAoMetric {
-        crate::live_ops_ao::apply_combine_ao_mode(&mut crystal, preview, &mut notes);
+        align_crystal_orientation(&mut crystal);
     }
+    // C1: the AO elastic branch (`CombineDrawMode::ElasticAoMetric`, `live_ops_ao::apply_combine_ao_mode`) left
+    // the UI; nothing selects that mode any more, so it draws as Raw.
 
     let (charge_label, charge_detail) = match classify_crystal_charge(&item.group, &info.cell, item.frame, &crystal) {
         Ok(ch) => {
@@ -159,7 +167,7 @@ pub fn build_combined_crystal(
 
     if preview {
         return CombineBuildOutput {
-            crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: applied_r,
+            lattice_key, crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: applied_r,
             charge_label, charge_detail, core_nodes: 0, core_edges: 0,
             core_summary: String::from("(core readout on release)"), local_cores: Vec::new(),
             patch_centre: ctr, applied_cuts, coalesced_count, note: notes.join("; "),
@@ -171,12 +179,87 @@ pub fn build_combined_crystal(
         .map_or((0, 0), |g| (g.node_count(), g.edge_count()));
 
     CombineBuildOutput {
+        lattice_key,
         core_summary: summarize_rings_and_core(&crystal, &info.lat_info),
         local_cores: inspect_crystal_cores(&crystal),
         crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: applied_r,
         charge_label, charge_detail, core_nodes, core_edges,
         patch_centre: ctr, applied_cuts, coalesced_count, note: notes.join("; "),
         preview, refused: None,
+    }
+}
+
+/// Rigidly rotate (and, for zero total Frank angle, translate) a relaxed 2D crystal so its bulk
+/// bond orientation matches the reference lattice without distorting any bond length or angle.
+pub(crate) fn align_crystal_orientation(crystal: &mut BuiltCrystal) {
+    let n = crystal.pos.len();
+    if n == 0 || crystal.adj.len() != n {
+        return;
+    }
+    let (mut c_sum, mut s_sum) = (0.0, 0.0);
+    for (u, adj_u) in crystal.adj.iter().enumerate() {
+        let pu = crystal.pos[u];
+        for e in adj_u {
+            if u >= e.to || e.across {
+                continue;
+            }
+            let pure_trans = e.seam.is_none_or(|g| {
+                (g.det() - 1.0).abs() < 1e-6 && ((g.m[0][0] + g.m[1][1]) - 2.0).abs() < 1e-6
+            });
+            if !pure_trans {
+                continue;
+            }
+            let ev = e.vec;
+            let le = ev[0].hypot(ev[1]);
+            if le < 1e-9 {
+                continue;
+            }
+            let d = [crystal.pos[e.to][0] - pu[0], crystal.pos[e.to][1] - pu[1]];
+            let ld = d[0].hypot(d[1]);
+            if ld < 1e-9 || ld > 3.0 * le {
+                continue;
+            }
+            c_sum += ev[0] * d[0] + ev[1] * d[1];
+            s_sum += ev[0] * d[1] - ev[1] * d[0];
+        }
+    }
+    if c_sum.hypot(s_sum) < 1e-9 {
+        return;
+    }
+    let theta = s_sum.atan2(c_sum);
+    let inv_n = 1.0 / (n as f64);
+    let cx = crystal.pos.iter().map(|p| p[0]).sum::<f64>() * inv_n;
+    let cy = crystal.pos.iter().map(|p| p[1]).sum::<f64>() * inv_n;
+    let (sin_t, cos_t) = (-theta).sin_cos();
+    let rot = |p: [f64; 2]| -> [f64; 2] {
+        let (dx, dy) = (p[0] - cx, p[1] - cy);
+        [cx + cos_t * dx - sin_t * dy, cy + sin_t * dx + cos_t * dy]
+    };
+    for p in &mut crystal.pos {
+        *p = rot(*p);
+    }
+    for adj_u in &mut crystal.adj {
+        for e in adj_u {
+            if let Some(g) = e.ghost_stub {
+                e.ghost_stub = Some(rot(g));
+            }
+        }
+    }
+    if crystal.ref_pos.len() == n && !crystal.is_non_orientable && total_frank(crystal).abs() < 1e-2 {
+        let tx = crystal.ref_pos.iter().zip(&crystal.pos).map(|(r, p)| r[0] - p[0]).sum::<f64>() * inv_n;
+        let ty = crystal.ref_pos.iter().zip(&crystal.pos).map(|(r, p)| r[1] - p[1]).sum::<f64>() * inv_n;
+        for p in &mut crystal.pos {
+            p[0] += tx;
+            p[1] += ty;
+        }
+        for adj_u in &mut crystal.adj {
+            for e in adj_u {
+                if let Some(g) = &mut e.ghost_stub {
+                    g[0] += tx;
+                    g[1] += ty;
+                }
+            }
+        }
     }
 }
 
@@ -199,15 +282,17 @@ pub fn item_from_notebook_json(
     // Python load_config rebuilds from the recipe; `group` is redundant descriptive metadata,
     // not permission to classify the same cell using a different wallpaper group.
     let group = cfg.recipe.group.clone();
-    let (dsymbol_key, network_key, symmetry_index) =
+    let (dsymbol_key, network_key, symmetry_index, topologically_chiral) =
         match fam.dsymbol().and_then(|ds| ds.canonical_key().map_err(|e| e.to_string())) {
             Ok(ck) => {
                 let nk = dsymbol::network_key(&ck).unwrap_or_else(|_| ck.clone());
                 let si = dsymbol::symmetry_index(&ck).unwrap_or(1);
-                (format_dsymbol_key(&ck), format_dsymbol_key(&nk), si)
+                let tc = dsymbol::is_topologically_chiral(&nk).unwrap_or(false);
+                (format_dsymbol_key(&ck), format_dsymbol_key(&nk), si, tc)
             }
-            Err(_) => (String::from("-"), String::from("-"), 1),
+            Err(_) => (String::from("-"), String::from("-"), 1, false),
         };
+    let chiral = is_geometrically_chiral(&cell).unwrap_or(false);
     // Display names are user-controlled and need not be unique. They never establish identity.
     let same_action = |it: &&CatalogueItemUi| it.group == group && dsymbol_key != "-" && it.dsymbol_key == dsymbol_key;
     let matched_named = named_list.iter()
@@ -244,6 +329,8 @@ pub fn item_from_notebook_json(
         dsymbol_key,
         network_key,
         symmetry_index,
+        chiral,
+        topologically_chiral,
         occupied_wyckoff: occupied_wyckoff_letters(&cfg.recipe),
         recipe: cfg.recipe.clone(),
         frame: cfg.frame,

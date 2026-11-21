@@ -3,10 +3,6 @@ use papertilling_core::types::SurfaceMesh;
 use super::{SurfacesTabState, verdict_colour};
 use crate::backend::VerdictKindUi;
 use crate::canvas2d::Canvas2D;
-use crate::mesh3d::SurfaceColor3d;
-use crate::spectrum_ui::show_spectrum_panel;
-use crate::spectrum_worker::SpectrumColorOverlay;
-use crate::surfaces_elastic::SurfaceShapeMode;
 use crate::theme::ThemeTokens;
 use crate::view3d::View3dState;
 
@@ -14,45 +10,15 @@ impl SurfacesTabState {
     pub fn show_inspector_panel(
         &mut self,
         ui: &mut egui::Ui,
-        canvas: &mut Canvas2D,
-        view3d: &mut View3dState,
+        _canvas: &mut Canvas2D,
+        _view3d: &mut View3dState,
         tokens: &ThemeTokens,
     ) {
-        let (need_fvk, need_resync) = self.elastic.show_controls(ui, tokens);
-        if need_fvk && let Some(mesh) = &self.current_mesh {
-            self.elastic.request_relax(mesh.clone(), Some(ui.ctx()));
-        }
-        let sp_ev = show_spectrum_panel(ui, &mut self.spectrum, "surf_spec", false, false, tokens);
-        if sp_ev.recompute && let Some(mesh) = &self.current_mesh {
-            let mut m = mesh.clone();
-            if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK
-                && let Some(res) = &self.elastic.last_result
-            {
-                m.xyz = res.xyz.clone();
-                if let (Some(c), Some(cx)) = (m.cover.as_deref_mut(), res.cover_xyz.as_ref()) {
-                    c.xyz = cx.clone();
-                }
-            }
-            self.spectrum.submit_surface(&m, Some(ui.ctx()));
-        }
-        let mut resync_3d = need_resync || sp_ev.redraw_colors;
-        if sp_ev.redraw_colors {
-            self.elastic.color_mode = match self.spectrum.color_overlay {
-                SpectrumColorOverlay::LdosMultiplet => SurfaceColor3d::SpectralLdos,
-                SpectrumColorOverlay::SpectralCharge => SurfaceColor3d::SpectralCharge,
-                SpectrumColorOverlay::None => SurfaceColor3d::FaceRingSize,
-            };
-            resync_3d = true;
-        }
-        if resync_3d {
-            self.sync_view3d_and_colors(canvas, view3d);
-        }
-        ui.separator();
         self.show_check_readout(ui, tokens);
     }
 
     fn show_check_readout(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
-        ui.strong("Topological Invariants Check");
+        ui.strong("Topology & Euler Characteristic");
         if let (Some(mesh), Some(rep)) = (&self.current_mesh, &self.current_report) {
             let badge_col = if rep.ok {
                 verdict_colour(VerdictKindUi::Ok, tokens)
@@ -77,6 +43,20 @@ impl SurfacesTabState {
                 mesh.chi
             ));
             ui.small(format!("Cones: {}", summarize_cones(mesh)));
+            for line in &self.notes.readout {
+                ui.small(line);
+            }
+            if self.notes.exact_view {
+                ui.small("Exact view: flat 2D fundamental domain with edge identifications");
+            }
+            if let Some(note) = self.notes.picture_note {
+                let msg = if self.notes.exact_view {
+                    format!("3D picture: {note} (the flat 2D net is the exact view)")
+                } else {
+                    format!("3D picture: {note}")
+                };
+                ui.small(egui::RichText::new(msg).italics());
+            }
             ui.small(format!(
                 "loops:{}  double:{}  coord:{}  euler:{}  faces>=3:{}",
                 ok_sym(rep.no_loops),

@@ -1,7 +1,14 @@
 //! PyO3 bindings (`papertilling_rs`) exposing `papertilling-core` Stages 0–5 to Python.
 
 mod atlas_py;
+mod growth_h3_py;
+mod growth_py;
+mod s3_fields_py;
+mod s4_flat3d_py;
+mod s5_noneuclid_py;
+mod s6_honeycomb_py;
 mod insights_py;
+mod solver_py;
 mod stage5_py;
 
 use std::collections::BTreeMap;
@@ -291,6 +298,13 @@ fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(relax_defect_sheet_3d_json, m)?)?;
     m.add_function(wrap_pyfunction!(spectrum_json, m)?)?;
     atlas_py::register(m)?;
+    growth_py::register(m)?;
+    growth_h3_py::register(m)?;
+    solver_py::register(m)?;
+    s3_fields_py::register(m)?;
+    s4_flat3d_py::register(m)?;
+    s5_noneuclid_py::register(m)?;
+    s6_honeycomb_py::register(m)?;
     Ok(())
 }
 

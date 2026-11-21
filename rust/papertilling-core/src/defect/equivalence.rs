@@ -95,24 +95,33 @@ pub(crate) fn is_bipartite<N, E>(g: &UnGraph<N, E>) -> bool {
     true
 }
 
-fn catalogue_for_centres(group: &str, cell: &Cell2D, frame: Frame2D) -> DefectCatalogue {
+pub(crate) fn catalogue_for_combinations(
+    group: &str,
+    cell: &Cell2D,
+    frame: Frame2D,
+    bmax: f64,
+) -> DefectCatalogue {
     let eff_group = if group.is_empty() {
         LatticeGroup::new(cell).name
     } else {
         group
     };
-    let cat = DefectCatalogue::with_bounds(eff_group, cell, frame, 0.0, 0.0);
+    let cat = DefectCatalogue::with_bounds(eff_group, cell, frame, bmax, 0.0);
     if frame == Frame2D::default()
         && let Some(first) = cat.centre_classes.first()
         && cat.centre_classes.iter().any(|c| c.label.starts_with("order-"))
     {
         let shifted = Frame2D { q: frame.q, origin: first.point };
-        let retry = DefectCatalogue::with_bounds(cat.group.as_str(), &cat.cell, shifted, 0.0, 0.0);
+        let retry = DefectCatalogue::with_bounds(cat.group.as_str(), &cat.cell, shifted, bmax, 0.0);
         if retry.centre_classes.iter().all(|c| !c.label.starts_with("order-")) {
             return retry;
         }
     }
     cat
+}
+
+fn catalogue_for_centres(group: &str, cell: &Cell2D, frame: Frame2D) -> DefectCatalogue {
+    catalogue_for_combinations(group, cell, frame, 0.0)
 }
 
 /// The rotation-centre classes of one lattice (order, label, members mod the lattice), built once, for repeated
@@ -206,6 +215,18 @@ pub fn classify_holonomy_charge(
     holonomy: Isometry2,
     loop_sum: [f64; 2],
 ) -> Result<ClassifiedCharge, String> {
+    classify_holonomy_inner(group, cell, frame, None, frank_deg, holonomy, loop_sum)
+}
+
+fn classify_holonomy_inner(
+    group: &str,
+    cell: &Cell2D,
+    frame: Frame2D,
+    cat_opt: Option<&DefectCatalogue>,
+    frank_deg: Option<f64>,
+    holonomy: Isometry2,
+    loop_sum: [f64; 2],
+) -> Result<ClassifiedCharge, String> {
     if holonomy.det() < 0.0 {
         return Ok(ClassifiedCharge {
             kind: "non_orientable".to_string(),
@@ -231,7 +252,14 @@ pub fn classify_holonomy_charge(
     let angle = if angle_r == 0.0 { 0.0 } else { angle_r };
     let is_trans = np_allclose_mat(holonomy.m, Isometry2::IDENTITY.m, 1e-5, 1e-6);
     if is_trans {
-        let grp = LatticeGroup::new(cell);
+        let owned_grp;
+        let grp = match cat_opt {
+            Some(cat) => &cat.grp,
+            None => {
+                owned_grp = LatticeGroup::new(cell);
+                &owned_grp
+            }
+        };
         let mut b = [-holonomy.t[0], -holonomy.t[1]];
         for x in &mut b {
             if x.abs() < 1e-9 {
@@ -281,7 +309,7 @@ pub fn classify_holonomy_charge(
                     loop_sum,
                 });
             }
-            let brep = orbit_rep(&grp, b);
+            let brep = orbit_rep(grp, b);
             let label = format!(
                 "dislocation [b] = P+ orbit of {} (|b| = {:.4})",
                 fmt_vec2_round4(brep),
@@ -323,13 +351,20 @@ pub fn classify_holonomy_charge(
         mat2_inv([[1.0 - holonomy.m[0][0], -holonomy.m[0][1]], [-holonomy.m[1][0], 1.0 - holonomy.m[1][1]]]),
         holonomy.t,
     );
-    let cat = catalogue_for_centres(group, cell, frame);
+    let owned_cat;
+    let cat = match cat_opt {
+        Some(cat) => cat,
+        None => {
+            owned_cat = catalogue_for_centres(group, cell, frame);
+            &owned_cat
+        }
+    };
     let rec = cat.centre_class_of(c);
     let w = rec.map_or("?", |r| r.label.as_str()).to_string();
     let label = format!("disclination D({w}, {:+.0} deg) about {}", angle, fmt_vec2_round4(c));
     let allowed = rec.is_some_and(|r| {
         let k = angle * (r.order as f64) / 360.0;
-        angle.abs() < 360.0 - 1e-6 && (k - round_even(k)).abs() < 1e-6
+        angle.abs() <= 180.0 + 1e-6 && (k - round_even(k)).abs() < 1e-6
     });
     let single = allowed.then_some(DefectSpec::Disclination { angle_deg: angle, at: c, cut: None });
     Ok(ClassifiedCharge {
@@ -357,6 +392,23 @@ pub fn classify_crystal_charge(
 ) -> Result<ClassifiedCharge, String> {
     let rep = total_charge(crystal)?;
     classify_holonomy_charge(group, cell, frame, Some(rep.frank_deg), rep.holonomy, rep.loop_sum)
+}
+
+/// Classify `crystal` reusing a precomputed `DefectCatalogue` (avoids rebuilding `LatticeGroup` or centre classes).
+pub(crate) fn classify_crystal_charge_with_cat(
+    cat: &DefectCatalogue,
+    crystal: &BuiltCrystal,
+) -> Result<ClassifiedCharge, String> {
+    let rep = total_charge(crystal)?;
+    classify_holonomy_inner(
+        cat.group.as_str(),
+        &cat.cell,
+        Frame2D::default(),
+        Some(cat),
+        Some(rep.frank_deg),
+        rep.holonomy,
+        rep.loop_sum,
+    )
 }
 
 pub(crate) fn same_charge_in_grp(

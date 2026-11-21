@@ -1,8 +1,10 @@
 //! Custom lattice builder (`BrowseMode::CustomBuilder`) and live `N = 7..=25` discovery UI
 //! in the Gallery tab.
 
-use papertilling_core::dsymbol::DSymbolKey;
+use papertilling_core::dsymbol::{self, DSymbolKey};
+use papertilling_core::plane::basis_reduce::is_geometrically_chiral;
 use papertilling_core::plane::custom_builder::{build_custom_lattice, BondSelection, CustomLatticeSpec};
+use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::groups::{wyckoff_table, WALLPAPER_GROUPS};
 use papertilling_core::plane::live_search::DiscoveredLattice;
 use papertilling_core::types::{Frame2D, Recipe};
@@ -83,6 +85,13 @@ fn make_custom_catalogue_item(
         .map(format_dsymbol_key)
         .unwrap_or_else(|| format!("nonplanar-{coordination}-N{num_sites}"));
     let alias_key = LatticeAliasKey::new(group, "custom", idx.max(1), &dsymbol_key);
+    let chiral = LatticeFamily::from_recipe(&recipe, Some(frame))
+        .ok()
+        .and_then(|f| is_geometrically_chiral(&f.cell()).ok())
+        .unwrap_or(false);
+    let topologically_chiral = ds_key
+        .and_then(|k| dsymbol::is_topologically_chiral(k).ok())
+        .unwrap_or(false);
     let mut item = CatalogueItemUi {
         index: idx.max(1),
         label: default_label.clone(),
@@ -98,6 +107,8 @@ fn make_custom_catalogue_item(
         dsymbol_key,
         network_key,
         symmetry_index,
+        chiral,
+        topologically_chiral,
         occupied_wyckoff: occupied_wyckoff_letters(&recipe),
         recipe,
         frame,

@@ -1084,8 +1084,8 @@
      "angle": 0.0,
      "label": "dislocation [b] = P+ orbit of [1.7321, 0.0] (|b| = 1.7321)",
      "b": [
-      0.8660254037844383,
-      -1.499999999999999
+      0.8660254037844385,
+      -1.4999999999999987
      ],
      "lattice_vector": true
     },
@@ -2350,8 +2350,113 @@
    "grid": 1,
    "radius": 2,
    "python": {
-    "ok": false,
-    "error": "defect 2 (disclination): developed region encloses an earlier defect core (two walks disagree); use another cut direction or defect order"
+    "ok": true,
+    "charge": {
+     "kind": "dislocation",
+     "angle": 0.0,
+     "label": "dislocation [b] = P+ orbit of [0.5, 0.866] (|b| = 1.0000)",
+     "b": [
+      0.49999999999999933,
+      -0.8660254037844382
+     ],
+     "lattice_vector": true
+    },
+    "cores": [
+     "disclination -120 deg on a 4-ring",
+     "disclination +120 deg on a 3-ring"
+    ],
+    "core": {
+     "nodes": 66,
+     "edges": 169,
+     "degrees": [
+      5,
+      5,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6
+     ]
+    },
+    "equivalent": false,
+    "matches": [],
+    "verdict": "no match among 15 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 0 times, 0 skipped at the rim); a larger grid may find more cores",
+    "candidates": [
+     "Volterra core 2",
+     "Volterra core 3",
+     "completion core 5",
+     "completion core 6",
+     "completion core 7",
+     "completion core 8",
+     "completion core 9",
+     "completion core 10",
+     "completion core 11",
+     "completion core 12",
+     "completion core 13",
+     "completion core 14",
+     "completion core 15",
+     "completion core 16",
+     "completion core 17"
+    ]
    }
   },
   {
@@ -2430,8 +2535,99 @@
    "grid": 1,
    "radius": 2,
    "python": {
-    "ok": false,
-    "error": "defect 2 (disclination): developed region encloses an earlier defect core (two walks disagree); use another cut direction or defect order"
+    "ok": true,
+    "charge": {
+     "kind": "dislocation",
+     "angle": 0.0,
+     "label": "dislocation [b] = P+ orbit of [0.5, 0.866] (|b| = 1.0000)",
+     "b": [
+      0.49999999999999933,
+      -0.8660254037844382
+     ],
+     "lattice_vector": true
+    },
+    "cores": [
+     "disclination +120 deg on a 3-ring",
+     "disclination -120 deg on a 4-ring"
+    ],
+    "core": {
+     "nodes": 66,
+     "edges": 169,
+     "degrees": [
+      5,
+      5,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6
+     ]
+    },
+    "equivalent": false,
+    "matches": [],
+    "verdict": "no match among 1 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 0 times, 0 skipped at the rim); a larger grid may find more cores",
+    "candidates": [
+     "Volterra core 1"
+    ]
    }
   },
   {
@@ -3012,9 +3208,7 @@
     "equivalent": false,
     "matches": [],
     "verdict": "not equivalent to the single defect",
-    "candidates": [
-     "single +270 deg at [6.0, 3.0]"
-    ]
+    "candidates": []
    }
   },
   {

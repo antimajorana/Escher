@@ -147,6 +147,14 @@ fn draw_arrow_head(painter: &egui::Painter, p0: egui::Pos2, p1: egui::Pos2, col:
     painter.line_segment([mid + u * 2.5, mid - u * w - n * (0.65 * w)], st);
 }
 
+/// Bottom-right box of the reference-chart inset in canvas `rect` (also used to keep the legend clear of it).
+pub(crate) fn reference_inset_rect(rect: egui::Rect) -> Option<egui::Rect> {
+    let size = rect.width().min(rect.height()).clamp(120.0, 210.0).min(196.0);
+    (size >= 96.0).then(|| {
+        egui::Rect::from_min_max(rect.right_bottom() - egui::vec2(size + 10.0, size + 10.0), rect.right_bottom() - egui::vec2(10.0, 10.0))
+    })
+}
+
 fn draw_reference_inset(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -154,14 +162,10 @@ fn draw_reference_inset(
     step_k: usize,
     tokens: &ThemeTokens,
 ) {
-    let size = rect.width().min(rect.height()).clamp(120.0, 210.0).min(196.0);
-    if size < 96.0 || ov.result.ref_path.len() < 2 {
+    if ov.result.ref_path.len() < 2 {
         return;
     }
-    let inset = egui::Rect::from_min_max(
-        rect.right_bottom() - egui::vec2(size + 10.0, size + 10.0),
-        rect.right_bottom() - egui::vec2(10.0, 10.0),
-    );
+    let Some(inset) = reference_inset_rect(rect) else { return };
     painter.rect_filled(inset, 6.0, tokens.bg_hud);
     painter.rect_stroke(inset, 6.0, egui::Stroke::new(1.2, tokens.border_strong), egui::StrokeKind::Inside);
 

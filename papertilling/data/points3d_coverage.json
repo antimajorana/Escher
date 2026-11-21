@@ -1,0 +1,9466 @@
+{
+"note": "Duplicate key = space group, sites per primitive cell, per-orbit coordination sequences to depth 12 (plan Q10): two non-isomorphic nets with equal sequences would be merged; collisions found are listed.",
+"rule": "plan T4/Q1: shells until connected; exact group by spglib; 48 samples, seed 0",
+"status": "COMPUTATIONAL EVIDENCE",
+"partial": false,
+"n_done": 230,
+"total_seconds": 903.8,
+"entries_histogram": {
+"11": 18,
+"9": 29,
+"12": 20,
+"7": 43,
+"14": 15,
+"10": 28,
+"17": 6,
+"21": 3,
+"8": 35,
+"13": 8,
+"19": 2,
+"16": 3,
+"15": 6,
+"20": 3,
+"30": 1,
+"18": 8,
+"27": 1,
+"22": 1
+},
+"groups": [
+{
+"group": 1,
+"symbol": "P1",
+"entries": 11,
+"deepest_complete_tier": [
+4,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+3,
+3,
+"complete"
+],
+[
+4,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 2.02
+},
+{
+"group": 2,
+"symbol": "P-1",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4,
+"same_lattice": 39
+},
+"seconds": 14.156
+},
+{
+"group": 3,
+"symbol": "P2",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 13
+},
+"seconds": 3.258
+},
+{
+"group": 4,
+"symbol": "P2_1",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 0.661
+},
+{
+"group": 5,
+"symbol": "C2",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10,
+"same_lattice": 5
+},
+"seconds": 1.3
+},
+{
+"group": 6,
+"symbol": "Pm",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 4
+},
+"seconds": 2.771
+},
+{
+"group": 7,
+"symbol": "Pc",
+"entries": 14,
+"deepest_complete_tier": [
+3,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+3,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 17
+},
+"seconds": 1.599
+},
+{
+"group": 8,
+"symbol": "Cm",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6
+},
+"seconds": 0.998
+},
+{
+"group": 9,
+"symbol": "Cc",
+"entries": 9,
+"deepest_complete_tier": [
+3,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+3,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 21
+},
+"seconds": 1.135
+},
+{
+"group": 10,
+"symbol": "P2/m",
+"entries": 17,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 22,
+"same_lattice": 172
+},
+"seconds": 83.142
+},
+{
+"group": 11,
+"symbol": "P2_1/m",
+"entries": 21,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 21
+},
+"seconds": 23.115
+},
+{
+"group": 12,
+"symbol": "C2/m",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+2
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6,
+"same_lattice": 13
+},
+"seconds": 3.385
+},
+{
+"group": 13,
+"symbol": "P2/c",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 2
+},
+"seconds": 1.327
+},
+{
+"group": 14,
+"symbol": "P2_1/c",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 0.579
+},
+{
+"group": 15,
+"symbol": "C2/c",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 1.021
+},
+{
+"group": 16,
+"symbol": "P222",
+"entries": 13,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 35,
+"same_lattice": 48
+},
+"seconds": 11.648
+},
+{
+"group": 17,
+"symbol": "P222_1",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 21
+},
+"seconds": 4.044
+},
+{
+"group": 18,
+"symbol": "P2_12_12",
+"entries": 19,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 14,
+"same_lattice": 5
+},
+"seconds": 3.514
+},
+{
+"group": 19,
+"symbol": "P2_12_12_1",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.402
+},
+{
+"group": 20,
+"symbol": "C222_1",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6
+},
+"seconds": 1.323
+},
+{
+"group": 21,
+"symbol": "C222",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 11,
+"same_lattice": 11
+},
+"seconds": 2.861
+},
+{
+"group": 22,
+"symbol": "F222",
+"entries": 16,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 46
+},
+"seconds": 8.085
+},
+{
+"group": 23,
+"symbol": "I222",
+"entries": 21,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 30,
+"same_lattice": 25
+},
+"seconds": 4.786
+},
+{
+"group": 24,
+"symbol": "I2_12_12_1",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 14,
+"same_lattice": 7
+},
+"seconds": 2.633
+},
+{
+"group": 25,
+"symbol": "Pmm2",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 9,
+"same_lattice": 51
+},
+"seconds": 9.936
+},
+{
+"group": 26,
+"symbol": "Pmc2_1",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 4
+},
+"seconds": 2.574
+},
+{
+"group": 27,
+"symbol": "Pcc2",
+"entries": 13,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 22,
+"same_lattice": 21
+},
+"seconds": 4.393
+},
+{
+"group": 28,
+"symbol": "Pma2",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 7
+},
+"seconds": 4.276
+},
+{
+"group": 29,
+"symbol": "Pca2_1",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 12
+},
+"seconds": 1.393
+},
+{
+"group": 30,
+"symbol": "Pnc2",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10,
+"same_lattice": 5
+},
+"seconds": 2.213
+},
+{
+"group": 31,
+"symbol": "Pmn2_1",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.081
+},
+{
+"group": 32,
+"symbol": "Pba2",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10,
+"same_lattice": 6
+},
+"seconds": 3.748
+},
+{
+"group": 33,
+"symbol": "Pna2_1",
+"entries": 15,
+"deepest_complete_tier": [
+3,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+3,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 17
+},
+"seconds": 1.83
+},
+{
+"group": 34,
+"symbol": "Pnn2",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 9,
+"same_lattice": 5
+},
+"seconds": 1.925
+},
+{
+"group": 35,
+"symbol": "Cmm2",
+"entries": 15,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 11,
+"same_lattice": 25
+},
+"seconds": 14.311
+},
+{
+"group": 36,
+"symbol": "Cmc2_1",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 3.469
+},
+{
+"group": 37,
+"symbol": "Ccc2",
+"entries": 17,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10,
+"same_lattice": 7
+},
+"seconds": 8.018
+},
+{
+"group": 38,
+"symbol": "Amm2",
+"entries": 20,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 8,
+"same_lattice": 15
+},
+"seconds": 5.741
+},
+{
+"group": 39,
+"symbol": "Aem2",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 9,
+"same_lattice": 9
+},
+"seconds": 3.34
+},
+{
+"group": 40,
+"symbol": "Ama2",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 1.691
+},
+{
+"group": 41,
+"symbol": "Aea2",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.104
+},
+{
+"group": 42,
+"symbol": "Fmm2",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 5
+},
+"seconds": 4.639
+},
+{
+"group": 43,
+"symbol": "Fdd2",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.206
+},
+{
+"group": 44,
+"symbol": "Imm2",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 16,
+"same_lattice": 17
+},
+"seconds": 7.614
+},
+{
+"group": 45,
+"symbol": "Iba2",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 10
+},
+"seconds": 2.357
+},
+{
+"group": 46,
+"symbol": "Ima2",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6,
+"same_lattice": 1
+},
+"seconds": 1.607
+},
+{
+"group": 47,
+"symbol": "Pmmm",
+"entries": 13,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 22,
+"same_lattice": 244
+},
+"seconds": 74.951
+},
+{
+"group": 48,
+"symbol": "Pnnn",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 8,
+"same_lattice": 17
+},
+"seconds": 5.095
+},
+{
+"group": 49,
+"symbol": "Pccm",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 2.119
+},
+{
+"group": 50,
+"symbol": "Pban",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.243
+},
+{
+"group": 51,
+"symbol": "Pmma",
+"entries": 21,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4,
+"same_lattice": 41
+},
+"seconds": 12.007
+},
+{
+"group": 52,
+"symbol": "Pnna",
+"entries": 17,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6,
+"same_lattice": 4
+},
+"seconds": 2.508
+},
+{
+"group": 53,
+"symbol": "Pmna",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.625
+},
+{
+"group": 54,
+"symbol": "Pcca",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 1.337
+},
+{
+"group": 55,
+"symbol": "Pbam",
+"entries": 20,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 13,
+"same_lattice": 41
+},
+"seconds": 13.258
+},
+{
+"group": 56,
+"symbol": "Pccn",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 6
+},
+"seconds": 3.654
+},
+{
+"group": 57,
+"symbol": "Pbcm",
+"entries": 30,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 33,
+"same_lattice": 10
+},
+"seconds": 8.423
+},
+{
+"group": 58,
+"symbol": "Pnnm",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.594
+},
+{
+"group": 59,
+"symbol": "Pmmn",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 6
+},
+"seconds": 2.697
+},
+{
+"group": 60,
+"symbol": "Pbcn",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 0.765
+},
+{
+"group": 61,
+"symbol": "Pbca",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10,
+"same_lattice": 7
+},
+"seconds": 3.389
+},
+{
+"group": 62,
+"symbol": "Pnma",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.301
+},
+{
+"group": 63,
+"symbol": "Cmcm",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 2
+},
+"seconds": 1.579
+},
+{
+"group": 64,
+"symbol": "Cmce",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 0.716
+},
+{
+"group": 65,
+"symbol": "Cmmm",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 20
+},
+"seconds": 6.205
+},
+{
+"group": 66,
+"symbol": "Cccm",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 9
+},
+"seconds": 3.878
+},
+{
+"group": 67,
+"symbol": "Cmme",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 4
+},
+"seconds": 2.194
+},
+{
+"group": 68,
+"symbol": "Ccce",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 9,
+"same_lattice": 3
+},
+"seconds": 2.376
+},
+{
+"group": 69,
+"symbol": "Fmmm",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 12
+},
+"seconds": 3.911
+},
+{
+"group": 70,
+"symbol": "Fddd",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 6
+},
+"seconds": 2.253
+},
+{
+"group": 71,
+"symbol": "Immm",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+2
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 29
+},
+"seconds": 4.575
+},
+{
+"group": 72,
+"symbol": "Ibam",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 1.751
+},
+{
+"group": 73,
+"symbol": "Ibca",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 13
+},
+"seconds": 4.502
+},
+{
+"group": 74,
+"symbol": "Imma",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 3
+},
+"seconds": 2.167
+},
+{
+"group": 75,
+"symbol": "P4",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 7
+},
+"seconds": 2.117
+},
+{
+"group": 76,
+"symbol": "P4_1",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.007
+},
+{
+"group": 77,
+"symbol": "P4_2",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10,
+"same_lattice": 5
+},
+"seconds": 2.421
+},
+{
+"group": 78,
+"symbol": "P4_3",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 0.981
+},
+{
+"group": 79,
+"symbol": "I4",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 1.254
+},
+{
+"group": 80,
+"symbol": "I4_1",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 0.9
+},
+{
+"group": 81,
+"symbol": "P-4",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 13,
+"same_lattice": 20
+},
+"seconds": 4.547
+},
+{
+"group": 82,
+"symbol": "I-4",
+"entries": 16,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 24,
+"same_lattice": 20
+},
+"seconds": 3.733
+},
+{
+"group": 83,
+"symbol": "P4/m",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 29
+},
+"seconds": 7.278
+},
+{
+"group": 84,
+"symbol": "P4_2/m",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.076
+},
+{
+"group": 85,
+"symbol": "P4/n",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.16
+},
+{
+"group": 86,
+"symbol": "P4_2/n",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 0.855
+},
+{
+"group": 87,
+"symbol": "I4/m",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.324
+},
+{
+"group": 88,
+"symbol": "I4_1/a",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+10
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 25,
+"same_lattice": 6
+},
+"seconds": 2.212
+},
+{
+"group": 89,
+"symbol": "P422",
+"entries": 27,
+"deepest_complete_tier": [
+2,
+9
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+9,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 34,
+"same_lattice": 27
+},
+"seconds": 7.983
+},
+{
+"group": 90,
+"symbol": "P42_12",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4,
+"same_lattice": 8
+},
+"seconds": 3.868
+},
+{
+"group": 91,
+"symbol": "P4_122",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 4
+},
+"seconds": 1.295
+},
+{
+"group": 92,
+"symbol": "P4_12_12",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 0.67
+},
+{
+"group": 93,
+"symbol": "P4_222",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6,
+"same_lattice": 9
+},
+"seconds": 3.28
+},
+{
+"group": 94,
+"symbol": "P4_22_12",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 0.891
+},
+{
+"group": 95,
+"symbol": "P4_322",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 4
+},
+"seconds": 1.453
+},
+{
+"group": 96,
+"symbol": "P4_32_12",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 0.715
+},
+{
+"group": 97,
+"symbol": "I422",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 6
+},
+"seconds": 2.562
+},
+{
+"group": 98,
+"symbol": "I4_122",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 1
+},
+"seconds": 1.274
+},
+{
+"group": 99,
+"symbol": "P4mm",
+"entries": 15,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 15
+},
+"seconds": 6.32
+},
+{
+"group": 100,
+"symbol": "P4bm",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 2.686
+},
+{
+"group": 101,
+"symbol": "P4_2cm",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4,
+"same_lattice": 5
+},
+"seconds": 1.95
+},
+{
+"group": 102,
+"symbol": "P4_2nm",
+"entries": 20,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 3.345
+},
+{
+"group": 103,
+"symbol": "P4cc",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+10
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 7
+},
+"seconds": 2.205
+},
+{
+"group": 104,
+"symbol": "P4nc",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+10
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.215
+},
+{
+"group": 105,
+"symbol": "P4_2mc",
+"entries": 22,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 19
+},
+"seconds": 5.377
+},
+{
+"group": 106,
+"symbol": "P4_2bc",
+"entries": 15,
+"deepest_complete_tier": [
+2,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 4
+},
+"seconds": 2.533
+},
+{
+"group": 107,
+"symbol": "I4mm",
+"entries": 16,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 2.79
+},
+{
+"group": 108,
+"symbol": "I4cm",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 1
+},
+"seconds": 2.247
+},
+{
+"group": 109,
+"symbol": "I4_1md",
+"entries": 15,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.719
+},
+{
+"group": 110,
+"symbol": "I4_1cd",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.877
+},
+{
+"group": 111,
+"symbol": "P-42m",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10,
+"same_lattice": 23
+},
+"seconds": 5.613
+},
+{
+"group": 112,
+"symbol": "P-42c",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 0.789
+},
+{
+"group": 113,
+"symbol": "P-42_1m",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 1.999
+},
+{
+"group": 114,
+"symbol": "P-42_1c",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 1.038
+},
+{
+"group": 115,
+"symbol": "P-4m2",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 12
+},
+"seconds": 3.123
+},
+{
+"group": 116,
+"symbol": "P-4c2",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 5
+},
+"seconds": 2.328
+},
+{
+"group": 117,
+"symbol": "P-4b2",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.284
+},
+{
+"group": 118,
+"symbol": "P-4n2",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 0.731
+},
+{
+"group": 119,
+"symbol": "I-4m2",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 1.095
+},
+{
+"group": 120,
+"symbol": "I-4c2",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 0.913
+},
+{
+"group": 121,
+"symbol": "I-42m",
+"entries": 13,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 1.551
+},
+{
+"group": 122,
+"symbol": "I-42d",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6
+},
+"seconds": 0.907
+},
+{
+"group": 123,
+"symbol": "P4/mmm",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 11
+},
+"seconds": 12.209
+},
+{
+"group": 124,
+"symbol": "P4/mcc",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.8
+},
+{
+"group": 125,
+"symbol": "P4/nbm",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 3.349
+},
+{
+"group": 126,
+"symbol": "P4/nnc",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.1
+},
+{
+"group": 127,
+"symbol": "P4/mbm",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 5
+},
+"seconds": 6.333
+},
+{
+"group": 128,
+"symbol": "P4/mnc",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+10
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 11
+},
+"seconds": 5.856
+},
+{
+"group": 129,
+"symbol": "P4/nmm",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 1
+},
+"seconds": 2.572
+},
+{
+"group": 130,
+"symbol": "P4/ncc",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.411
+},
+{
+"group": 131,
+"symbol": "P4_2/mmc",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 12
+},
+"seconds": 4.169
+},
+{
+"group": 132,
+"symbol": "P4_2/mcm",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 2
+},
+"seconds": 2.774
+},
+{
+"group": 133,
+"symbol": "P4_2/nbc",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7
+},
+"seconds": 1.224
+},
+{
+"group": 134,
+"symbol": "P4_2/nnm",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.207
+},
+{
+"group": 135,
+"symbol": "P4_2/mbc",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 2.886
+},
+{
+"group": 136,
+"symbol": "P4_2/mnm",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 4
+},
+"seconds": 4.09
+},
+{
+"group": 137,
+"symbol": "P4_2/nmc",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 0.949
+},
+{
+"group": 138,
+"symbol": "P4_2/ncm",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.845
+},
+{
+"group": 139,
+"symbol": "I4/mmm",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 6
+},
+"seconds": 2.31
+},
+{
+"group": 140,
+"symbol": "I4/mcm",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 1
+},
+"seconds": 2.453
+},
+{
+"group": 141,
+"symbol": "I4_1/amd",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 3
+},
+"seconds": 1.711
+},
+{
+"group": 142,
+"symbol": "I4_1/acd",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 1.579
+},
+{
+"group": 143,
+"symbol": "P3",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 8
+},
+"seconds": 3.622
+},
+{
+"group": 144,
+"symbol": "P3_1",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 0.982
+},
+{
+"group": 145,
+"symbol": "P3_2",
+"entries": 14,
+"deepest_complete_tier": [
+3,
+9
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+3,
+9,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 10
+},
+"seconds": 1.607
+},
+{
+"group": 146,
+"symbol": "R3",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 0.909
+},
+{
+"group": 147,
+"symbol": "P-3",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 0.938
+},
+{
+"group": 148,
+"symbol": "R-3",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 0.51
+},
+{
+"group": 149,
+"symbol": "P312",
+"entries": 17,
+"deepest_complete_tier": [
+2,
+7
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+7,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 18,
+"same_lattice": 44
+},
+"seconds": 8.248
+},
+{
+"group": 150,
+"symbol": "P321",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 6
+},
+"seconds": 2.185
+},
+{
+"group": 151,
+"symbol": "P3_112",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6,
+"same_lattice": 8
+},
+"seconds": 2.625
+},
+{
+"group": 152,
+"symbol": "P3_121",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 3
+},
+"seconds": 1.125
+},
+{
+"group": 153,
+"symbol": "P3_212",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 8
+},
+"seconds": 2.531
+},
+{
+"group": 154,
+"symbol": "P3_221",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 3
+},
+"seconds": 1.078
+},
+{
+"group": 155,
+"symbol": "R32",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 3
+},
+"seconds": 0.914
+},
+{
+"group": 156,
+"symbol": "P3m1",
+"entries": 13,
+"deepest_complete_tier": [
+2,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5,
+"same_lattice": 10
+},
+"seconds": 4.176
+},
+{
+"group": 157,
+"symbol": "P31m",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 2.117
+},
+{
+"group": 158,
+"symbol": "P3c1",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4,
+"same_lattice": 11
+},
+"seconds": 2.967
+},
+{
+"group": 159,
+"symbol": "P31c",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.924
+},
+{
+"group": 160,
+"symbol": "R3m",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 1.624
+},
+{
+"group": 161,
+"symbol": "R3c",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 1.554
+},
+{
+"group": 162,
+"symbol": "P-31m",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 2.584
+},
+{
+"group": 163,
+"symbol": "P-31c",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.132
+},
+{
+"group": 164,
+"symbol": "P-3m1",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.068
+},
+{
+"group": 165,
+"symbol": "P-3c1",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+10
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 1.871
+},
+{
+"group": 166,
+"symbol": "R-3m",
+"entries": 17,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4,
+"same_lattice": 7
+},
+"seconds": 2.579
+},
+{
+"group": 167,
+"symbol": "R-3c",
+"entries": 14,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6
+},
+"seconds": 1.115
+},
+{
+"group": 168,
+"symbol": "P6",
+"entries": 13,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+7,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 3.025
+},
+{
+"group": 169,
+"symbol": "P6_1",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+6,
+"complete"
+],
+[
+2,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 1.305
+},
+{
+"group": 170,
+"symbol": "P6_5",
+"entries": 11,
+"deepest_complete_tier": [
+2,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+6,
+"complete"
+],
+[
+2,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 1.217
+},
+{
+"group": 171,
+"symbol": "P6_2",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+9
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+9,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6
+},
+"seconds": 2.094
+},
+{
+"group": 172,
+"symbol": "P6_4",
+"entries": 19,
+"deepest_complete_tier": [
+2,
+9
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+9,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 2.037
+},
+{
+"group": 173,
+"symbol": "P6_3",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 1.957
+},
+{
+"group": 174,
+"symbol": "P-6",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+4
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 21
+},
+"seconds": 9.182
+},
+{
+"group": 175,
+"symbol": "P6/m",
+"entries": 13,
+"deepest_complete_tier": [
+2,
+7
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+7,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 10
+},
+"seconds": 9.495
+},
+{
+"group": 176,
+"symbol": "P6_3/m",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 4
+},
+"seconds": 1.472
+},
+{
+"group": 177,
+"symbol": "P622",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 1.83
+},
+{
+"group": 178,
+"symbol": "P6_122",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 1
+},
+"seconds": 0.744
+},
+{
+"group": 179,
+"symbol": "P6_522",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 1
+},
+"seconds": 0.807
+},
+{
+"group": 180,
+"symbol": "P6_222",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 8
+},
+"seconds": 2.137
+},
+{
+"group": 181,
+"symbol": "P6_422",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 8
+},
+"seconds": 2.047
+},
+{
+"group": 182,
+"symbol": "P6_322",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 0.999
+},
+{
+"group": 183,
+"symbol": "P6mm",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.649
+},
+{
+"group": 184,
+"symbol": "P6cc",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+14
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+14,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 2.285
+},
+{
+"group": 185,
+"symbol": "P6_3cm",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+10
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 2.586
+},
+{
+"group": 186,
+"symbol": "P6_3mc",
+"entries": 17,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 5
+},
+"seconds": 2.804
+},
+{
+"group": 187,
+"symbol": "P-6m2",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+3
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 27
+},
+"seconds": 8.359
+},
+{
+"group": 188,
+"symbol": "P-6c2",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 8,
+"same_lattice": 17
+},
+"seconds": 7.547
+},
+{
+"group": 189,
+"symbol": "P-62m",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 4
+},
+"seconds": 4.506
+},
+{
+"group": 190,
+"symbol": "P-62c",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.391
+},
+{
+"group": 191,
+"symbol": "P6/mmm",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 6
+},
+"seconds": 5.328
+},
+{
+"group": 192,
+"symbol": "P6/mcc",
+"entries": 15,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 3.358
+},
+{
+"group": 193,
+"symbol": "P6_3/mcm",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 2.801
+},
+{
+"group": 194,
+"symbol": "P6_3/mmc",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+6
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 3
+},
+"seconds": 1.626
+},
+{
+"group": 195,
+"symbol": "P23",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+10
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+7,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+9,
+"complete"
+],
+[
+2,
+10,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 3
+},
+"seconds": 2.386
+},
+{
+"group": 196,
+"symbol": "F23",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+13
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+5,
+"complete"
+],
+[
+2,
+7,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+13,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 18
+},
+"seconds": 8.696
+},
+{
+"group": 197,
+"symbol": "I23",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 0.881
+},
+{
+"group": 198,
+"symbol": "P2_13",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.909
+},
+{
+"group": 199,
+"symbol": "I2_13",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+2,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 1.328
+},
+{
+"group": 200,
+"symbol": "Pm-3",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 6
+},
+"seconds": 4.156
+},
+{
+"group": 201,
+"symbol": "Pn-3",
+"entries": 8,
+"deepest_complete_tier": [
+2,
+16
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+14,
+"complete"
+],
+[
+2,
+16,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 2
+},
+"seconds": 3.493
+},
+{
+"group": 202,
+"symbol": "Fm-3",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 3.265
+},
+{
+"group": 203,
+"symbol": "Fd-3",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 1.637
+},
+{
+"group": 204,
+"symbol": "Im-3",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 1.754
+},
+{
+"group": 205,
+"symbol": "Pa-3",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 3
+},
+"seconds": 3.266
+},
+{
+"group": 206,
+"symbol": "Ia-3",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 3
+},
+"seconds": 3.725
+},
+{
+"group": 207,
+"symbol": "P432",
+"entries": 18,
+"deepest_complete_tier": [
+2,
+25
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+7,
+"complete"
+],
+[
+2,
+9,
+"complete"
+],
+[
+2,
+11,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+13,
+"complete"
+],
+[
+2,
+14,
+"complete"
+],
+[
+2,
+15,
+"complete"
+],
+[
+2,
+16,
+"complete"
+],
+[
+2,
+18,
+"complete"
+],
+[
+2,
+20,
+"complete"
+],
+[
+2,
+24,
+"complete"
+],
+[
+2,
+25,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 11
+},
+"seconds": 10.259
+},
+{
+"group": 208,
+"symbol": "P4_232",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 1
+},
+"seconds": 3.729
+},
+{
+"group": 209,
+"symbol": "F432",
+"entries": 14,
+"deepest_complete_tier": [
+2,
+25
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+3,
+"complete"
+],
+[
+2,
+7,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+9,
+"complete"
+],
+[
+2,
+10,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+13,
+"complete"
+],
+[
+2,
+14,
+"complete"
+],
+[
+2,
+16,
+"complete"
+],
+[
+2,
+18,
+"complete"
+],
+[
+2,
+20,
+"complete"
+],
+[
+2,
+24,
+"complete"
+],
+[
+2,
+25,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 7,
+"same_lattice": 7
+},
+"seconds": 14.135
+},
+{
+"group": 210,
+"symbol": "F4_132",
+"entries": 10,
+"deepest_complete_tier": [
+2,
+14
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+6,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+14,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 4
+},
+"seconds": 4.747
+},
+{
+"group": 211,
+"symbol": "I432",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3
+},
+"seconds": 1.823
+},
+{
+"group": 212,
+"symbol": "P4_332",
+"entries": 11,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 1
+},
+"seconds": 1.718
+},
+{
+"group": 213,
+"symbol": "P4_132",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2,
+"same_lattice": 1
+},
+"seconds": 1.773
+},
+{
+"group": 214,
+"symbol": "I4_132",
+"entries": 10,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 7
+},
+"seconds": 1.636
+},
+{
+"group": 215,
+"symbol": "P-43m",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 3
+},
+"seconds": 3.652
+},
+{
+"group": 216,
+"symbol": "F-43m",
+"entries": 7,
+"deepest_complete_tier": [
+2,
+5
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+2,
+"complete"
+],
+[
+2,
+5,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 11
+},
+"seconds": 6.377
+},
+{
+"group": 217,
+"symbol": "I-43m",
+"entries": 9,
+"deepest_complete_tier": [
+1,
+12
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 1.419
+},
+{
+"group": 218,
+"symbol": "P-43n",
+"entries": 9,
+"deepest_complete_tier": [
+2,
+14
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+14,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1,
+"same_lattice": 3
+},
+"seconds": 3.052
+},
+{
+"group": 219,
+"symbol": "F-43c",
+"entries": 12,
+"deepest_complete_tier": [
+2,
+26
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+2,
+4,
+"complete"
+],
+[
+2,
+8,
+"complete"
+],
+[
+2,
+10,
+"complete"
+],
+[
+2,
+12,
+"complete"
+],
+[
+2,
+14,
+"complete"
+],
+[
+2,
+16,
+"complete"
+],
+[
+2,
+18,
+"complete"
+],
+[
+2,
+20,
+"complete"
+],
+[
+2,
+24,
+"complete"
+],
+[
+2,
+26,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 6,
+"same_lattice": 5
+},
+"seconds": 7.2
+},
+{
+"group": 220,
+"symbol": "I-43d",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 3,
+"same_lattice": 1
+},
+"seconds": 2.434
+},
+{
+"group": 221,
+"symbol": "Pm-3m",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 5
+},
+"seconds": 7.494
+},
+{
+"group": 222,
+"symbol": "Pn-3n",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+48
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+16,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+1,
+48,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 1
+},
+"seconds": 4.031
+},
+{
+"group": 223,
+"symbol": "Pm-3n",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+16,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 2
+},
+"seconds": 4.317
+},
+{
+"group": 224,
+"symbol": "Pn-3m",
+"entries": 8,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 1
+},
+"seconds": 5.391
+},
+{
+"group": 225,
+"symbol": "Fm-3m",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 2
+},
+"seconds": 9.121
+},
+{
+"group": 226,
+"symbol": "Fm-3c",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+48
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+16,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+1,
+48,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 5.878
+},
+{
+"group": 227,
+"symbol": "Fd-3m",
+"entries": 12,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+2,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0,
+"same_lattice": 2
+},
+"seconds": 5.545
+},
+{
+"group": 228,
+"symbol": "Fd-3c",
+"entries": 13,
+"deepest_complete_tier": [
+1,
+48
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+4,
+"complete"
+],
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+16,
+"complete"
+],
+[
+1,
+24,
+"complete"
+],
+[
+1,
+48,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 2
+},
+"seconds": 5.802
+},
+{
+"group": 229,
+"symbol": "Im-3m",
+"entries": 7,
+"deepest_complete_tier": [
+1,
+8
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+1,
+"complete"
+],
+[
+1,
+3,
+"complete"
+],
+[
+1,
+4,
+"complete"
+],
+[
+1,
+6,
+"complete"
+],
+[
+1,
+8,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 1.474
+},
+{
+"group": 230,
+"symbol": "Ia-3d",
+"entries": 14,
+"deepest_complete_tier": [
+1,
+24
+],
+"timed_out": false,
+"collisions": 0,
+"tiers": [
+[
+1,
+8,
+"complete"
+],
+[
+1,
+12,
+"complete"
+],
+[
+1,
+16,
+"complete"
+],
+[
+1,
+24,
+"complete"
+]
+],
+"counts": {
+"rare_phases": 0
+},
+"seconds": 4.071
+}
+]
+}

@@ -60,6 +60,16 @@ pub fn symmetry_facts(group: &str) -> SymmetryFacts {
     SymmetryFacts { group: group.to_string(), rotation_orders, reversing }
 }
 
+/// Cell-aware symmetry facts: identifies the realized wallpaper group of `cell`
+/// (falling back to `fallback_group` on failure) so special-locus mirror/glide
+/// symmetries on Sohncke recipes match `refusal.py`.
+pub fn symmetry_facts_of_cell(fallback_group: &str, cell: &Cell2D) -> SymmetryFacts {
+    let real_group = cell
+        .try_identify_wallpaper_group(false)
+        .unwrap_or_else(|_| fallback_group.to_string());
+    symmetry_facts(&real_group)
+}
+
 /// Settings attempted for flat surfaces (`torus`, `cylinder`, `Moebius band`, `Klein bottle`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlatAttempt {
@@ -181,7 +191,9 @@ fn run_poly_table(group: &str, cell: &Cell2D, projective: bool) -> SurfaceTableR
 /// the corners restricted to the centre classes matching `centre` (`None`: every usable class, as in the table).
 pub fn try_poly_for_table_with_centre(group: &str, cell: &Cell2D, projective: bool, centre: Option<&str>) -> SurfaceTableRow {
     let name = if projective { "projective plane" } else { "sphere" };
-    let facts = symmetry_facts(group);
+    // C1: facts and group from the cell (the label can miss the symmetry of a tuned special locus).
+    let facts = symmetry_facts_of_cell(group, cell);
+    let group = facts.group.as_str();
     if let Some(reason) = facts.impossible_reason(name) {
         return SurfaceTableRow::impossible(name, reason, "group", vec!["default".into()]);
     }
@@ -281,7 +293,10 @@ where
     FFlat: FnMut(&str, FlatAttempt) -> Result<SurfaceMesh, SurfaceError>,
     FGenus: FnMut(u32, (i32, i32)) -> Result<SurfaceMesh, SurfaceError>,
 {
-    let facts = symmetry_facts(group);
+    // C1: the verdicts come from the symmetry found on the cell, not from the label (a tuned special locus such as
+    // an oblique cell at b = 1, gamma = 90 deg has mirrors its label p2 does not list).
+    let facts = symmetry_facts_of_cell(group, cell);
+    let group = facts.group.as_str();
     SURFACES
         .into_iter()
         .map(|name| match name {
@@ -356,10 +371,12 @@ mod tests {
             |_, _| Err(SurfaceError::not_found("stub", "", false)),
             |_, _| Err(SurfaceError::not_found("stub", "", false)),
         );
+        // C1: the verdicts follow the cell, not the label. A square cell labelled p4 has the mirrors of p4m, so the
+        // Moebius row is not proved impossible (the stub builder refuses it: NOT FOUND) and neither is RP2.
         assert_eq!(rows.len(), 8);
-        assert_eq!(rows[2].status, "IMPOSSIBLE");
+        assert_eq!(rows[2].status, "NOT FOUND");
         assert_eq!(rows[4].status, "OK");
-        assert_eq!(rows[5].status, "IMPOSSIBLE");
+        assert_ne!(rows[5].status, "IMPOSSIBLE");
     }
 
     #[derive(Default, Deserialize)]

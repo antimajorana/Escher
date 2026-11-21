@@ -117,13 +117,10 @@ pub fn show_wallpaper_bieberbach_collapsible(
     let Some(sum) = wallpaper_bieberbach_summary(group) else {
         return;
     };
-    egui::CollapsingHeader::new(format!(
-        "Cohomology & Sectors: H²={}, Gᵃᵇ={}",
-        sum.h2_label, sum.ab_full_label
-    ))
-    .id_salt(id_salt)
-    .default_open(false)
-    .show(ui, |ui| {
+    egui::CollapsingHeader::new("Group cohomology (H², Gᵃᵇ)")
+        .id_salt(id_salt)
+        .default_open(false)
+        .show(ui, |ui| {
         let split_tag = if sum.is_split {
             "split ([ν]=0)"
         } else {

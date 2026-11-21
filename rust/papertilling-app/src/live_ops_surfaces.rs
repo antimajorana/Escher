@@ -3,7 +3,7 @@ use papertilling_core::plane::groups::WALLPAPER_GROUPS;
 use papertilling_core::surface::{
     RefusalKind, SurfaceError, check_surface, cylinder, default_cylinder, default_genus_surface,
     default_klein_bottle, default_mobius_band, default_torus, genus_surface_with_options,
-    klein_bottle, mobius_band, polyhedron, surface_table, symmetry_facts, torus,
+    klein_bottle, mobius_band, polyhedron, surface_table, symmetry_facts_of_cell, torus,
     try_poly_for_table_with_centre,
 };
 use papertilling_core::types::{Cell2D, SurfaceCheckReport, SurfaceMesh};
@@ -78,6 +78,9 @@ pub fn surface_table_name(target: SurfaceTargetUi) -> &'static str {
         SurfaceTargetUi::ProjectivePlane => "projective plane",
         SurfaceTargetUi::Genus2 => "genus 2",
         SurfaceTargetUi::Genus3 => "genus 3",
+        // not in Python's SURFACES (C1 boundary conditions of the Surfaces tab; they never ask for this name)
+        SurfaceTargetUi::Open => "open patch",
+        SurfaceTargetUi::TorusHex => "torus (hexagonal domain)",
     }
 }
 
@@ -104,13 +107,16 @@ fn verdict_message(msg: String) -> String {
     }
 }
 
-fn surface_error_message(e: SurfaceError) -> String {
+pub(crate) fn surface_error_message(e: SurfaceError) -> String {
     match e.kind {
         RefusalKind::Impossible => match e.scope {
             Some(sc) => format!("IMPOSSIBLE ({sc}): {e}"),
             None => format!("IMPOSSIBLE: {e}"),
         },
-        RefusalKind::NotFound { .. } => format!("NOT FOUND: {e}"),
+        RefusalKind::NotFound { .. } => {
+            let s = e.to_string();
+            if s.starts_with("NOT FOUND") { s } else { format!("NOT FOUND: {s}") }
+        }
         RefusalKind::InvalidArg => format!("invalid size: {e}"),
     }
 }
@@ -121,8 +127,12 @@ pub fn build_surface_mesh(
     target: SurfaceTargetUi,
     params: &SurfaceBuildParamsUi,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
+    if matches!(target, SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex) {
+        return open_or_hex(item, target);
+    }
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
-    if let Some(reason) = symmetry_facts(&item.group).impossible_reason(surface_table_name(target)) {
+    let facts = symmetry_facts_of_cell(&item.group, &cell);
+    if let Some(reason) = facts.impossible_reason(surface_table_name(target)) {
         return Err(format!("IMPOSSIBLE (group): {reason}"));
     }
     let (h, k) = (params.h, params.k);
@@ -134,7 +144,7 @@ pub fn build_surface_mesh(
         SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane => {
             let proj = target == SurfaceTargetUi::ProjectivePlane;
             return polyhedron(
-                &item.group,
+                &facts.group,
                 &cell,
                 Some((h.max(0), k.max(0))),
                 centre_filter(params.centre_mode),
@@ -150,6 +160,7 @@ pub fn build_surface_mesh(
             let g = if target == SurfaceTargetUi::Genus2 { 2 } else { params.genus_g.max(3) as usize };
             genus_surface_with_options(&cell, g, [h.max(1), 0], [0, k.max(1)], None)
         }
+        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => unreachable!("routed to open_or_hex above"),
     }
     .map_err(verdict_message)?;
     let report = check_surface(&mesh);
@@ -164,8 +175,12 @@ pub fn build_surface_mesh_auto(
     centre_mode: CentreModeUi,
     genus_g: u32,
 ) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
+    if matches!(target, SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex) {
+        return open_or_hex(item, target);
+    }
     let cell = LatticeFamily::from_recipe(&item.recipe, Some(item.frame))?.cell();
-    if let Some(reason) = symmetry_facts(&item.group).impossible_reason(surface_table_name(target)) {
+    let facts = symmetry_facts_of_cell(&item.group, &cell);
+    if let Some(reason) = facts.impossible_reason(surface_table_name(target)) {
         return Err(format!("IMPOSSIBLE (group): {reason}"));
     }
     let mesh = match target {
@@ -176,7 +191,7 @@ pub fn build_surface_mesh_auto(
         SurfaceTargetUi::Sphere | SurfaceTargetUi::ProjectivePlane => {
             let proj = target == SurfaceTargetUi::ProjectivePlane;
             let row = try_poly_for_table_with_centre(
-                &item.group,
+                &facts.group,
                 &cell,
                 proj,
                 centre_filter(centre_mode),
@@ -194,8 +209,15 @@ pub fn build_surface_mesh_auto(
         }
         SurfaceTargetUi::Genus2 => default_genus_surface(&cell, 2),
         SurfaceTargetUi::Genus3 => default_genus_surface(&cell, genus_g.max(3) as usize),
+        SurfaceTargetUi::Open | SurfaceTargetUi::TorusHex => unreachable!("routed to open_or_hex above"),
     }
     .map_err(verdict_message)?;
     let report = check_surface(&mesh);
     Ok((mesh, report))
+}
+
+/// The open patch or the hexagonal torus at the default options of the Surfaces tab (the tab itself builds them
+/// from its own options, see `surfaces_tab::bc`).
+fn open_or_hex(item: &CatalogueItemUi, target: SurfaceTargetUi) -> Result<(SurfaceMesh, SurfaceCheckReport), String> {
+    crate::surfaces_tab::bc::build_bc(item, target, &Default::default()).map(|(m, r, _)| (m, r))
 }

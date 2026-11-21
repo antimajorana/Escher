@@ -2733,6 +2733,7 @@ dependencies = [
 name = "papertilling-app"
 version = "0.2.0"
 dependencies = [
+ "ab_glyph",
  "bytemuck",
  "eframe",
  "egui",
@@ -2743,6 +2744,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "ttf-parser",
 ]
 
 [[package]]

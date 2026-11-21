@@ -1,7 +1,10 @@
 //! Complete 230 3D space groups (`space_groups_230.json`) and 80 layer groups
 //! (`layer_groups_80.json`), analyzed dynamically via the Bieberbach engine.
 
+pub mod layer_slab;
+pub mod motifs;
 pub mod nets3d;
+pub mod points3d;
 
 use std::sync::LazyLock;
 

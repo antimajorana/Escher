@@ -50,6 +50,7 @@ impl CombineTabState {
         self.grid = o.grid.clamp(1, 3);
         self.opts.core_radius = o.radius.clamp(1, 4);
         self.specs = cfg.defects.clone();
+        self.clear_selection();
         let mut clamped = Vec::new();
         if o.r_patch.is_some_and(|r| (r - self.opts.manual_radius).abs() > 1e-9) {
             clamped.push(format!("r_patch {:?} -> {}", o.r_patch.unwrap_or_default(), self.opts.manual_radius));

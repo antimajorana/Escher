@@ -1,8 +1,15 @@
 //! Geometry-agnostic tiling, Delaney-Dress symbol, surface, and defect core for `papertilling`.
 
 pub mod bieberbach;
+pub mod defect_fields;
+pub mod flat3d;
+pub mod fusion;
+pub mod growth;
+pub mod honeycomb3d;
+pub mod noneuclidean2d;
 pub mod defect;
 pub mod dsymbol;
+pub mod export;
 pub mod hyperbolic;
 pub mod plane;
 pub mod space3d;

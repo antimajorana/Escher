@@ -4,8 +4,10 @@ use crate::backend::{
 use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::combine_worker::{LatestWorker, empty_crystal, empty_sheet3d};
 use crate::defects_inspectors::DefectInspectors;
+use crate::defects_ui::growth::{GrowthOutcome, GrowthRequest, GrowthUi};
 use crate::export_obj::export_sheet_obj;
 use crate::live_ops::defect_context;
+use crate::canvas2d::gauge_overlay::CrystalOverlayMode;
 use crate::live_ops_ao::{Defect2dMode, build_ao_crystal_overlay};
 use crate::mesh3d::{
     DefectViewMode, GpuMeshData, Sheet3dViewOpts, mesh_from_sheet3d_with_spectral, sheet3d_caption,
@@ -21,6 +23,8 @@ struct BuildJob {
     draw_mode: Defect2dMode,
     wall_half: bool,
     kappa_b: f64,
+    /// C1 WP-U7: grow the point defect by `layers` layers (None: the plain surgery patch).
+    grow: Option<GrowthRequest>,
     reuse_crystal: Option<(DefectCatalogueUi, BuiltCrystal, DefectReadoutUi)>,
 }
 
@@ -31,6 +35,8 @@ type BuildOutput = (
     Sheet3DResult,
     BuiltCrystal,
     Sheet3DResult,
+    // None: keep the growth readout (a 3D-only rebuild reuses the crystal)
+    Option<GrowthOutcome>,
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,16 +44,23 @@ pub enum DefectSubTab {
     Dislocations,
     Disclinations,
     Walls,
+    Combinations,
 }
 
 impl DefectSubTab {
-    pub const ALL: [Self; 3] = [Self::Dislocations, Self::Disclinations, Self::Walls];
+    pub const ALL: [Self; 4] = [
+        Self::Dislocations,
+        Self::Disclinations,
+        Self::Walls,
+        Self::Combinations,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Dislocations => "Dislocations",
             Self::Disclinations => "Disclinations",
-            Self::Walls => "Walls (Wa-Wd)",
+            Self::Walls => "Mirror & glide walls",
+            Self::Combinations => "Combinations",
         }
     }
 }
@@ -65,6 +78,9 @@ pub struct DefectsTabState {
     pub view_mode: DefectViewMode,
     pub sheet_opts: Sheet3dViewOpts,
     pub inspectors: DefectInspectors,
+    pub(crate) growth: GrowthUi,
+    pub(crate) combos: crate::defects_ui::combos::CombosState,
+    pub(crate) open_in_combine: Option<Vec<papertilling_core::defect::surgery::DefectSpec>>,
     pub(crate) last_item: CatalogueItemUi,
     pub readout: DefectReadoutUi,
     pub(crate) stale: bool,
@@ -73,7 +89,7 @@ pub struct DefectsTabState {
     last_scene: Option<Scene2D>,
     pub(crate) last_crystal: BuiltCrystal,
     pub(crate) last_sheet: Sheet3DResult,
-    flat_crystal: BuiltCrystal,
+    pub(crate) flat_crystal: BuiltCrystal,
     pub(crate) flat_sheet: Sheet3DResult,
     pub(crate) view3d_dirty: bool,
     reset_on_result: bool,
@@ -105,35 +121,61 @@ impl DefectsTabState {
             radius,
             relaxed,
             draw_mode: Defect2dMode::RelaxedDrawing,
-            view_mode: DefectViewMode::Split2D3D,
+            view_mode: DefectViewMode::Planar2D,
             sheet_opts,
             inspectors: DefectInspectors::new(),
+            growth: GrowthUi::default(),
+            combos: crate::defects_ui::combos::CombosState::new(),
+            open_in_combine: None,
             last_item: item.clone(),
             readout,
             stale: false,
             initializing: false,
             worker: LatestWorker::spawn("defects-build", (), |_: &mut (), job: BuildJob| {
-                let (catalogue, crystal, readout) = match job.reuse_crystal {
-                    Some(prev) => prev,
+                let (catalogue, crystal, readout, grown, eff_radius) = match job.reuse_crystal {
+                    Some((cat, c, r)) => (cat, c, r, None, job.radius),
                     None => {
                         let cat = crate::live_ops::catalogue_for_lattice(&job.item);
-                        let (c, r) = crate::live_ops::build_defect_patch_mode(
-                            &job.item,
-                            &job.selection,
-                            job.radius,
-                            job.draw_mode,
-                            job.wall_half,
-                        );
-                        (cat, c, r)
+                        let grown = job.grow.map(|req| {
+                            crate::defects_ui::growth::build_grown(&job.item, &job.selection, req, job.draw_mode)
+                        });
+                        match grown {
+                            Some(Ok((c, r, v))) => {
+                                let rad = v.radius;
+                                (cat, c, r, Some(GrowthOutcome::Shown(v)), rad)
+                            }
+                            other => {
+                                let (c, mut r) = crate::live_ops::build_defect_patch_mode(
+                                    &job.item,
+                                    &job.selection,
+                                    job.radius,
+                                    job.draw_mode,
+                                    job.wall_half,
+                                );
+                                let outcome = match other {
+                                    Some(Err(why)) => {
+                                        r.note = [r.note.as_str(), &format!("not grown: {why}")]
+                                            .iter()
+                                            .filter(|t| !t.is_empty())
+                                            .copied()
+                                            .collect::<Vec<_>>()
+                                            .join("; ");
+                                        GrowthOutcome::Refused(why)
+                                    }
+                                    _ => GrowthOutcome::Off,
+                                };
+                                (cat, c, r, Some(outcome), job.radius)
+                            }
+                        }
                     }
                 };
                 let (sheet, flat_c, flat_s) = crate::live_ops::build_defect_sheets_3d(
                     &job.item,
                     &crystal,
-                    job.radius,
+                    eff_radius,
                     job.kappa_b,
                 );
-                (catalogue, crystal, readout, sheet, flat_c, flat_s)
+                (catalogue, crystal, readout, sheet, flat_c, flat_s, grown)
             }),
             last_scene,
             last_crystal: crystal,
@@ -148,10 +190,18 @@ impl DefectsTabState {
 
     pub(crate) fn current_selection(&self) -> DefectSelectionUi {
         match self.sub_tab {
-            DefectSubTab::Dislocations => DefectSelectionUi::Dislocation(self.selected_disloc),
+            DefectSubTab::Dislocations | DefectSubTab::Combinations => {
+                DefectSelectionUi::Dislocation(self.selected_disloc)
+            }
             DefectSubTab::Disclinations => DefectSelectionUi::Disclination(self.selected_disclin),
             DefectSubTab::Walls => DefectSelectionUi::Wall(self.selected_wall),
         }
+    }
+
+    pub(crate) fn take_open_in_combine(
+        &mut self,
+    ) -> Option<Vec<papertilling_core::defect::surgery::DefectSpec>> {
+        self.open_in_combine.take()
     }
 
     pub fn reload_for_item(
@@ -163,6 +213,8 @@ impl DefectsTabState {
     ) {
         self.last_item = item.clone();
         self.inspectors.clear_for_switch();
+        self.combos.clear_and_cancel();
+        self.open_in_combine = None;
         self.selected_disloc = 0;
         self.selected_disclin = 0;
         self.selected_wall = 0;
@@ -183,13 +235,7 @@ impl DefectsTabState {
         }
     }
 
-    pub fn rebuild_crystal(
-        &mut self,
-        item: &CatalogueItemUi,
-        _backend: &AppBackend,
-        canvas: &mut Canvas2D,
-        reset_view: bool,
-    ) {
+    pub fn submit_rebuild(&mut self, item: &CatalogueItemUi, reset_view: bool) {
         self.last_item = item.clone();
         self.relaxed = self.draw_mode != Defect2dMode::Raw;
         self.worker.submit(BuildJob {
@@ -199,12 +245,23 @@ impl DefectsTabState {
             draw_mode: self.draw_mode,
             wall_half: self.wall_half,
             kappa_b: self.sheet_opts.kappa_b,
+            grow: self.growth.request(self.sub_tab),
             reuse_crystal: None,
         });
         self.stale = false;
         self.error = None;
         self.view3d_dirty = true;
         self.reset_on_result |= reset_view;
+    }
+
+    pub fn rebuild_crystal(
+        &mut self,
+        item: &CatalogueItemUi,
+        _backend: &AppBackend,
+        canvas: &mut Canvas2D,
+        reset_view: bool,
+    ) {
+        self.submit_rebuild(item, reset_view);
         let mut scene = self.last_scene.clone().unwrap_or_else(|| Scene2D::PeriodicCell {
             cell: Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: Vec::new(), bonds: Vec::new() },
             repeat: 1,
@@ -216,18 +273,25 @@ impl DefectsTabState {
         canvas.set_scene(scene, reset_view);
     }
 
+    #[cfg(test)]
     pub fn rebuild_sheet3d_only(&mut self, item: &CatalogueItemUi) {
         let reuse = (!self.is_busy() && !self.initializing && !self.last_crystal.pos.is_empty()).then(|| {
             (self.catalogue.clone(), self.last_crystal.clone(), self.readout.clone())
         });
+        let grow_req = self.growth.request(self.sub_tab);
+        let eff_radius = match (&reuse, &self.growth.outcome) {
+            (Some(_), GrowthOutcome::Shown(v)) if grow_req.is_some() => v.radius,
+            _ => self.radius,
+        };
         self.relaxed = self.draw_mode != Defect2dMode::Raw;
         self.worker.submit(BuildJob {
             item: item.clone(),
             selection: self.current_selection(),
-            radius: self.radius,
+            radius: eff_radius,
             draw_mode: self.draw_mode,
             wall_half: self.wall_half,
             kappa_b: self.sheet_opts.kappa_b,
+            grow: if reuse.is_some() { None } else { grow_req },
             reuse_crystal: reuse,
         });
         self.error = None;
@@ -241,16 +305,18 @@ impl DefectsTabState {
     pub(crate) fn poll_worker(&mut self, ctx: &egui::Context, canvas: &mut Canvas2D) {
         self.worker.set_repaint_ctx(ctx);
         if let Some(result) = self.worker.poll() {
-            self.take_result(result, canvas);
+            self.take_result(result, Some(canvas));
         }
-        if self.inspectors.spectrum.poll(ctx) {
-            let item = self.last_item.clone();
-            let ao = defect_context(&item).ok().and_then(|c| {
-                build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &c.cell, item.frame)
-            });
-            self.inspectors.sync_to_canvas(canvas, &self.last_crystal, ao);
-            self.view3d_dirty = true;
+    }
+
+    /// Poll the defect worker without updating `canvas2d` (used by `Analysis` mode).
+    pub(crate) fn poll_worker_quiet(&mut self, ctx: &egui::Context) -> bool {
+        self.worker.set_repaint_ctx(ctx);
+        if let Some(result) = self.worker.poll() {
+            self.take_result(result, None);
+            return true;
         }
+        false
     }
 
     pub(crate) fn refresh_and_sync_inspectors(&mut self, item: &CatalogueItemUi, canvas: &mut Canvas2D) {
@@ -265,6 +331,12 @@ impl DefectsTabState {
             build_ao_crystal_overlay(&self.last_crystal, self.inspectors.overlay_mode, &item.group, &ctx.cell, item.frame)
         });
         self.inspectors.sync_to_canvas(canvas, &self.last_crystal, ao);
+        // C1 WP-U7: with the Standard overlay, a grown crystal is coloured by layer
+        if self.inspectors.overlay_mode == CrystalOverlayMode::Standard
+            && let Some(ov) = self.growth.overlay()
+        {
+            canvas.set_gauge_overlay(Some(ov));
+        }
     }
 
     pub fn sync_view3d(&mut self, view3d: &mut View3dState) {
@@ -285,12 +357,8 @@ impl DefectsTabState {
         } else {
             (&self.last_crystal, &self.last_sheet)
         };
-        let gpu = mesh_from_sheet3d_with_spectral(
-            c,
-            s,
-            &self.sheet_opts,
-            self.inspectors.spectral_3d_for(self.sheet_opts.color_mode),
-        );
+        let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, None);
+        let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, None);
         let mut cap = sheet3d_caption(&self.readout.title, s, &self.sheet_opts);
         if self.is_busy() {
             cap.push_str(" | previous result — stale");
@@ -298,6 +366,7 @@ impl DefectsTabState {
             cap.push_str(&format!(" | previous result — failed: {err}"));
         }
         view3d.set_mesh(gpu, cap);
+        view3d.set_legend(legend);
         self.view3d_dirty = false;
     }
 
@@ -310,31 +379,33 @@ impl DefectsTabState {
     pub(crate) fn fail_build_for_test(&mut self, err: &str, canvas: &mut Canvas2D) {
         self.worker.cancel();
         self.stale = false;
-        self.take_result(Err(err.to_owned()), canvas);
+        self.take_result(Err(err.to_owned()), Some(canvas));
     }
 
-    pub(crate) fn take_result(&mut self, result: Result<BuildOutput, String>, canvas: &mut Canvas2D) {
+    pub(crate) fn take_result(&mut self, result: Result<BuildOutput, String>, canvas: Option<&mut Canvas2D>) {
         self.initializing = false;
         match result {
-            Ok((catalogue, crystal, readout, sheet, flat_c, flat_s)) => {
+            Ok((catalogue, crystal, readout, sheet, flat_c, flat_s, grown)) => {
                 self.catalogue = catalogue;
+                if let Some(g) = grown {
+                    self.growth.outcome = g;
+                }
                 let scene = Scene2D::CrystalPatch {
                     crystal: crystal.clone(),
                     title: readout.title.clone(),
                     note: readout.note.clone(),
                 };
-                canvas.set_scene(scene.clone(), self.reset_on_result);
-                self.last_scene = Some(scene);
+                self.last_scene = Some(scene.clone());
                 self.last_crystal = crystal;
                 self.last_sheet = sheet;
                 self.flat_crystal = flat_c;
                 self.flat_sheet = flat_s;
                 self.readout = readout;
                 self.view3d_dirty = true;
-                let item = self.last_item.clone();
-                self.refresh_and_sync_inspectors(&item, canvas);
-                if self.inspectors.spectrum.expanded && !self.last_crystal.pos.is_empty() {
-                    self.inspectors.spectrum.submit_crystal(&self.last_crystal, Some(&self.last_sheet), None);
+                if let Some(cv) = canvas {
+                    cv.set_scene(scene, self.reset_on_result);
+                    let item = self.last_item.clone();
+                    self.refresh_and_sync_inspectors(&item, cv);
                 }
             }
             Err(err) => {
@@ -344,7 +415,9 @@ impl DefectsTabState {
                     if let Scene2D::CrystalPatch { note, .. } = &mut scene {
                         *note = format!("Build failed (showing previous result): {err}");
                     }
-                    canvas.set_scene(scene, false);
+                    if let Some(cv) = canvas {
+                        cv.set_scene(scene, false);
+                    }
                 }
             }
         }
@@ -354,7 +427,7 @@ impl DefectsTabState {
     #[cfg(test)]
     pub(crate) fn wait_idle(&mut self, canvas: &mut Canvas2D) {
         if let Some(result) = self.worker.wait(std::time::Duration::from_secs(120)) {
-            self.take_result(result, canvas);
+            self.take_result(result, Some(canvas));
         }
         assert!(!self.is_busy(), "defect build did not complete");
     }

@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use papertilling_core::dsymbol;
+use papertilling_core::plane::basis_reduce::is_geometrically_chiral;
 use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::plane::tuning::SliderState;
 use papertilling_core::types::Cell2D;
@@ -93,18 +94,31 @@ pub fn readout(base: &CatalogueItemUi, fam: &LatticeFamily, cell: &Cell2D, on_sp
     let sites_coincide = cell.basis.is_empty() || cell.min_separation() < 1e-6;
     let found = if sites_coincide { Ok(None) } else { group_at(cell).map(Some) };
     let key = fam.dsymbol().ok().and_then(|d| d.canonical_key().ok());
-    let (dsymbol_key, network_key, symmetry_index) = match &key {
+    let (dsymbol_key, network_key, symmetry_index, topologically_chiral) = match &key {
         Some(k) => (
             format_dsymbol_key(k),
             dsymbol::network_key(k).map_or_else(|_| base.network_key.clone(), |n| format_dsymbol_key(&n)),
             dsymbol::symmetry_index(k).unwrap_or(base.symmetry_index),
+            dsymbol::is_topologically_chiral(k).unwrap_or(base.topologically_chiral),
         ),
-        None => (base.dsymbol_key.clone(), base.network_key.clone(), base.symmetry_index),
+        None => (
+            base.dsymbol_key.clone(),
+            base.network_key.clone(),
+            base.symmetry_index,
+            base.topologically_chiral,
+        ),
+    };
+    let chiral = if sites_coincide {
+        false
+    } else {
+        is_geometrically_chiral(cell).unwrap_or(base.chiral)
     };
     let mut out = DSymbolReadoutUi {
         dsymbol_key,
         network_key,
         symmetry_index,
+        chiral,
+        topologically_chiral,
         active_group: String::from("?"),
         status_ok: false,
         status_message: String::new(),
@@ -162,6 +176,8 @@ pub fn tune_item(base: &CatalogueItemUi, st: Option<&SliderState>) -> TunedLatti
                 dsymbol_key: base.dsymbol_key.clone(),
                 network_key: base.network_key.clone(),
                 symmetry_index: base.symmetry_index,
+                chiral: base.chiral,
+                topologically_chiral: base.topologically_chiral,
                 active_group: String::from("?"),
                 status_ok: false,
                 status_message: format!("invalid recipe: {err}"),
@@ -199,6 +215,8 @@ fn export_item(base: &CatalogueItemUi, fam: &LatticeFamily, cell: &Cell2D, ro: &
         dsymbol_key: ro.dsymbol_key.clone(),
         network_key: ro.network_key.clone(),
         symmetry_index: ro.symmetry_index,
+        chiral: ro.chiral,
+        topologically_chiral: ro.topologically_chiral,
         ..base.clone()
     })
 }

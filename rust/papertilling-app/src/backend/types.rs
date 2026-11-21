@@ -12,22 +12,47 @@ pub struct GroupInfo {
     pub counts: [usize; 3], // [points, sheet, bonds]
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CatalogueRuleUi {
-    Points,
-    Sheet,
+    #[default]
     Bonds,
+    Sheet,
+    Points,
 }
 
 impl CatalogueRuleUi {
-    pub const ALL: [Self; 3] = [Self::Points, Self::Sheet, Self::Bonds];
+    pub const ALL: [Self; 3] = [Self::Bonds, Self::Sheet, Self::Points];
 
-    pub fn label(self) -> &'static str {
+    pub fn slug(self) -> &'static str {
         match self {
             Self::Points => "points",
             Self::Sheet => "sheet",
             Self::Bonds => "bonds",
         }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Points => "Delaunay",
+            Self::Sheet => "Atomic",
+            Self::Bonds => "Standard",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Points => "Delaunay lattice",
+            Self::Sheet => "Atomic crystals",
+            Self::Bonds => "Standard lattice",
+        }
+    }
+
+    #[cfg(test)]
+    pub fn matches(self, s: &str) -> bool {
+        let q = s.trim();
+        q.eq_ignore_ascii_case(self.slug())
+            || q.eq_ignore_ascii_case(self.short_label())
+            || q.eq_ignore_ascii_case(self.label())
     }
 
     pub fn index(self) -> usize {
@@ -64,6 +89,8 @@ pub struct CatalogueItemUi {
     pub dsymbol_key: String,
     pub network_key: String,
     pub symmetry_index: usize,
+    pub chiral: bool,
+    pub topologically_chiral: bool,
     pub occupied_wyckoff: Vec<char>,
     pub recipe: Recipe,
     pub frame: Frame2D,
@@ -116,6 +143,8 @@ pub struct DSymbolReadoutUi {
     pub dsymbol_key: String,
     pub network_key: String,
     pub symmetry_index: usize,
+    pub chiral: bool,
+    pub topologically_chiral: bool,
     pub active_group: String,
     pub status_ok: bool,
     pub status_message: String,
@@ -131,6 +160,10 @@ pub enum SurfaceTargetUi {
     ProjectivePlane,
     Genus2,
     Genus3,
+    /// C1 (WP-U3): an open patch of the lattice (no gluing).
+    Open,
+    /// C1 (WP-U3): a torus glued from a hexagonal domain (3 pairs of sides).
+    TorusHex,
 }
 
 impl SurfaceTargetUi {
@@ -145,6 +178,21 @@ impl SurfaceTargetUi {
         Self::Genus3,
     ];
 
+    /// Every target: [`Self::ALL`] (the 8 columns of the verdict matrix) and the two C1 boundary conditions that are
+    /// not columns of the Python `surface_table` (session decoding, deck cards).
+    pub const EVERY: [Self; 10] = [
+        Self::Torus,
+        Self::Cylinder,
+        Self::MobiusBand,
+        Self::KleinBottle,
+        Self::Sphere,
+        Self::ProjectivePlane,
+        Self::Genus2,
+        Self::Genus3,
+        Self::Open,
+        Self::TorusHex,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Torus => "torus",
@@ -155,6 +203,8 @@ impl SurfaceTargetUi {
             Self::ProjectivePlane => "projective plane",
             Self::Genus2 => "genus 2",
             Self::Genus3 => "genus 3",
+            Self::Open => "open patch",
+            Self::TorusHex => "torus (hexagonal domain)",
         }
     }
 
@@ -168,6 +218,8 @@ impl SurfaceTargetUi {
             Self::ProjectivePlane => "RP²",
             Self::Genus2 => "g=2",
             Self::Genus3 => "g=3",
+            Self::Open => "open",
+            Self::TorusHex => "torus6",
         }
     }
 }

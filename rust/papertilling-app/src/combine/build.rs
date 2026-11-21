@@ -97,12 +97,14 @@ impl CombineTabState {
     }
 
     /// Collect finished jobs (call every frame while the tab is shown); `ctx` lets workers wake the UI.
+    /// Returns `true` when an initializer or build result landed.
     pub fn poll(
         &mut self,
         ctx: Option<&egui::Context>,
         gallery_item: &CatalogueItemUi,
-        mut canvas: Option<&mut Canvas2D>,
-    ) {
+        canvas: Option<&mut Canvas2D>,
+    ) -> bool {
+        let mut landed = false;
         if let Some(ctx) = ctx {
             self.initializer.set_repaint_ctx(ctx);
             self.builder.set_repaint_ctx(ctx);
@@ -110,31 +112,44 @@ impl CombineTabState {
         }
         if let Some(result) = self.initializer.poll() {
             self.take_init(result, gallery_item);
+            landed = true;
         }
         if let Some(res) = self.builder.poll() {
             self.take_build(res);
             self.on_combine_build_landed(gallery_item);
+            landed = true;
         }
-        self.poll_spectrum_inspector(ctx, gallery_item, canvas.as_deref_mut());
         if self.compare_after_build && !self.builder.is_busy() && !self.last_build.preview {
             self.compare_after_build = false;
             self.submit_compare(gallery_item);
         }
         if let Some(res) = self.comparer.poll() {
-            let (rep, ms, stats) = res.unwrap_or_else(|err| (Err(err), 0.0, self.cache_stats));
-            self.compare_result = Some(rep);
-            (self.compare_ms, self.cache_stats, self.compare_stale) = (ms, stats, false);
+            match res {
+                Ok((rep, ms, _stats)) => {
+                    self.compare_result = Some(rep);
+                    (self.compare_ms, self.compare_stale) = (ms, false);
+                    #[cfg(test)]
+                    {
+                        self.cache_stats = _stats;
+                    }
+                }
+                Err(err) => {
+                    self.compare_result = Some(Err(err));
+                    (self.compare_ms, self.compare_stale) = (0.0, false);
+                }
+            }
         }
         if self.canvas_dirty
             && let Some(canvas) = canvas
         {
-            let reset = std::mem::take(&mut self.reset_view_on_build) && !self.dragging;
+            let reset = std::mem::take(&mut self.reset_view_on_build) && !self.dragging && !self.cut_dragging;
             self.sync_to_canvas(gallery_item, canvas, reset);
             self.canvas_dirty = false;
         }
-        if self.dragging && self.preview_dirty && !self.builder.is_busy() {
+        if (self.dragging || self.cut_dragging) && self.preview_dirty && !self.builder.is_busy() {
             self.request_build(gallery_item, true, false, false);
         }
+        landed
     }
 
     /// Block until every queued job has landed (tests).
@@ -161,6 +176,7 @@ impl CombineTabState {
         }
     }
 
+    #[cfg(test)]
     pub fn request_sheet3d_only(&mut self, gallery_item: &CatalogueItemUi) {
         if self.lattice_unavailable() {
             return;
@@ -168,7 +184,7 @@ impl CombineTabState {
         // A stiffness edit must not supersede a newer geometry job with the last completed crystal.
         if self.builder.is_busy() || self.last_build.preview {
             let compare = self.compare_after_build || self.auto_compare;
-            self.request_build(gallery_item, self.dragging, compare, false);
+            self.request_build(gallery_item, self.dragging || self.cut_dragging, compare, false);
             return;
         }
         let reuse = (!self.last_build.crystal.pos.is_empty()).then(|| self.last_build.clone());
@@ -209,25 +225,40 @@ impl CombineTabState {
         } else {
             (&self.last_build.crystal, &self.last_sheet3d.sheet)
         };
-        let gpu = mesh_from_sheet3d_with_spectral(
-            c,
-            s,
-            &self.sheet_opts,
-            self.inspectors.spectral_3d_for(self.sheet_opts.color_mode),
-        );
+        let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, None);
+        let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, None);
         let mut cap = sheet3d_caption(&title, s, &self.sheet_opts);
         if self.is_building() {
             cap.push_str(" | previous result — stale");
         }
         view3d.set_mesh(gpu, cap);
+        view3d.set_legend(legend);
         self.view3d_dirty = false;
     }
 
     pub(super) fn take_build(&mut self, res: Result<BuildWorkerOutput, String>) {
         match res {
             Ok((out, sheet3d)) => {
-                self.last_build = out;
-                self.last_sheet3d = sheet3d;
+                let preserve_prev = out.refused.is_some()
+                    && !self.last_build.crystal.pos.is_empty()
+                    && self.last_build.lattice_key == out.lattice_key;
+                if preserve_prev {
+                    self.last_build.refused = out.refused;
+                    self.last_build.note = out.note;
+                    self.last_build.charge_label = out.charge_label;
+                    self.last_build.charge_detail = out.charge_detail;
+                    self.last_build.elapsed_ms = out.elapsed_ms;
+                    self.last_build.preview = out.preview;
+                    self.last_build.applied_cuts = out.applied_cuts;
+                    self.last_build.coalesced_count = 0;
+                    self.last_build.core_nodes = 0;
+                    self.last_build.core_edges = 0;
+                    self.last_build.core_summary = out.core_summary;
+                    self.last_build.local_cores = out.local_cores;
+                } else {
+                    self.last_build = out;
+                    self.last_sheet3d = sheet3d;
+                }
             }
             Err(err) => {
                 self.last_build.note = err.clone();
@@ -258,6 +289,7 @@ impl CombineTabState {
         match result {
             Ok(info) => {
                 self.reset_lattice_defaults(gallery_item, (*info).clone());
+                self.clear_selection();
                 self.specs = preset_neighbour_pair(&self.info);
                 self.request_build(gallery_item, false, self.auto_compare, true);
             }

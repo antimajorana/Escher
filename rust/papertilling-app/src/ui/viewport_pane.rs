@@ -1,5 +1,5 @@
 use crate::app::{NavTab, PapertillingApp};
-use crate::mesh3d::{DefectViewMode, Sheet3dViewOpts, show_sheet3d_controls};
+use crate::gallery_tab::filter::group_with_orbifold;
 use crate::theme::ThemeTokens;
 
 impl PapertillingApp {
@@ -13,9 +13,9 @@ impl PapertillingApp {
             match self.active_tab {
             NavTab::Gallery => {
                 ui.strong(format!(
-                    "2D Periodic Lattice — {} ({}) [drag: pan, scroll/pinch/+/-: zoom, 0/dbl-click: fit]",
+                    "{} · {}  [drag: pan, scroll/+/-: zoom, 0/double-click: fit]",
                     self.gallery.active_item().display_with_orig(),
-                    self.gallery.active_item().group
+                    group_with_orbifold(&self.gallery.active_item().group)
                 ));
                 ui.add_space(2.0);
                 self.canvas2d.show(ui, &tokens);
@@ -24,18 +24,22 @@ impl PapertillingApp {
                 self.surfaces
                     .poll_background(ui.ctx(), &mut self.canvas2d, &mut self.view3d);
                 let mut ratio = self.viewport_split_ratio;
+                let exact_2d = self.surfaces.notes.exact_view;
+                let not_iso_3d = self.surfaces.notes.picture_note.is_some();
                 show_split_2d_3d(
                     ui,
                     &mut ratio,
                     "surfaces_split",
                     &tokens,
                     |ui| {
-                        ui.strong("2D Fundamental Chart / Gluing Net (drag pan, scroll/pinch zoom)");
+                        let exact = if exact_2d { " (exact isometric domain)" } else { "" };
+                        ui.strong(format!("2D Fundamental Domain / Gluing Net (drag: pan, scroll: zoom){exact}"));
                         ui.add_space(2.0);
                         self.canvas2d.show(ui, &tokens);
                     },
                     |ui| {
-                        ui.strong("3D wgpu Surface Viewport (two-sided lit faces + bond curves)");
+                        let not_iso = if not_iso_3d { " — topological picture, not isometric" } else { "" };
+                        ui.strong(format!("3D Surface Preview{not_iso}"));
                         ui.add_space(2.0);
                         self.view3d.show(ui, &tokens);
                     },
@@ -52,6 +56,9 @@ impl PapertillingApp {
                     &mut self.viewport_split_ratio,
                     &tokens,
                 );
+                if let Some(specs) = self.defects.take_open_in_combine() {
+                    self.open_specs_in_combine(specs);
+                }
             }
             NavTab::Combine => {
                 let item = self.gallery.active_item().clone();
@@ -74,37 +81,40 @@ impl PapertillingApp {
                     &tokens,
                 );
             }
+            NavTab::Analysis => {
+                let item = self.gallery.active_item().clone();
+                let mut env = crate::analysis_mode::AnalysisEnv {
+                    item: &item,
+                    backend: &self.backend,
+                    surfaces: &mut self.surfaces,
+                    defects: &mut self.defects,
+                    combine: &mut self.combine,
+                    canvas: &mut self.canvas2d,
+                    view3d: &mut self.view3d,
+                };
+                self.analysis
+                    .show_central(ui, &mut env, &mut self.viewport_split_ratio, &tokens);
+            }
+            NavTab::Workbench => {
+                self.workbench_pump_sources(ui.ctx());
+                let mut ratio = self.viewport_split_ratio;
+                self.workbench_call(|wb, cx, canvas, view3d| {
+                    wb.show_central(ui, cx, canvas, view3d, &mut ratio, &tokens);
+                });
+                self.viewport_split_ratio = ratio;
+            }
         }
         });
     }
 }
 
-/// Shared viewport header for `Defects` and `Combine`: renders `DefectViewMode` selector + busy spinner,
-/// and when `view_mode.uses_3d()` renders `show_sheet3d_controls` once. Returns `(kappa_changed, visual_changed)`.
-pub fn show_defect_viewport_header(
-    ui: &mut egui::Ui,
-    view_mode: &mut DefectViewMode,
-    sheet_opts: &mut Sheet3dViewOpts,
-    is_busy: bool,
-    view3d_dirty: &mut bool,
-    id_salt: &str,
-) -> (bool, bool) {
-    ui.horizontal_wrapped(|ui| {
-        ui.strong("View:");
-        for vm in DefectViewMode::ALL {
-            if ui.selectable_label(*view_mode == vm, vm.label()).clicked() {
-                *view_mode = vm;
-                *view3d_dirty = true;
-            }
-        }
-        if is_busy {
+/// Shared busy indicator for `Defects` and `Combine` while a background build is running.
+pub fn show_defect_viewport_header(ui: &mut egui::Ui, is_busy: bool) {
+    if is_busy {
+        ui.horizontal(|ui| {
             ui.spinner();
-        }
-    });
-    if view_mode.uses_3d() {
-        show_sheet3d_controls(ui, sheet_opts, id_salt)
-    } else {
-        (false, false)
+            ui.small("Building crystal…");
+        });
     }
 }
 

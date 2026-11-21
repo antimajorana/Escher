@@ -93,7 +93,7 @@ fn tabs_reload_lazily_for_the_current_gallery_lattice() {
     let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
     app.gallery.select_group_by_symbol("p4m", &app.backend, &mut app.canvas2d);
     let p4m = app.gallery.active_item().clone();
-    assert_ne!(item_key(&p4m), app.combine_seen, "the start lattice is p6m kagome");
+    assert_ne!(item_key(&p4m), app.combine_seen, "the start lattice is the p6m honeycomb");
     app.switch_tab(NavTab::Combine);
     assert_eq!(app.combine_seen, item_key(&p4m));
     app.combine.wait_idle(&p4m, Some(&mut app.canvas2d));

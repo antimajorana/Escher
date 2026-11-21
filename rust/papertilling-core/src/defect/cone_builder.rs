@@ -221,13 +221,16 @@ impl<'a> ConeBuilder<'a> {
             let du = d_map[&u];
             for (&v, e) in &self.nb[u] {
                 let dv = e.seam.map_or(du, |g| du.compose(&g.inverse()));
+                let yv = dv.apply(self.ref_pos[v]);
+                if self.cone_sites.contains(&v) && !inside_eff(yv) {
+                    continue;
+                }
                 if let Some(&existing) = d_map.get(&v) {
                     if !same_iso(&dv, &existing, 1e-6) {
                         return Err("developed region encloses an earlier defect core (two walks disagree)".to_string());
                     }
                     continue;
                 }
-                let yv = dv.apply(self.ref_pos[v]);
                 if inside_eff(yv) {
                     d_map.insert(v, dv);
                     y_map.insert(v, yv);

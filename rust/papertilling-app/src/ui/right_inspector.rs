@@ -31,6 +31,7 @@ impl PapertillingApp {
                             &self.backend,
                             &mut self.canvas2d,
                             &tokens,
+                            self.advanced,
                         );
                     }
                     NavTab::Surfaces => {
@@ -48,7 +49,11 @@ impl PapertillingApp {
                             &item,
                             &mut self.canvas2d,
                             &tokens,
+                            self.advanced,
                         );
+                        if let Some(specs) = self.defects.take_open_in_combine() {
+                            self.open_specs_in_combine(specs);
+                        }
                     }
                     NavTab::Combine => {
                         let item = self.gallery.active_item().clone();
@@ -57,10 +62,27 @@ impl PapertillingApp {
                             &item,
                             &mut self.canvas2d,
                             &tokens,
+                            self.advanced,
                         );
                     }
                     NavTab::Atlas => {
                         self.atlas.show_inspector_panel(ui, &tokens);
+                    }
+                    NavTab::Analysis => {
+                        let item = self.gallery.active_item().clone();
+                        let mut env = crate::analysis_mode::AnalysisEnv {
+                            item: &item,
+                            backend: &self.backend,
+                            surfaces: &mut self.surfaces,
+                            defects: &mut self.defects,
+                            combine: &mut self.combine,
+                            canvas: &mut self.canvas2d,
+                            view3d: &mut self.view3d,
+                        };
+                        self.analysis.show_inspector_panel(ui, &mut env, &tokens);
+                    }
+                    NavTab::Workbench => {
+                        self.workbench_call(|wb, cx, _, _| wb.show_inspector_panel(ui, cx, &tokens));
                     }
                 });
             });

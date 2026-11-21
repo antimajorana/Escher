@@ -1,6 +1,13 @@
 //! Public Stage 5 API entry points for live defect combination, charge comparison,
 //! Volterra/completion core galleries, and single-defect equivalence.
 
+pub use crate::defect::combinations::{
+    build_combinations_table, build_combinations_table_cached,
+};
+pub use crate::defect::combinations_types::{
+    ChargeGroup, CombinationCandidate, CombinationEntry, CombinationMode, CombinationsOptions,
+    CombinationsTable, CoreGroup, RefusedCombination, SingleMatchStatus,
+};
 use crate::defect::combine_types::{
     ClassifiedCharge, ConfigComparison, CoreFaceSummary, CoreGalleryEntry, DislocationScanInfo,
     EquivalentSingleReport,

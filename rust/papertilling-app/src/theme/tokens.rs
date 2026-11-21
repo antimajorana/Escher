@@ -2,6 +2,21 @@ use egui::Color32;
 
 use super::StudioTheme;
 
+/// Compiled scene colours of the Gallery unit cell (`scene2d::periodic`): theme-independent in the scene and the
+/// export, mapped to `unit_cell_fill` / `unit_cell_vec` when the `Studio` canvas is painted.
+pub const SCENE_UNIT_CELL_FILL: [u8; 4] = [218, 234, 252, 95];
+pub const SCENE_UNIT_CELL_EDGE: [u8; 4] = [32, 94, 176, 225];
+pub const SCENE_UNIT_CELL_LABEL: [u8; 4] = [24, 72, 145, 245];
+/// Compiled colours of the Gallery overlays (`scene2d::overlays`): the `Paper` tokens, mapped to the `Studio`
+/// `ita_*` / `voronoi_*` tokens on the live dark canvas.
+/// Each role colour must equal no other compiled scene colour (e.g. the Defects under-coordination ring is
+/// [198, 40, 40, 235]): the alphas below are chosen to be unique.
+pub const SCENE_ITA_MIRROR: [u8; 4] = [198, 40, 40, 233];
+pub const SCENE_ITA_GLIDE: [u8; 4] = [21, 101, 192, 235];
+pub const SCENE_ITA_ROTATION: [u8; 4] = [46, 125, 50, 255];
+pub const SCENE_VORONOI_EDGE: [u8; 4] = [100, 116, 139, 170];
+pub const SCENE_VORONOI_FILL: [u8; 4] = [226, 232, 240, 64];
+
 #[derive(Clone, Copy, Debug)]
 pub struct ThemeTokens {
     pub is_light: bool,
@@ -39,24 +54,15 @@ pub struct ThemeTokens {
     pub site_a: Color32,
     #[allow(dead_code)] // Stage 2-3 overlay token
     pub site_b: Color32,
-    #[allow(dead_code)] // Stage 3 overlay token
     pub unit_cell_vec: Color32,
-    #[allow(dead_code)] // Stage 3 overlay token
     pub unit_cell_fill: Color32,
-    #[allow(dead_code)] // Stage 3 ITA overlay token
     pub ita_mirror: Color32,
-    #[allow(dead_code)] // Stage 3 ITA overlay token
     pub ita_glide: Color32,
-    #[allow(dead_code)] // Stage 3 ITA overlay token
     pub ita_rotation: Color32,
-    #[allow(dead_code)] // Stage 3 Voronoi overlay token
     pub voronoi_edge: Color32,
-    #[allow(dead_code)] // Stage 3 Voronoi overlay token
     pub voronoi_fill: Color32,
-    #[allow(dead_code)] // Stage 6 selection overlay token
     pub selection_ring: Color32,
     pub cut_ray_line: Color32,
-    #[allow(dead_code)] // Stage 6 cut-ray handle token
     pub cut_ray_handle: Color32,
     pub cut_half_wall: Color32,
     pub cut_insertion: Color32,
@@ -176,6 +182,17 @@ impl ThemeTokens {
         if self.is_light {
             return Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]);
         }
+        let role = match rgba {
+            SCENE_UNIT_CELL_EDGE | SCENE_UNIT_CELL_LABEL => Some(self.unit_cell_vec),
+            SCENE_ITA_MIRROR => Some(self.ita_mirror),
+            SCENE_ITA_GLIDE => Some(self.ita_glide),
+            SCENE_ITA_ROTATION => Some(self.ita_rotation),
+            SCENE_VORONOI_EDGE => Some(self.voronoi_edge),
+            _ => None,
+        };
+        if let Some(v) = role {
+            return Color32::from_rgba_unmultiplied(v.r(), v.g(), v.b(), rgba[3].min(v.a()));
+        }
         let [r, g, b, a] = rgba;
         let rf = f32::from(r) / 255.0;
         let gf = f32::from(g) / 255.0;
@@ -207,26 +224,22 @@ impl ThemeTokens {
     /// WCAG 2.1 contrast ratio between two opaque colors (returns `1.0..=21.0`).
     #[cfg(test)]
     pub fn contrast_wcag_ratio(fg: Color32, bg: Color32) -> f32 {
-        let l1 = relative_luminance(fg);
-        let l2 = relative_luminance(bg);
-        let (hi, lo) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
-        (hi + 0.05) / (lo + 0.05)
+        super::contrast::contrast_ratio([fg.r(), fg.g(), fg.b()], [bg.r(), bg.g(), bg.b()])
     }
-}
 
-#[cfg(test)]
-fn srgb_to_linear(channel: u8) -> f32 {
-    let c = f32::from(channel) / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
+    /// Fill of a scene polygon: the unit-cell wash follows the theme in `Studio`; every other fill (ring tints,
+    /// surface faces) is drawn as compiled, so `Paper` matches the SVG / PNG export exactly.
+    pub fn scene_fill(&self, rgba: [u8; 4]) -> Color32 {
+        if !self.is_light {
+            match rgba {
+                SCENE_UNIT_CELL_FILL => return self.unit_cell_fill,
+                SCENE_VORONOI_FILL => return self.voronoi_fill,
+                SCENE_ITA_ROTATION => return self.ita_rotation,
+                _ => {}
+            }
+        }
+        Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3])
     }
-}
-
-#[cfg(test)]
-fn relative_luminance(c: Color32) -> f32 {
-    0.2126 * srgb_to_linear(c.r()) + 0.7152 * srgb_to_linear(c.g()) + 0.0722 * srgb_to_linear(c.b())
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 mod build;
 mod canvas_ops;
+mod history;
 mod markers;
 mod panel_left;
 mod panel_right;
@@ -26,7 +27,11 @@ use crate::live_combine::spec_world_pos;
 #[cfg(test)]
 #[path = "../combine_tab_tests.rs"]
 mod tests;
+#[cfg(test)]
+mod fixes_tests;
+#[cfg(test)]
+mod stage6_tests;
 
 pub use kinematics::MotionMode;
-pub(crate) use state::{MANUAL_R_MAX, MANUAL_R_MIN};
+pub(crate) use state::{MANUAL_R_MAX, MANUAL_R_MIN, default_build_opts};
 pub use state::{CombineTabState, ToolMode};

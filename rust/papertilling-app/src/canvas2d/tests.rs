@@ -305,10 +305,17 @@ fn pin_badge_text_and_core_ring_labels_keep_contrast_in_paper_and_studio() {
         Scene2D::VectorScene { primitives } => &primitives.polygons,
         _ => unreachable!(),
     };
+    // a label over a filled polygon of a non-crystal scene (e.g. a surface-net gluing label) keeps its colour code
     assert_eq!(
         render::scene_label_color(&poly_scene, polys, &inside_lbl, &studio),
         to_color32(inside_lbl.color),
-        "label inside filled ring polygon must stay dark ink in Studio mode"
+        "label inside a filled polygon keeps its compiled colour outside CrystalPatch"
+    );
+    let paper = ThemeTokens::paper();
+    assert_eq!(
+        render::scene_label_color(&poly_scene, polys, &inside_lbl, &paper),
+        to_color32(inside_lbl.color),
+        "Paper keeps the compiled ink (as exported)"
     );
     assert_eq!(
         render::scene_label_color(&poly_scene, polys, &outside_lbl, &studio),
@@ -318,3 +325,76 @@ fn pin_badge_text_and_core_ring_labels_keep_contrast_in_paper_and_studio() {
 }
 
 mod zoom_routing;
+
+#[test]
+fn studio_ring_numbers_meet_wcag_aa_on_every_ring_tint() {
+    use crate::scene2d::{PolyPrim, TextPrim};
+    use crate::theme::ThemeTokens;
+    use crate::theme::contrast::{contrast_ratio, over};
+    let studio = ThemeTokens::studio();
+    for sides in 3..=12 {
+        let fill = crate::scene2d::ring_tint_rgba(sides);
+        let ring = PolyPrim { points: vec![[0.0, 0.0], [2.0, 0.0], [1.0, 2.0]], fill, stroke: None };
+        let lbl = TextPrim { pos: [1.0, 0.8], text: sides.to_string(), color: [42, 48, 58, 225], size_px: 10.5 };
+        let scene = crystal_scene();
+        // a translucent outer face drawn first, then the ring face: the label sits on both
+        let outer = PolyPrim { points: vec![[-1.0, -1.0], [3.0, -1.0], [3.0, 3.0], [-1.0, 3.0]], fill: [235, 240, 246, 85], stroke: None };
+        let ink = render::scene_label_color(&scene, &[outer.clone(), ring.clone()], &lbl, &studio);
+        let under_outer = over(outer.fill, studio.bg_canvas_2d);
+        let bg = over(fill, egui::Color32::from_rgb(under_outer[0], under_outer[1], under_outer[2]));
+        let r = contrast_ratio([ink.r(), ink.g(), ink.b()], bg);
+        // the previous dark ink [42, 48, 58] reached only about 2.0-2.8:1 here
+        assert!(r >= 4.5, "{sides}-ring label contrast {r:.2} < 4.5 (WCAG AA, small text)");
+    }
+}
+
+fn crystal_scene() -> Scene2D {
+    Scene2D::CrystalPatch { crystal: crate::combine_worker::empty_crystal(), title: String::new(), note: String::new() }
+}
+
+#[test]
+fn studio_ring_ink_applies_to_crystal_patches_only_and_paper_is_unchanged() {
+    use crate::scene2d::{PolyPrim, TextPrim};
+    use crate::theme::ThemeTokens;
+    let ring = PolyPrim { points: vec![[0.0, 0.0], [2.0, 0.0], [1.0, 2.0]], fill: crate::scene2d::ring_tint_rgba(4), stroke: None };
+    let lbl = TextPrim { pos: [1.0, 0.8], text: String::from("4"), color: [42, 48, 58, 225], size_px: 10.5 };
+    let polys = std::slice::from_ref(&ring);
+    // blue 4-ring on the dark canvas: white ink (dark ink would be about 3.4:1)
+    assert_eq!(render::scene_label_color(&crystal_scene(), polys, &lbl, &ThemeTokens::studio()), crate::theme::contrast::INK_LIGHT);
+    assert_eq!(render::scene_label_color(&crystal_scene(), polys, &lbl, &ThemeTokens::paper()), to_color32(lbl.color));
+    let vec_scene = Scene2D::VectorScene { primitives: crate::scene2d::ScenePrimitives { polygons: vec![ring.clone()], ..empty_prims() } };
+    assert_eq!(render::scene_label_color(&vec_scene, polys, &lbl, &ThemeTokens::studio()), to_color32(lbl.color));
+}
+
+fn empty_prims() -> crate::scene2d::ScenePrimitives {
+    crate::scene2d::ScenePrimitives {
+        polygons: Vec::new(),
+        lines: Vec::new(),
+        circles: Vec::new(),
+        labels: Vec::new(),
+        site_circle_indices: Vec::new(),
+        edge_line_indices: Vec::new(),
+        title: String::new(),
+        note: String::new(),
+        bbox: ([0.0, 0.0], [2.0, 2.0]),
+        site_count: 0,
+        bond_count: 0,
+    }
+}
+
+#[test]
+fn unit_cell_labels_sit_outside_the_cell_on_outward_normals() {
+    use crate::scene2d::periodic::edge_label_pos;
+    // square cell: a1 label below the bottom edge, a2 label left of the left edge
+    let (a1, a2) = ([1.0_f32, 0.0], [0.0_f32, 1.0]);
+    let p1 = edge_label_pos(a1, a2);
+    let p2 = edge_label_pos(a2, a1);
+    assert!((p1[0] - 0.5).abs() < 1e-6 && p1[1] < 0.0, "{p1:?}");
+    assert!((p2[1] - 0.5).abs() < 1e-6 && p2[0] < 0.0, "{p2:?}");
+    // skew hexagonal cell a1 = (1, 0), a2 = (-1/2, sqrt3/2): both labels outside the parallelogram
+    let (h1, h2) = ([1.0_f32, 0.0], [-0.5_f32, 0.866_025_4]);
+    let cell = [[0.0, 0.0], h1, [h1[0] + h2[0], h1[1] + h2[1]], h2];
+    for p in [edge_label_pos(h1, h2), edge_label_pos(h2, h1)] {
+        assert!(!render::point_in_polygon(p, &cell), "{p:?} must lie outside the unit cell");
+    }
+}

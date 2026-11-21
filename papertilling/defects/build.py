@@ -287,7 +287,7 @@ def classify_charge(lat: LatticeData, frank: float | None, H) -> dict:
     c = np.linalg.solve(np.eye(2) - M, t)
     rec = lat.centre_class(c)
     w = rec["label"] if rec else "?"
-    allowed = (rec is not None and abs(frank) < 360 - 1e-6
+    allowed = (rec is not None and abs(frank) <= 180 + 1e-6
                and abs(frank * rec["order"] / 360.0 - round(frank * rec["order"] / 360.0)) < 1e-6)
     out.update(kind="disclination", centre=c, centre_class=w,
                label=f"disclination D({w}, {frank:+.0f} deg) about {np.round(c, 4).tolist()}",
@@ -383,28 +383,11 @@ def _run(lat: LatticeData, specs, R=None, centre=None, check=True, fast=None):
     if hw_specs:
         from ._half_wall import build_half_wall_defect, seed_builder_from_defect
         d_hw, _ = build_half_wall_defect(lat, hw_specs[0], R=float(R), centre=ctr, check=False, fast=fast)
-        B = seed_builder_from_defect(b_cls, lat, d_hw, ctr, float(R))
+        make_b = lambda: seed_builder_from_defect(b_cls, lat, d_hw, ctr, float(R))
     else:
-        B = b_cls(lat.cell, lat.L, ctr, float(R))
-    for idx, d in enumerate(eff, 1):
-        disloc = d["kind"] == "dislocation"
-        cuts = [d["cut"]] if d.get("cut") is not None else candidate_cuts_360(d, [o for o in eff if o is not d], disloc)
-        err = None
-        for cut in cuts:
-            snap = B.snapshot()
-            try:
-                if disloc:
-                    B.add_dislocation(d["b"], d["at"], cut)
-                else:
-                    B.add_disclination(d["angle"], d["at"], cut)
-                d["cut_used"] = np.asarray(cut, float)
-                err = None
-                break
-            except ValueError as e:
-                B.restore(snap)
-                err = e
-        if err is not None:
-            raise ValueError(f"defect {idx} ({d['kind']}): {err}") from None
+        make_b = lambda: b_cls(lat.cell, lat.L, ctr, float(R))
+    from ._surgery import run_eff_with_fallback
+    B = run_eff_with_fallback(make_b, eff, lat)
     d = B.finish()
     expected = sum(s["angle"] for s in eff if s["kind"] == "disclination") + sum(
         (s["ending"]["frank_angle_deg"] or 0.0) for s in hw_specs

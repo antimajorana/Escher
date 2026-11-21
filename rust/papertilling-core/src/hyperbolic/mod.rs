@@ -2,12 +2,25 @@
 //! Poincare disk geodesics, Klein Beltrami chords, upper-sheet 3D hyperboloid bowl,
 //! wedge disclinations, and `PSU(1,1)` loop holonomy.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
 use crate::dsymbol::{DSymbol, GeometryKind};
+use crate::growth::SeedKind;
+
+pub mod boundary_counts;
+#[cfg(test)]
+mod draw_tests;
+pub mod inflation;
+pub mod inflation_seeds;
+#[cfg(test)]
+mod inflation_tests;
+#[cfg(test)]
+mod seed_tests;
+mod kagome;
+mod wedge;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HyperbolicStyle {
@@ -33,23 +46,33 @@ pub struct HyperbolicTiling {
     pub edges: Vec<(usize, usize)>,
     pub edge_arcs: Vec<Vec<[f64; 2]>>,
     pub faces: Vec<Vec<usize>>,
+    /// Shell index of each face: `n` for faces in `S_n \ S_{n-1}` of vertex completion (0 = seed);
+    /// on the wedge-core path, of the vertex completion of the core copies (module `wedge`).
+    #[serde(default)]
+    pub face_shell: Vec<usize>,
+    /// Largest `n` with `S_n` fully drawn (on either path).
+    #[serde(default)]
+    pub complete_through_shell: usize,
+    /// Which growth rule built the patch and which shells are complete or truncated.
+    #[serde(default)]
+    pub growth_rule: String,
+    /// Seed of the regular path (`cell` = one tile; C1 WP-G3). Kagome and wedge paths always use `cell`.
+    #[serde(default = "cell_seed")]
+    pub seed: SeedKind,
 }
 
-#[inline]
-fn c_add(a: [f64; 2], b: [f64; 2]) -> [f64; 2] { [a[0] + b[0], a[1] + b[1]] }
-#[inline]
-fn c_sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] { [a[0] - b[0], a[1] - b[1]] }
-#[inline]
-fn c_mul(a: [f64; 2], b: [f64; 2]) -> [f64; 2] { [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]] }
-#[inline]
-fn c_conj(a: [f64; 2]) -> [f64; 2] { [a[0], -a[1]] }
-#[inline]
-fn c_div(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
-    let d = b[0] * b[0] + b[1] * b[1];
-    [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d]
+fn cell_seed() -> SeedKind {
+    SeedKind::Cell
 }
+
+/// Largest layer index accepted by [`build_hyperbolic_tiling_seeded`] (layers are 0-based, layer 0 = the seed).
+/// It only bounds the loop: the drawn depth is set by [`DRAW_CAPS`] (growth stops at twice the face cap and the
+/// readout says which shell was omitted or truncated). The slowest-growing pair is {7,3}: from one tile |S_6| = 1625
+/// and |S_7| = 4264 (boundary-letter counter), so no tile-seed layer beyond 6 is ever drawn.
+pub const MAX_H2_LAYERS: usize = 64;
+
 #[inline]
-fn c_norm2(a: [f64; 2]) -> f64 { a[0] * a[0] + a[1] * a[1] }
+pub(super) fn c_norm2(a: [f64; 2]) -> f64 { a[0] * a[0] + a[1] * a[1] }
 
 /// Orthogonal circle center & R^2 for Poincare geodesic through A, B (or None if diameter).
 fn orthogonal_circle(a: [f64; 2], b: [f64; 2]) -> Option<([f64; 2], f64)> {
@@ -63,33 +86,6 @@ fn orthogonal_circle(a: [f64; 2], b: [f64; 2]) -> Option<([f64; 2], f64)> {
     let cy = (a[0] * rhs1 - rhs0 * b[0]) / det;
     let r2 = cx * cx + cy * cy - 1.0;
     (r2 > 0.0).then_some(([cx, cy], r2))
-}
-
-fn reflect_geodesic(z: [f64; 2], a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
-    if let Some((c, r2)) = orthogonal_circle(a, b) {
-        let dz = c_conj(c_sub(z, c));
-        let denom = c_norm2(dz).max(1e-18);
-        [c[0] + r2 * dz[0] / denom, c[1] - r2 * dz[1] / denom]
-    } else {
-        let len = c_norm2(a).sqrt().max(1e-18);
-        let u = [a[0] / len, a[1] / len];
-        let u2 = c_mul(u, u);
-        c_mul(u2, c_conj(z))
-    }
-}
-
-fn geodesic_midpoint(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
-    // Mobius shift A -> 0: T(z) = (z - A) / (1 - conj(A)*z)
-    let denom = c_sub([1.0, 0.0], c_mul(c_conj(a), b));
-    let w = c_div(c_sub(b, a), denom);
-    let r = c_norm2(w).sqrt();
-    if r < 1e-12 {
-        return a;
-    }
-    let half_r = r / (1.0 + (1.0 - r * r).max(0.0).sqrt());
-    let mw = [w[0] * half_r / r, w[1] * half_r / r];
-    let inv_d = c_add([1.0, 0.0], c_mul(c_conj(a), mw));
-    c_div(c_add(mw, a), inv_d)
 }
 
 fn sample_geodesic_arc(a: [f64; 2], b: [f64; 2], segs: usize) -> Vec<[f64; 2]> {
@@ -125,33 +121,212 @@ pub fn to_hyperboloid(z: [f64; 2]) -> [f64; 3] {
     [2.0 * x / d, 2.0 * y / d, (1.0 + x * x + y * y) / d]
 }
 
-fn regular_hyp_radius(p: usize, q: usize) -> f64 {
-    let num = (PI / (p as f64) + PI / (q as f64)).cos();
-    let den = (PI / (p as f64) - PI / (q as f64)).cos();
-    (num / den).max(0.0).sqrt().min(0.96)
+/// Caps of the drawn patch: whole shells are kept while the face count stays within `max_faces`;
+/// faces whose centre lies beyond Poincare radius `max_centre_radius` are dropped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DrawCaps {
+    pub max_faces: usize,
+    pub max_centre_radius: f64,
 }
 
-fn insert_pt(pts: &mut Vec<[f64; 2]>, z: [f64; 2]) -> usize {
-    if let Some((idx, _)) = pts
-        .iter()
-        .enumerate()
-        .find(|&(_, &p)| (p[0] - z[0]).hypot(p[1] - z[1]) < 2e-4)
-    {
-        idx
-    } else {
-        let idx = pts.len();
-        pts.push(z);
-        idx
+/// Default caps of [`build_hyperbolic_tiling`]. Pilot (2026-11-18, release, `draw_tests::pilot_draw_caps`):
+/// the old 180 / 0.985 left {5,4}, {3,7}, {4,5} at S_2 for layers 2..4; the radius cap, not the face cap,
+/// saturates the slider (1000 / 0.985 still stops {5,4} at S_2: its S_3 corner faces lie beyond 0.985).
+/// 1000 / 0.998 draws S_1..S_4 whole for {5,4} (11, 51, 201, 761), {7,3}, {3,7}, {4,5} (913), and builds
+/// all 92 pairs x 4 layers in ~1.5-1.8 s, worst single build ~21-25 ms. Layers 1..4 give >= 2 different
+/// patches for 47 of the 92 pairs (4 different for 5), against 17 (0) under 180 / 0.985; the rest
+/// grow too fast (S_2 alone > 1000 faces). 2000 / 0.998 gives 62 (7) at ~2x the time. At 0.998 the
+/// drawn vertices drift off the hyperboloid by |<x, x> + 1| <= 4.4e-3 (vs 6.5e-5 at 0.985; at t ~ 500 that is a
+/// relative error ~1e-8 in the Poincare point) with no dedup-band hit. Faces near radius 0.998 are
+/// about a pixel wide; the 3D bowl (`to_hyperboloid`) clamps at radius 0.95, so they sit on its rim.
+pub(crate) const DRAW_CAPS: DrawCaps = DrawCaps { max_faces: 1000, max_centre_radius: 0.998 };
+/// Wedge path: face centres (and vertices) closer than this hyperbolic distance are one.
+const WEDGE_MERGE_DIST: f64 = 1e-3;
+
+pub(super) struct Patch {
+    pts: Vec<[f64; 2]>,
+    faces: Vec<Vec<usize>>,
+    face_shell: Vec<usize>,
+    complete_through_shell: usize,
+    growth_rule: String,
+}
+
+pub(super) fn keep_whole_shells(shell_sizes: &[usize], stopped: &Option<String>, max_faces: usize) -> (usize, Vec<String>) {
+    let mut keep = 0;
+    let mut total = 0;
+    for &a in shell_sizes {
+        if total + a > max_faces {
+            break;
+        }
+        total += a;
+        keep += 1;
     }
+    let mut notes = Vec::new();
+    if let Some(&a) = shell_sizes.get(keep) {
+        notes.push(format!("shell {keep} ({a} faces) omitted by the {max_faces}-face cap"));
+    }
+    match stopped {
+        // The compute budget (twice the cap) only stops shells that cannot fit the cap: the estimate is
+        // exact for shell 1 and exceeds shell n + 1 by at most a_{n-1} < cap (by the recurrence
+        // a_{n+1} = 2 gamma a_n - a_{n-1}, GT-observed; a_2 = 2 gamma a_1 in the hand counts {7,3}, {5,4}, {3,7}).
+        Some(s) if s.starts_with("face budget") && keep < shell_sizes.len() => {}
+        Some(s) if s.starts_with("face budget") => {
+            notes.push(format!("shell {} omitted by the {max_faces}-face cap (estimated larger)", shell_sizes.len()))
+        }
+        Some(s) => notes.push(s.clone()),
+        None => {}
+    }
+    (keep, notes)
+}
+
+/// Regular core (`wedge_delta == 0`, non-kagome): BDF vertex completion `S_0 .. S_layers` from one `p`-gon.
+/// Whole shells are kept while the total stays within `caps.max_faces`; faces whose centre lies
+/// beyond Poincare radius `caps.max_centre_radius` are dropped (the seed never is), which truncates
+/// that shell. `growth_rule` states which shells are complete.
+fn vertex_completion_patch(p: usize, q: usize, lay: usize, caps: DrawCaps, seed: SeedKind) -> Result<Patch, String> {
+    let DrawCaps { max_faces, max_centre_radius } = caps;
+    // The next-shell estimate of `grow_vertex_completion_seeded` is >= the true shell, so twice the cap
+    // never stops a shell that would fit.
+    let vc = inflation_seeds::grow_vertex_completion_seeded(p, q, seed, lay, 2 * max_faces)?;
+    let (keep, mut notes) = keep_whole_shells(&vc.shell_sizes, &vc.stopped, max_faces);
+    if keep == 0 {
+        return Err(format!(
+            "{{{p},{q}}}: the seed alone ({} tiles) exceeds the {max_faces}-face drawing cap",
+            vc.shell_sizes[0]
+        ));
+    }
+    let mut set = inflation::HypPointSet::new(inflation::hyp_dist(vc.base.vertices[0], vc.base.vertices[1]));
+    let mut complete = keep - 1;
+    let (mut faces, mut face_shell) = (Vec::new(), Vec::new());
+    // Draw centred on the seed (the identity for the tile seed), so the radius cap cuts symmetrically about it.
+    let m = inflation_seeds::recentre(inflation_seeds::seed_centre(&vc.base, seed));
+    for (i, &s) in vc.shell.iter().enumerate().take_while(|&(_, &s)| s < keep) {
+        let centre = inflation::mat_vec(&m, vc.centre(i));
+        if s > 0 && c_norm2(inflation::hyperboloid_to_poincare(centre)) > max_centre_radius.powi(2) {
+            complete = complete.min(s - 1);
+            continue;
+        }
+        let pts3 = vc.face_vertices(i);
+        faces.push(pts3.into_iter().map(|x| set.insert(inflation::mat_vec(&m, x)).0).collect());
+        face_shell.push(s);
+    }
+    // The band guard sees `hyp_dist` only, not drift off the hyperboloid; for centres within the
+    // default radius cap 0.998 (p, q <= 12) that vertex drift was measured <= 4.4e-3 in |<x, x> + 1|.
+    if set.suspect > 0 {
+        return Err(format!(
+            "{{{p},{q}}}: f64 precision: {} drawn points have an ambiguous dedup distance",
+            set.suspect
+        ));
+    }
+    if complete + 1 < keep {
+        notes.push(format!("shell {} truncated by the centre radius cap {max_centre_radius}", complete + 1));
+    }
+    let growth_rule = format!(
+        "BDF vertex completion from {}: S_0..S_{complete} complete, {} faces drawn (requested S_{lay}){}",
+        inflation_seeds::seed_label(p, q, seed),
+        faces.len(),
+        notes.iter().map(|n| format!("; {n}")).collect::<String>()
+    );
+    let pts = set.pts.iter().map(|&x| inflation::hyperboloid_to_poincare(x)).collect();
+    Ok(Patch { pts, faces, face_shell, complete_through_shell: complete, growth_rule })
+}
+
+/// Wedge-disclination core (`wedge_delta != 0`): vertex completion of copies of a regular
+/// `p_core`-gon (see [`wedge`]), with hyperbolic-distance dedup. For `q = 3` this is the original
+/// edge-BFS face set. The core edge length matches `{p, q}` (`cosh(l/2) = cos(pi/p) / sin(pi/q)`,
+/// `sinh R_core = sinh(l/2) / sin(pi/p_core)`).
+fn wedge_patch(p: usize, q: usize, style: HyperbolicStyle, lay: usize, p_core: usize, caps: DrawCaps) -> Patch {
+    let half_edge_pq = ((PI / (p as f64)).cos() / (PI / (q as f64)).sin()).max(1.0).acosh();
+    let rc_hyp = (half_edge_pq.sinh() / (PI / (p_core as f64)).sin()).asinh();
+    let poly = wedge::Polygon::regular(p_core, rc_hyp);
+    let g = wedge::grow_polygon_vertex_completion(&poly, q, lay, caps.max_faces, caps.max_centre_radius, WEDGE_MERGE_DIST);
+    let kagome = style == HyperbolicStyle::RectifiedKagome;
+    let (pts, faces) = wedge::polygon_faces_to_poincare(&poly, &g.faces, kagome, WEDGE_MERGE_DIST);
+    let mut notes = g.notes;
+    if g.near_coincident_merged > 0 {
+        notes.push(format!(
+            "{} near-coincident copies (centres {:.1e}..{:.1e} apart) merged",
+            g.near_coincident_merged,
+            0.5 * WEDGE_MERGE_DIST,
+            WEDGE_MERGE_DIST
+        ));
+    }
+    if g.near_coincident_kept > 0 {
+        notes.push(format!(
+            "{} near-coincident copies (centres {:.1e}..{:.1e} apart) kept",
+            g.near_coincident_kept,
+            WEDGE_MERGE_DIST,
+            1.5 * WEDGE_MERGE_DIST
+        ));
+    }
+    let walk = if q == 3 {
+        "= edge-BFS for q = 3".to_string()
+    } else {
+        let steps = (q - 1) / 2;
+        let unit = if steps == 1 { "step" } else { "steps" };
+        let opp = if q.is_multiple_of(2) { " + centred opposite copy" } else { "" };
+        format!("star walks of {steps} {unit} each side{opp}")
+    };
+    let growth_rule = format!(
+        "vertex completion of {p_core}-gon wedge-core copies ({walk}): S_0..S_{} complete, {} faces drawn (requested S_{lay}){}",
+        g.complete_through,
+        faces.len(),
+        notes.iter().map(|n| format!("; {n}")).collect::<String>()
+    );
+    Patch { pts, faces, face_shell: g.shell, complete_through_shell: g.complete_through, growth_rule }
 }
 
 /// Generate a finite patch of hyperbolic `{p, q}` / rectified `(p.q.p.q)` / dual `{q, p}` tiling.
+///
+/// For `wedge_delta == 0` the patch is BDF vertex completion `S_layers` of one `p`-gon (layers are
+/// 0-based, at most [`MAX_H2_LAYERS`]), trimmed to whole shells within [`DRAW_CAPS`] faces and to face
+/// centres within its Poincare radius (see `growth_rule`). For `wedge_delta != 0` it is vertex completion
+/// of copies of the wedge core (module [`wedge`]), with the same caps. Other seeds:
+/// [`build_hyperbolic_tiling_seeded`].
 pub fn build_hyperbolic_tiling(
     p_in: usize,
     q_in: usize,
     style: HyperbolicStyle,
     layers: usize,
     wedge_delta: i32,
+) -> Result<HyperbolicTiling, String> {
+    build_hyperbolic_tiling_capped(p_in, q_in, style, layers, wedge_delta, DRAW_CAPS)
+}
+
+/// [`build_hyperbolic_tiling`] grown from `seed` (vertex, edge or tile; C1 WP-G3). Only the regular and dual
+/// paths take a vertex or edge seed: the kagome cluster rule and the wedge core grow from their own core, so
+/// other seeds are refused there with a reason.
+pub fn build_hyperbolic_tiling_seeded(
+    p_in: usize,
+    q_in: usize,
+    style: HyperbolicStyle,
+    layers: usize,
+    wedge_delta: i32,
+    seed: SeedKind,
+) -> Result<HyperbolicTiling, String> {
+    build_with(p_in, q_in, style, layers, wedge_delta, DRAW_CAPS, seed)
+}
+
+/// [`build_hyperbolic_tiling`] with explicit drawing caps (pilots and tests).
+pub(crate) fn build_hyperbolic_tiling_capped(
+    p_in: usize,
+    q_in: usize,
+    style: HyperbolicStyle,
+    layers: usize,
+    wedge_delta: i32,
+    caps: DrawCaps,
+) -> Result<HyperbolicTiling, String> {
+    build_with(p_in, q_in, style, layers, wedge_delta, caps, SeedKind::Cell)
+}
+
+fn build_with(
+    p_in: usize,
+    q_in: usize,
+    style: HyperbolicStyle,
+    layers: usize,
+    wedge_delta: i32,
+    caps: DrawCaps,
+    seed: SeedKind,
 ) -> Result<HyperbolicTiling, String> {
     let (p, q) = match style {
         HyperbolicStyle::DualQP => (q_in, p_in),
@@ -160,93 +335,31 @@ pub fn build_hyperbolic_tiling(
     if p < 3 || q < 3 || (p - 2) * (q - 2) <= 4 {
         return Err(format!("{{{p}, {q}}} is not hyperbolic (requires (p-2)(q-2) > 4)"));
     }
-    let lay = layers.clamp(1, 4);
-    let r0 = regular_hyp_radius(p, q);
+    let lay = layers.min(MAX_H2_LAYERS);
+    let one_tile = matches!(seed, SeedKind::Cell | SeedKind::Face);
+    if !one_tile && (wedge_delta != 0 || style == HyperbolicStyle::RectifiedKagome) {
+        return Err(format!(
+            "{seed:?} seed: only the regular and dual {{p,q}} paths take vertex or edge seeds; the kagome cluster              rule and the wedge core grow from their own core (use the tile seed)"
+        ));
+    }
     let ds = DSymbol::new(vec![0], vec![0], vec![0], vec![p as u32], vec![q as u32])
         .map_err(|e| format!("D-symbol error: {e:?}"))?;
-
     let p_core = (p as i32 + wedge_delta).clamp(3, 12) as usize;
-    let r_core = if wedge_delta == 0 {
-        r0
-    } else {
-        // Adjust central core radius so its edges maintain nearly equal hyperbolic length.
-        let half_edge_hyp = ((PI / (q as f64)).cos() / (PI / (p as f64)).sin()).max(1.0).acosh();
-        let rc_hyp = (half_edge_hyp.sinh() / (PI / (p_core as f64)).sin()).asinh();
-        (0.5 * rc_hyp).tanh().min(0.96)
+    let patch = match (wedge_delta, style) {
+        (0, HyperbolicStyle::RectifiedKagome) => kagome::kagome_cluster_patch(p, q, lay, caps)?,
+        (0, _) => vertex_completion_patch(p, q, lay, caps, seed)?,
+        (_, _) => wedge_patch(p, q, style, lay, p_core, caps),
     };
+    let Patch { pts: poincare_pts, faces, face_shell, complete_through_shell, growth_rule } = patch;
 
-    let mut poly_verts: Vec<Vec<[f64; 2]>> = Vec::new();
-    let mut seen_centers: Vec<[f64; 2]> = vec![[0.0, 0.0]];
-    let central: Vec<[f64; 2]> = (0..p_core)
-        .map(|k| {
-            let th = 2.0 * PI * (k as f64) / (p_core as f64);
-            [r_core * th.cos(), r_core * th.sin()]
-        })
-        .collect();
-    poly_verts.push(central);
-
-    let mut bfs = VecDeque::from([(0_usize, 0_usize)]);
-    while let Some((pid, depth)) = bfs.pop_front() {
-        if depth >= lay || poly_verts.len() >= 180 {
-            continue;
-        }
-        let cur_poly = poly_verts[pid].clone();
-        let m = cur_poly.len();
-        for e in 0..m {
-            let a = cur_poly[e];
-            let b = cur_poly[(e + 1) % m];
-            let next_poly: Vec<[f64; 2]> = cur_poly.iter().map(|&z| reflect_geodesic(z, a, b)).collect();
-            let cen = next_poly.iter().fold([0.0, 0.0], |acc, &v| [acc[0] + v[0], acc[1] + v[1]]);
-            let cen = [cen[0] / (m as f64), cen[1] / (m as f64)];
-            if c_norm2(cen) > 0.985 * 0.985 {
-                continue;
-            }
-            if seen_centers.iter().any(|&c| (c[0] - cen[0]).hypot(c[1] - cen[1]) < 1e-3) {
-                continue;
-            }
-            seen_centers.push(cen);
-            let nid = poly_verts.len();
-            poly_verts.push(next_poly);
-            bfs.push_back((nid, depth + 1));
-            if poly_verts.len() >= 180 {
-                break;
-            }
-        }
-    }
-
-    let mut poincare_pts = Vec::new();
-    let mut faces = Vec::new();
     let mut edge_set: BTreeSet<(usize, usize)> = BTreeSet::new();
-
-    if style == HyperbolicStyle::RectifiedKagome {
-        for poly in &poly_verts {
-            let m = poly.len();
-            let mut face_v = Vec::with_capacity(m);
-            for k in 0..m {
-                let mid = geodesic_midpoint(poly[k], poly[(k + 1) % m]);
-                face_v.push(insert_pt(&mut poincare_pts, mid));
+    for face_v in &faces {
+        let m = face_v.len();
+        for k in 0..m {
+            let (u, v) = (face_v[k], face_v[(k + 1) % m]);
+            if u != v {
+                edge_set.insert((u.min(v), u.max(v)));
             }
-            for k in 0..m {
-                let u = face_v[k];
-                let v = face_v[(k + 1) % m];
-                if u != v {
-                    edge_set.insert((u.min(v), u.max(v)));
-                }
-            }
-            faces.push(face_v);
-        }
-    } else {
-        for poly in &poly_verts {
-            let m = poly.len();
-            let face_v: Vec<usize> = poly.iter().map(|&z| insert_pt(&mut poincare_pts, z)).collect();
-            for k in 0..m {
-                let u = face_v[k];
-                let v = face_v[(k + 1) % m];
-                if u != v {
-                    edge_set.insert((u.min(v), u.max(v)));
-                }
-            }
-            faces.push(face_v);
         }
     }
 
@@ -285,6 +398,10 @@ pub fn build_hyperbolic_tiling(
         edges,
         edge_arcs,
         faces,
+        face_shell,
+        complete_through_shell,
+        growth_rule,
+        seed: if one_tile { SeedKind::Cell } else { seed },
     })
 }
 

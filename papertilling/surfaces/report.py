@@ -61,7 +61,11 @@ def _attempts(name, L, facts):
         return [{}, {"sites": 400}]
     if name in ("Moebius band", "Klein bottle"):
         from .flat import glides
-        k = max(1, len(glides(L)))
+        from .refusal import SurfaceNotFound
+        try:
+            k = max(1, len(glides(L)))
+        except SurfaceNotFound:                                    # non-primitive cell: the builders give the reason
+            k = 1
         return [{}] + [{"which": w} for w in range(1, k)] + [{"sites": 400}]
     pillow = sorted(((h, k) for h in range(1, 9) for k in range(1, 9)), key=lambda z: (z[0] * z[1], z))   # cheap nets
     if name == "sphere":

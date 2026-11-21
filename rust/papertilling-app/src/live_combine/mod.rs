@@ -17,10 +17,13 @@ mod builder;
 pub mod cuts;
 mod snap;
 
+#[cfg(test)]
+pub(crate) use builder::align_crystal_orientation;
 pub use builder::{build_combined_crystal, item_from_notebook_json};
 pub use snap::{
-    burgers_from_mn, combine_lattice_info, mn_from_burgers, preset_neighbour_pair,
-    preset_shortest_dislocation, snap_disclination_centre, spec_short_label, spec_world_pos,
+    burgers_from_mn, combine_lattice_info, map_drawn_to_ref, map_ref_to_drawn, mn_from_burgers,
+    preset_neighbour_pair, preset_shortest_dislocation, snap_disclination_centre,
+    spec_core_ref_pos, spec_short_label, spec_world_pos,
 };
 #[cfg(test)]
 use snap::{centre_class_at, iso_rotation_about, same_mod_cell};
@@ -29,6 +32,7 @@ use snap::{centre_class_at, iso_rotation_about, same_mod_cell};
 pub enum CombineDrawMode {
     FastRelaxed,
     Raw,
+    #[allow(dead_code)] // C1 hidden: the AO elastic view left the UI
     ElasticAoMetric,
 }
 
@@ -76,6 +80,7 @@ pub struct CombineBuildOptions {
 
 #[derive(Clone, Debug)]
 pub struct CombineBuildOutput {
+    pub lattice_key: (String, Cell2D),
     pub crystal: BuiltCrystal,
     pub elapsed_ms: f64,
     pub applied_radius: f64,

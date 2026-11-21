@@ -1,7 +1,9 @@
 use std::sync::{Once, OnceLock};
 
 use papertilling_core::defect::combine_types::NotebookConfigJson;
-use papertilling_core::types::{BuiltCrystal, Cell2D, SurfaceCheckReport, SurfaceMesh};
+use papertilling_core::types::{BuiltCrystal, Cell2D};
+#[cfg(test)]
+use papertilling_core::types::{SurfaceCheckReport, SurfaceMesh};
 
 use crate::aliases::AliasStore;
 use crate::live_combine::{self, CombineLatticeInfo};
@@ -133,6 +135,7 @@ impl AppBackend {
         verdict_matrix_cell().get().map(Vec::as_slice)
     }
 
+    #[cfg(test)]
     pub fn build_surface(
         &self,
         item: &CatalogueItemUi,

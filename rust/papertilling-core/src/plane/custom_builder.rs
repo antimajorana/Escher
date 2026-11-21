@@ -6,6 +6,7 @@ use std::collections::{BTreeSet, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::dsymbol::{self, DSymbolKey};
+use crate::plane::basis_reduce::ReducedBasis2D;
 use crate::plane::cell::{canon_bond, mat2_inv, mat2_mul, mat2_vec};
 use crate::plane::family::LatticeFamily;
 use crate::plane::groups::{conventional_cell, group_spec, prim_ops, prim_u};
@@ -57,7 +58,8 @@ fn round12(x: f64) -> f64 {
 type BareBond = (usize, usize, [i32; 2]);
 type DistanceShell = (f64, Vec<BareBond>);
 
-/// Compute up to `max_shells` shortest unique periodic inter-site distance shells.
+/// Compute up to `max_shells` shortest unique periodic inter-site distance shells
+/// using Lagrange-Gauss basis reduction and scale-invariant tolerances.
 pub fn compute_distance_shells(
     prim_sites: &[[f64; 2]],
     a1: [f64; 2],
@@ -65,37 +67,53 @@ pub fn compute_distance_shells(
     max_shells: usize,
 ) -> Vec<DistanceShell> {
     let n = prim_sites.len();
-    let cart: Vec<[f64; 2]> = prim_sites
+    if n == 0 {
+        return Vec::new();
+    }
+    let Ok(rb) = ReducedBasis2D::reduce(a1, a2) else {
+        return Vec::new();
+    };
+    let (wrapped, floors) = rb.wrap_sites(prim_sites);
+    let cart: Vec<[f64; 2]> = wrapped
         .iter()
-        .map(|f| [f[0] * a1[0] + f[1] * a2[0], f[0] * a1[1] + f[1] * a2[1]])
+        .map(|f| [f[0] * rb.b1[0] + f[1] * rb.b2[0], f[0] * rb.b1[1] + f[1] * rb.b2[1]])
         .collect();
+    let (m1_max, m2_max, _) = rb.covering_shift_bounds();
+    let (m1_lim, m2_lim) = (m1_max.max(3), m2_max.max(3));
+    let l0 = (rb.area() / (n as f64)).sqrt().max(1e-30);
+    let min_dist = 1e-5 * l0;
+    let shell_tol = 1e-4 * l0;
+
+    let mut seen: BTreeSet<(usize, usize, i32, i32)> = BTreeSet::new();
     let mut raw: Vec<(f64, usize, usize, i32, i32)> = Vec::new();
     for i in 0..n {
         for j in 0..n {
-            for n1 in -3_i32..=3 {
-                for n2 in -3_i32..=3 {
-                    if j == i && n1 == 0 && n2 == 0 {
+            for m1 in -m1_lim..=m1_lim {
+                for m2 in -m2_lim..=m2_lim {
+                    let sh = rb.map_shift_to_orig(floors[i], floors[j], [m1, m2]);
+                    if j == i && sh == [0, 0] {
                         continue;
                     }
                     let q = [
-                        cart[j][0] + f64::from(n1) * a1[0] + f64::from(n2) * a2[0],
-                        cart[j][1] + f64::from(n1) * a1[1] + f64::from(n2) * a2[1],
+                        cart[j][0] + f64::from(m1) * rb.b1[0] + f64::from(m2) * rb.b2[0],
+                        cart[j][1] + f64::from(m1) * rb.b1[1] + f64::from(m2) * rb.b2[1],
                     ];
                     let dist = (q[0] - cart[i][0]).hypot(q[1] - cart[i][1]);
-                    if dist > 1e-5
-                        && (i, j, n1, n2) <= (j, i, -n1, -n2)
-                    {
-                        raw.push((dist, i, j, n1, n2));
+                    if dist > min_dist {
+                        let cb = canon_bond(i, j, sh[0], sh[1], 0);
+                        if seen.insert((cb.i, cb.j, cb.n1, cb.n2)) {
+                            raw.push((dist, cb.i, cb.j, cb.n1, cb.n2));
+                        }
                     }
                 }
             }
         }
     }
-    raw.sort_by(|a, b| a.0.total_cmp(&b.0));
+    raw.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
     let mut shells: Vec<DistanceShell> = Vec::new();
     for (d, i, j, n1, n2) in raw {
         if let Some(last) = shells.last_mut()
-            && (d - last.0).abs() <= 1e-4
+            && (d - last.0).abs() <= shell_tol
         {
             last.1.push((i, j, [n1, n2]));
             continue;
@@ -221,15 +239,29 @@ pub fn check_periodic_connected(cell: &Cell2D, min_degree: usize) -> Result<Stri
     if !visited.iter().all(|&v| v) {
         return Err("periodic net has disconnected components".to_string());
     }
-    let spans_2d = (0..cycle_vecs.len()).any(|i| {
-        ((i + 1)..cycle_vecs.len()).any(|j| {
-            i64::from(cycle_vecs[i][0]) * i64::from(cycle_vecs[j][1])
-                - i64::from(cycle_vecs[i][1]) * i64::from(cycle_vecs[j][0])
-                != 0
-        })
-    });
-    if !spans_2d {
+    fn gcd_i64(mut a: i64, mut b: i64) -> i64 {
+        a = a.abs();
+        b = b.abs();
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a
+    }
+    let mut det_gcd = 0_i64;
+    for i in 0..cycle_vecs.len() {
+        for j in (i + 1)..cycle_vecs.len() {
+            let det = i64::from(cycle_vecs[i][0]) * i64::from(cycle_vecs[j][1])
+                - i64::from(cycle_vecs[i][1]) * i64::from(cycle_vecs[j][0]);
+            if det != 0 {
+                det_gcd = gcd_i64(det_gcd, det);
+            }
+        }
+    }
+    if det_gcd == 0 {
         return Err("periodic net is 0D/1D (does not span 2D cell)".to_string());
+    }
+    if det_gcd > 1 {
+        return Err(format!("periodic net has {det_gcd} disconnected interpenetrating sublattices"));
     }
     Ok(degs.into_iter().map(|d| d.to_string()).collect::<Vec<_>>().join(","))
 }
@@ -304,27 +336,38 @@ pub fn build_custom_lattice(spec: &CustomLatticeSpec) -> Result<CustomLatticeRes
 
     let (a1c, a2c) = conventional_cell(canon, spec.a, spec.b, spec.gamma)?;
     let _ = (mat2_mul, mat2_inv, a1c, a2c);
-    let (dsymbol_key, network_key, symmetry_index, planar, status) = match fam.dsymbol() {
-        Ok(ds) => {
-            let ck = ds.canonical_key().map_err(|e| e.to_string())?;
-            let nk = dsymbol::network_key(&ck).map_err(|e| e.to_string())?;
-            let si = dsymbol::symmetry_index(&ck).map_err(|e| e.to_string())?;
-            let msg = format!(
-                "Planar ({}, |D|={}, sym_idx={}, {coordination}-coord)",
-                canon,
-                ds.size,
-                si
-            );
-            (Some(ck), Some(nk), Some(si), true, msg)
-        }
-        Err(e) => (
-            None,
-            None,
-            None,
-            false,
-            format!("Connected non-planar ({e})"),
-        ),
-    };
+    let (dsymbol_key, network_key, symmetry_index, planar, status) =
+        if cell.has_crossings() || cell.clearance() <= 1e-6 {
+            (
+                None,
+                None,
+                None,
+                false,
+                "Connected non-planar (bond crossing or bond through site)".to_string(),
+            )
+        } else {
+            match fam.dsymbol() {
+                Ok(ds) => {
+                    let ck = ds.canonical_key().map_err(|e| e.to_string())?;
+                    let nk = dsymbol::network_key(&ck).map_err(|e| e.to_string())?;
+                    let si = dsymbol::symmetry_index(&ck).map_err(|e| e.to_string())?;
+                    let msg = format!(
+                        "Planar ({}, |D|={}, sym_idx={}, {coordination}-coord)",
+                        canon,
+                        ds.size,
+                        si
+                    );
+                    (Some(ck), Some(nk), Some(si), true, msg)
+                }
+                Err(e) => (
+                    None,
+                    None,
+                    None,
+                    false,
+                    format!("Connected non-planar ({e})"),
+                ),
+            }
+        };
     Ok(CustomLatticeResult {
         num_sites: cell.basis.len(),
         num_bonds: cell.bonds.len(),
@@ -341,4 +384,39 @@ pub fn build_custom_lattice(spec: &CustomLatticeSpec) -> Result<CustomLatticeRes
         planar,
         status,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Bond2D;
+
+    #[test]
+    fn interpenetrating_sublattices_and_bond_through_site_are_rejected() {
+        let interpenetrating = Cell2D {
+            a1: [1.0, 0.0],
+            a2: [0.0, 1.0],
+            basis: vec![[0.0, 0.0]],
+            bonds: vec![
+                Bond2D { i: 0, j: 0, n1: 2, n2: 0, kind: 0 },
+                Bond2D { i: 0, j: 0, n1: 0, n2: 2, kind: 0 },
+            ],
+        };
+        let err = check_periodic_connected(&interpenetrating, 3).unwrap_err();
+        assert!(err.contains("4 disconnected interpenetrating sublattices"), "{err}");
+
+        // pm with 2 mirror sites at (0, 0) and (0.5, 0) and b=0.9: shells are 0.5 (x), 0.9 (y), 1.0 (x skipping 0.5).
+        let res = build_custom_lattice(&CustomLatticeSpec {
+            group: "pm".to_string(),
+            a: 1.0,
+            b: Some(0.9),
+            gamma: None,
+            seeds: vec![[0.0, 0.0], [0.5, 0.0]],
+            bond_mode: BondSelection::ShellMask(0b111),
+            min_degree: 3,
+        })
+        .unwrap();
+        assert!(res.cell.clearance() <= 1e-6);
+        assert!(!res.planar, "bond passing through site must be marked non-planar: {}", res.status);
+    }
 }

@@ -18,22 +18,27 @@ mod defects_ui;
 mod export;
 mod export_obj;
 mod gallery_tab;
+mod game_menu;
 mod live_combine;
 mod live_ops;
 mod live_ops_ao;
 mod live_plane;
 mod mesh3d;
+mod analysis_mode;
+mod presets;
 mod scene2d;
 mod scene_crystal;
-mod spectrum_ui;
-mod spectrum_worker;
+mod session;
 mod surfaces_elastic;
 mod surfaces_tab;
 mod theme;
 mod ui;
 mod view3d;
+mod workbench;
 #[cfg(test)]
 mod features_gate_tests;
+#[cfg(test)]
+mod simple_default_tests;
 
 use std::io::Cursor;
 use std::process::ExitCode;
@@ -77,6 +82,8 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("papertilling — Desktop Explorer")
             .with_inner_size([1360.0, 840.0])
+            // the narrow HUD keeps the Codex button and the rename controls whole down to this width
+            .with_min_inner_size([game_menu::HUD_MIN_WINDOW_WIDTH, 480.0])
             .with_icon(load_app_icon()),
         depth_buffer: view3d::DEPTH_BITS,
         ..Default::default()
@@ -91,17 +98,19 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             theme::typography::register_fonts(&cc.egui_ctx);
             theme::StudioTheme::Paper.apply(&cc.egui_ctx);
-            let (adapter_name, backend_name) = if let Some(rs) = &cc.wgpu_render_state {
+            let (adapter_name, backend_name, offscreen) = if let Some(rs) = &cc.wgpu_render_state {
                 view3d::init_view3d_resources(rs);
                 let info = rs.adapter.get_info();
-                (info.name, format!("{:?}", info.backend))
+                (info.name, format!("{:?}", info.backend), Some(view3d::OffscreenGpuContext::from_render_state(rs)))
             } else {
-                (String::from("none"), String::from("none"))
+                (String::from("none"), String::from("none"), None)
             };
-            Ok(Box::new(
-                PapertillingApp::new(smoke_test, adapter_name, backend_name)
-                    .with_smoke_outcome(smoke_for_app),
-            ))
+            let mut app = PapertillingApp::new(smoke_test, adapter_name, backend_name)
+                .with_smoke_outcome(smoke_for_app)
+                .with_offscreen_gpu(offscreen);
+            // restores `session.json` from the OS config folder (never in smoke-test mode)
+            app.load_session_at_start(&cc.egui_ctx);
+            Ok(Box::new(app))
         }),
     );
 

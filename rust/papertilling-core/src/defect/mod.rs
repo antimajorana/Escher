@@ -1,32 +1,44 @@
 //! Geometry-agnostic holonomy classification, `DefectCatalogue`, wall classification,
 //! and wall crystal builders (Stages 4–5).
 
+pub mod burgers_indices;
 pub mod catalogue;
 pub mod charge;
 pub mod circuit;
 mod circuit_auto;
+pub mod combinations;
+mod combinations_gen;
+pub mod combinations_types;
 pub mod combine_api;
 pub mod combine_types;
 pub mod cone_builder;
 pub mod cone_geometry;
 pub mod core_gallery;
 pub mod core_graph;
+pub mod defect_growth;
 pub mod equivalence;
 pub mod gauge;
 mod gauge_holonomy;
+pub mod grain_boundary;
 pub mod gsv_elastic;
 pub mod gsv_mobius;
 mod gsv_model;
 pub mod half_wall;
 mod half_wall_cuts;
 pub mod kinematics;
+pub mod point_defects;
 pub mod sheet3d;
 mod sheet3d_energy;
 mod sheet3d_opt;
 pub(crate) mod sheet3d_topology;
 pub mod single_cache;
 #[cfg(test)]
+mod consistency_tests;
+#[cfg(test)]
+mod stage2_defect_tests;
+#[cfg(test)]
 mod stage5_gate_tests;
+pub mod stone_wales;
 pub mod surgery;
 mod sym_helper;
 pub mod volterra_patch;
@@ -39,6 +51,10 @@ use petgraph::algo::is_isomorphic_matching;
 use petgraph::graph::UnGraph;
 use serde::{Deserialize, Serialize};
 
+pub use burgers_indices::{
+    BurgersIndexInfo, Weber4Index, burgers_index_info, family_representative, hex_components,
+    weber_from_hex_uv,
+};
 pub use catalogue::{CentreClassEntry, DefectCatalogue, DisclinationEntry, DislocationEntry};
 pub use circuit::{CircuitResult, auto_burgers_circuit, burgers_circuit, shift_circuit_basepoint};
 pub use gauge::{
@@ -46,11 +62,20 @@ pub use gauge::{
     apply_gauge_transform, fusion_channels, plaquette_holonomies, ribbon_faces, twisted_coboundary,
     verify_d_r_squared, wyckoff_rotocentres,
 };
+pub use grain_boundary::{
+    BicrystalOptions, BicrystalResult, CslGrainBoundaryEntry, build_symmetric_tilt_bicrystal,
+    csl_family, list_csl_grain_boundaries, perfect_disk,
+};
 pub use gsv_elastic::{
     Elastic2DOptions, Elastic2DResult, gsv_diagnostics_2d, gsv_eval_2d, gsv_hessian_2d,
     relax_elastic_2d, relax_elastic_2d_with_opts,
 };
 pub use half_wall::{ResolvedHalfWall, build_half_wall, resolve_half_wall_spec};
+pub use point_defects::{
+    PointDefectOp, PointDefectedCrystal, apply_point_defects, default_site_species, rim_sites,
+    validate_element_symbol,
+};
+pub use stone_wales::{StoneWalesResult, stone_wales_flip};
 pub use wall_build::{build_interface, build_mobius_seam, build_wall};
 pub use wall_endings::{WallEndingInfo, classify_wall_ending, nearest_ending_holonomy};
 pub use walls::{
