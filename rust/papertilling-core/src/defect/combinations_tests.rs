@@ -342,7 +342,7 @@ fn square_p4m_mixed_pairs_disclination_plus_dislocation() {
 }
 
 #[test]
-fn square_p4m_triple_f90_v90_v90_has_two_orbits_both_at_1b() {
+fn square_p4m_triple_f90_v90_v90_charge_and_strict_overlap_rule() {
     let cell = square_cell();
     let mode = CombinationMode::Triple {
         ids: ["D(1b, +90)".to_string(), "D(1a, -90)".to_string(), "D(1a, -90)".to_string()],
@@ -350,20 +350,33 @@ fn square_p4m_triple_f90_v90_v90_has_two_orbits_both_at_1b() {
     let table = build_combinations_table("p4m", &cell, Frame2D::default(), &mode, &fast_opts(1.5), None)
         .expect("square p4m triple");
     assert!(!table.cancelled);
+    // A face centre with two of its corners: the corners are adjacent (1 apart) or opposite (sqrt 2 apart).
     assert_eq!(table.total_candidates, 2, "adjacent vs opposite corners of the face -> exactly 2 orbits");
-    assert_eq!(table.built_count, 2, "refused={:?}", table.refused);
-    assert_eq!(table.refused_count, 0);
-    assert_eq!(table.charge_groups.len(), 1, "both orbits share the exact same G~+ charge");
+    assert_eq!(table.built_count + table.refused_count, 2);
+    let mut seps: Vec<f64> = table
+        .charge_groups
+        .iter()
+        .flat_map(|g| g.core_groups.iter().flat_map(|c| c.members.iter().map(|m| m.separation)))
+        .chain(table.refused.iter().map(|r| r.separation))
+        .collect();
+    seps.sort_by(|a, b| a.total_cmp(b));
+    assert!((seps[0] - 1.0).abs() < 1e-5, "adjacent corners diameter = 1.0");
+    assert!((seps[1] - 2.0_f64.sqrt()).abs() < 1e-5, "opposite corners diameter = sqrt(2)");
 
+    // Group algebra: +90 - 90 - 90 = -90, and the product of the three rotations fixes a face centre (1b).
+    // Every placement that builds must read exactly that off the lattice.
+    assert!(table.built_count >= 1, "refused={:?}", table.refused);
+    assert_eq!(table.charge_groups.len(), 1, "built placements share one charge");
     let cg = &table.charge_groups[0];
     assert_eq!(cg.charge.kind, "disclination");
     assert!((cg.charge.angle + 90.0).abs() < 1e-5);
     assert_eq!(cg.charge.centre_class.as_deref(), Some("1b"));
 
-    let mut seps: Vec<f64> = cg.core_groups.iter().flat_map(|c| c.members.iter().map(|m| m.separation)).collect();
-    seps.sort_by(|a, b| a.total_cmp(b));
-    assert!((seps[0] - 1.0).abs() < 1e-5, "adjacent corners diameter = 1.0");
-    assert!((seps[1] - 2.0_f64.sqrt()).abs() < 1e-5, "opposite corners diameter = sqrt(2)");
+    // The author's rule (2026-11-22): the validity check stays strict. Three cores this close can overlap;
+    // such a placement is refused for that reason and no other, and is never built by relaxing the check.
+    for r in &table.refused {
+        assert!(r.reason.contains("encloses an earlier defect core"), "{}: {}", r.label, r.reason);
+    }
 }
 
 #[test]
