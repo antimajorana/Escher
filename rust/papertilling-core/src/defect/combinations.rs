@@ -456,7 +456,9 @@ pub fn build_combinations_table_cached(
                         &lat_info,
                         &cat,
                         cell,
-                        &charge,
+                        // The representative's own charge: a group holds every orientation of a Burgers vector,
+                        // and the single-defect scan depends on the orientation.
+                        &rep.charge,
                         &rep.h_cfg,
                         rep.wl_hash,
                         opts.radius,

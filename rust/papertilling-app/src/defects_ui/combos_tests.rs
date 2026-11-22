@@ -98,7 +98,7 @@ fn combinations_default_view_square_renders_sections_cleanly_without_forbidden_t
     );
     assert!(
         table.charge_groups.iter().any(|g| !g.has_single_defect),
-        "square disclination pairs within 1.5a include charges no single defect carries"
+        "square disclination pairs within 1.0a include charges no single defect carries (two +180 at distance 1)"
     );
 
     assert!(

@@ -469,7 +469,7 @@ impl WbPanel for Panel {
         // A session saved before the core list existed has two steps and numbers its routes from 0:
         // its route r is view r + 1 now.
         let legacy = o.get("step").and_then(Value::as_array).is_some_and(|s| s.len() == 2);
-        match o.get("route").map(as_index).map(|r| r.map(|r| r + usize::from(legacy))) {
+        match o.get("route").map(as_index).map(|r| r.and_then(|r| r.checked_add(usize::from(legacy)))) {
             Some(Some(r)) if r < VIEW_LABELS.len() => self.route = r,
             Some(_) => notes.push(String::from("Fusion steps: unknown route (kept current)")),
             None => {}

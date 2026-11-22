@@ -1,4 +1,10 @@
-//! Exact `G_+` orbit enumeration and deduplication for defect pairs and triples.
+//! Enumeration of defect pairs and triples, one per class of placements.
+//!
+//! Disclination pairs are reduced exactly by `G_+` (both defects sit on rotation centres). Dislocation pairs
+//! are reduced only by naming the two defects in the other order. Mixed pairs and triples are reduced by
+//! rotations although their dislocation cores sit at a fixed generic offset that is not rotated with them:
+//! there the kept placement stands for its rotated copies WITH the offset rotated too. Whether to list those
+//! separately as well is an open question for the author.
 
 use std::collections::{HashMap, HashSet};
 

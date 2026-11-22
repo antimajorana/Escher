@@ -183,7 +183,8 @@ impl SingleDefectCache {
     }
 
     /// Match an extracted core graph `h_cfg` (with precomputed `wl_hash`) against the single defect(s)
-    /// carrying `charge`, using canonical orbit representatives (`b_rep` and `centre_class_of`) for cache reuse.
+    /// carrying `charge`: for a dislocation its own Burgers vector `charge.b`, for a disclination the class
+    /// of its centre (`centre_class_of`).
     /// Returns `Ok(None)` if `cancel` is set before a new scan/build is started.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn match_core_against_single(
