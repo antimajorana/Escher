@@ -238,13 +238,16 @@ impl CombineTabState {
 
     pub(super) fn take_build(&mut self, res: Result<BuildWorkerOutput, String>) {
         match res {
-            Ok((out, sheet3d)) => {
+            Ok((mut out, sheet3d)) => {
+                let prev_was_standin = self.last_build.refused.is_some()
+                    && self.last_build.note.ends_with(crate::live_combine::cuts::REFUSAL_STANDIN_SUFFIX);
                 let preserve_prev = out.refused.is_some()
+                    && !prev_was_standin
                     && !self.last_build.crystal.pos.is_empty()
                     && self.last_build.lattice_key == out.lattice_key;
                 if preserve_prev {
                     self.last_build.refused = out.refused;
-                    self.last_build.note = out.note;
+                    self.last_build.note = crate::live_combine::cuts::with_refusal_canvas_notice(out.note, true);
                     self.last_build.charge_label = out.charge_label;
                     self.last_build.charge_detail = out.charge_detail;
                     self.last_build.elapsed_ms = out.elapsed_ms;
@@ -256,6 +259,9 @@ impl CombineTabState {
                     self.last_build.core_summary = out.core_summary;
                     self.last_build.local_cores = out.local_cores;
                 } else {
+                    if out.refused.is_some() {
+                        out.note = crate::live_combine::cuts::with_refusal_canvas_notice(out.note, false);
+                    }
                     self.last_build = out;
                     self.last_sheet3d = sheet3d;
                 }

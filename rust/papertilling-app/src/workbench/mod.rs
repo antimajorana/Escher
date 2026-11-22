@@ -33,6 +33,7 @@ mod s4_flat3d;
 mod s5_curved2d;
 mod s6_honeycombs;
 mod s7_fusion;
+pub(crate) use s7_fusion::CavityRequest;
 pub(crate) mod scene_helpers;
 #[cfg(test)]
 mod tests;
@@ -256,6 +257,18 @@ impl WorkbenchState {
         self.view = view;
         self.panel_mut(view).select_sub(sub);
         self.dirty = true;
+    }
+
+    /// Load a live defect cavity request into `s7_fusion` and mark the workbench dirty for re-sync.
+    pub(crate) fn load_fusion_cavity(&mut self, req: CavityRequest) {
+        self.s7.load_cavity(req);
+        self.dirty = true;
+        self.reset_view = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn live_fusion_cavity(&self) -> Option<&s7_fusion::LoadedCavity> {
+        self.s7.live_cavity.as_ref()
     }
 
     pub(crate) fn sub_labels(&self, view: WorkbenchView) -> &'static [&'static str] {

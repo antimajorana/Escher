@@ -69,19 +69,28 @@ impl CombineTabState {
                 self.sync_selection_to_canvas(canvas);
                 build_preview = Some(build_preview.unwrap_or(true) && prev);
             }
-            if has_coincident_same_kind_pins(&self.info, &self.specs)
-                && ui
-                    .small_button("Fuse overlapping defects")
-                    .on_hover_text("Collapse superposed same-point pins permanently")
+            ui.horizontal_wrapped(|ui| {
+                if has_coincident_same_kind_pins(&self.info, &self.specs)
+                    && ui
+                        .small_button("Fuse overlapping defects")
+                        .on_hover_text("Collapse superposed same-point pins permanently")
+                        .clicked()
+                {
+                    self.commit_cut_edit_anchor();
+                    self.push_undo();
+                    merge_coincident_pins(&self.info, &mut self.specs);
+                    self.clear_selection();
+                    self.sync_selection_to_canvas(canvas);
+                    build_preview = Some(false);
+                }
+                if ui
+                    .button("Inspect core reconnections")
+                    .on_hover_text("Cut a fixed-boundary cavity around these defects and enumerate valid lattice core reconnections")
                     .clicked()
-            {
-                self.commit_cut_edit_anchor();
-                self.push_undo();
-                merge_coincident_pins(&self.info, &mut self.specs);
-                self.clear_selection();
-                self.sync_selection_to_canvas(canvas);
-                build_preview = Some(false);
-            }
+                {
+                    self.open_cavity_in_fusion = Some(self.build_cavity_request(gallery_item));
+                }
+            });
         }
         if let Some(preview_only) = build_preview {
             self.request_build(gallery_item, preview_only, !preview_only && self.auto_compare, false);

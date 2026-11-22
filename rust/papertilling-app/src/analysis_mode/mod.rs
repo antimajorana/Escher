@@ -165,7 +165,9 @@ impl AnalysisModeState {
         match self.target {
             AnalysisTarget::PlaneLattice | AnalysisTarget::Surface => false,
             AnalysisTarget::SingleDefect => defects.last_crystal.wall_sigma.is_some(),
-            AnalysisTarget::CombinedDefects => combine.last_build.crystal.wall_sigma.is_some(),
+            AnalysisTarget::CombinedDefects => {
+                combine.last_build.refused.is_none() && combine.last_build.crystal.wall_sigma.is_some()
+            }
         }
     }
 
@@ -267,6 +269,14 @@ impl AnalysisModeState {
             self.canvas_dirty = true;
             self.view3d_dirty = true;
         }
+        if self.target == AnalysisTarget::CombinedDefects
+            && env.combine.last_build.refused.is_some()
+            && (self.spectrum.result.is_some() || self.spectrum.is_busy())
+        {
+            self.spectrum.clear_for_switch();
+            self.canvas_dirty = true;
+            self.view3d_dirty = true;
+        }
 
         if self.canvas_dirty {
             self.sync_canvas(env.surfaces, env.defects, env.combine, env.canvas);
@@ -325,12 +335,19 @@ impl AnalysisModeState {
                 self.spectrum.submit_crystal(c, Some(s), ctx);
             }
             AnalysisTarget::CombinedDefects => {
-                let (c, s) = if combine.sheet_opts.show_flat_baseline {
-                    (&combine.last_sheet3d.flat_crystal, &combine.last_sheet3d.flat_sheet)
+                if let Some(reason) = &combine.last_build.refused {
+                    self.spectrum.clear_for_switch();
+                    self.spectrum.last_error = Some(format!(
+                        "Current Place & fuse configuration was refused by surgery ({reason})."
+                    ));
                 } else {
-                    (&combine.last_build.crystal, &combine.last_sheet3d.sheet)
-                };
-                self.spectrum.submit_crystal(c, Some(s), ctx);
+                    let (c, s) = if combine.sheet_opts.show_flat_baseline {
+                        (&combine.last_sheet3d.flat_crystal, &combine.last_sheet3d.flat_sheet)
+                    } else {
+                        (&combine.last_build.crystal, &combine.last_sheet3d.sheet)
+                    };
+                    self.spectrum.submit_crystal(c, Some(s), ctx);
+                }
             }
         }
         self.canvas_dirty = true;
@@ -405,21 +422,36 @@ impl AnalysisModeState {
             }
             AnalysisTarget::CombinedDefects => {
                 let b = &combine.last_build;
-                let title = if b.charge_label.is_empty() {
-                    String::from("Combined defects (Analysis)")
+                if let Some(reason) = &b.refused {
+                    let title = String::from("Combined defects unavailable");
+                    let note = format!("Current Place & fuse configuration was refused by surgery ({reason})");
+                    canvas.set_scene_with_title(
+                        Scene2D::CrystalPatch {
+                            crystal: crate::combine_worker::empty_crystal(),
+                            title: title.clone(),
+                            note,
+                        },
+                        Some(title),
+                        reset,
+                    );
+                    canvas.set_gauge_overlay(None);
                 } else {
-                    b.charge_label.clone()
-                };
-                canvas.set_scene_with_title(
-                    Scene2D::CrystalPatch {
-                        crystal: b.crystal.clone(),
-                        title: title.clone(),
-                        note: b.note.clone(),
-                    },
-                    Some(title),
-                    reset,
-                );
-                canvas.set_gauge_overlay(ov);
+                    let title = if b.charge_label.is_empty() {
+                        String::from("Combined defects (Analysis)")
+                    } else {
+                        b.charge_label.clone()
+                    };
+                    canvas.set_scene_with_title(
+                        Scene2D::CrystalPatch {
+                            crystal: b.crystal.clone(),
+                            title: title.clone(),
+                            note: b.note.clone(),
+                        },
+                        Some(title),
+                        reset,
+                    );
+                    canvas.set_gauge_overlay(ov);
+                }
             }
         }
     }
@@ -463,6 +495,16 @@ impl AnalysisModeState {
                 view3d.set_legend(surface_color_legend(use_el, color_mode, scalar_ref));
             }
             AnalysisTarget::PlaneLattice | AnalysisTarget::SingleDefect | AnalysisTarget::CombinedDefects => {
+                if self.target == AnalysisTarget::CombinedDefects
+                    && let Some(reason) = &combine.last_build.refused
+                {
+                    view3d.set_mesh(
+                        GpuMeshData::default(),
+                        format!("Current Place & fuse configuration was refused by surgery ({reason})"),
+                    );
+                    view3d.set_legend(None);
+                    return;
+                }
                 let (c, s, base_opts, title): (&BuiltCrystal, &Sheet3DResult, Sheet3dViewOpts, &str) = match self.target {
                     AnalysisTarget::PlaneLattice => (
                         &self.plane_crystal,
@@ -519,7 +561,13 @@ impl AnalysisModeState {
             AnalysisTarget::Surface => surfaces.export_active_obj(path),
             AnalysisTarget::PlaneLattice => export_sheet_obj(&self.plane_title, &self.plane_sheet, path),
             AnalysisTarget::SingleDefect => defects.export_active_obj(path),
-            AnalysisTarget::CombinedDefects => combine.export_active_obj(item, path),
+            AnalysisTarget::CombinedDefects => {
+                if let Some(reason) = &combine.last_build.refused {
+                    Err(format!("Current Place & fuse configuration was refused by surgery ({reason})"))
+                } else {
+                    combine.export_active_obj(item, path)
+                }
+            }
         }
     }
 }

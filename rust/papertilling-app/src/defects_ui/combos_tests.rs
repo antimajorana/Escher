@@ -98,7 +98,11 @@ fn combinations_default_view_square_renders_sections_cleanly_without_forbidden_t
     );
     assert!(
         table.charge_groups.iter().any(|g| !g.has_single_defect),
-        "square disclination pairs within 1.0a include charges no single defect carries (two +180 at distance 1)"
+        "square disclination pairs within 1.0a include charges no single defect carries (e.g. two -180 at distance 1)"
+    );
+    assert!(
+        table.refused.iter().all(|r| r.algebraic_charge.is_some()),
+        "every refused square disclination pair carries its exact algebraic total charge"
     );
 
     assert!(
@@ -113,12 +117,19 @@ fn combinations_default_view_square_renders_sections_cleanly_without_forbidden_t
             .is_some(),
         "multi-defect section heading rendered"
     );
-    assert!(
-        h.query_all_by_label_contains("[COMPUTATIONAL EVIDENCE]")
-            .next()
-            .is_some(),
-        "bounds banner honesty note rendered"
-    );
+    for needle in [
+        "[COMPUTATIONAL EVIDENCE]",
+        "sep <= 1.00 a",
+        "|b| <= 2.0 b_min",
+        "core radius 2",
+        "1×1 search grid",
+        "working build order",
+    ] {
+        assert!(
+            h.query_all_by_label_contains(needle).next().is_some(),
+            "bounds banner must display '{needle}'"
+        );
+    }
     assert!(
         h.query_all_by_label_contains("Triple: D(1b,+90) + 2×D(1a,-90)")
             .next()
@@ -211,7 +222,72 @@ fn combinations_reload_for_item_cancels_and_clears_table() {
 
     let combos = &h.state().defects.combos;
     assert!(combos.table.is_none(), "reload_for_item cleared combinations table");
+    assert!(combos.algebra.is_none(), "reload_for_item cleared cached algebra report");
     assert!(combos.selected.is_none(), "reload_for_item cleared selection");
     assert!(!combos.is_busy(), "reload_for_item cancelled combinations worker");
     assert!(combos.error.is_none(), "reload_for_item cleared error");
 }
+
+#[test]
+fn combinations_proved_algebraic_fusion_panel_renders_on_square_without_forbidden_tokens() {
+    let mut h = harness();
+    switch_to_square_combinations(&mut h);
+
+    // Cached algebraic report is populated synchronously for p4m (square).
+    let report = h
+        .state()
+        .defects
+        .combos
+        .algebra
+        .as_ref()
+        .expect("algebraic report cached")
+        .as_ref()
+        .expect("algebraic report succeeded");
+    assert_eq!(report.group, "p4m");
+    assert!(report.symmorphic);
+    assert_eq!(report.ab_proper.label, "Z/2Z x Z/4Z");
+    assert_eq!(report.ab_full.label, "(Z/2Z)^3");
+    assert_eq!(report.improper_sectors.len(), 2);
+
+    for needle in [
+        "[PROVED] Algebraic fusion rules (all separations) & improper sectors",
+        "(G+)^ab = Z/2Z x Z/4Z",
+        "G^ab = (Z/2Z)^3",
+        "Reflection & glide holonomy sectors (Q_R // Z_P(R))",
+        "Z x Z/2Z",
+        "All-separation fusion channels (lifted G~+)",
+    ] {
+        assert!(
+            h.query_all_by_label_contains(needle).next().is_some(),
+            "algebraic fusion panel must render '{needle}'"
+        );
+    }
+
+    assert_clean_combos_screen(&h, "Combinations algebraic panel (square p4m)");
+    assert!(
+        h.query_all_by_label_contains("Group cohomology").next().is_none(),
+        "must never display 'Group cohomology'"
+    );
+
+    // Expand the all-separation fusion channels table and verify rows & zero forbidden tokens.
+    h.query_all_by_label_contains("All-separation fusion channels (lifted G~+)")
+        .next()
+        .expect("fusion channels collapsing header")
+        .click();
+    h.run_steps(2);
+
+    assert!(
+        h.query_all_by_label_contains("Abelian sum in (G+)^ab").next().is_some(),
+        "expanded fusion channels table shows Abelian sum column"
+    );
+    assert!(
+        h.query_all_by_label_contains("Allowed output channels [PROVED]").next().is_some(),
+        "expanded fusion channels table shows [PROVED] channels column"
+    );
+    assert_clean_combos_screen(&h, "Combinations algebraic fusion channels expanded (square p4m)");
+    assert!(
+        h.query_all_by_label_contains("Group cohomology").next().is_none(),
+        "expanded fusion table must never display 'Group cohomology'"
+    );
+}
+

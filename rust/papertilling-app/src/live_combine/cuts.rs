@@ -223,6 +223,25 @@ pub fn format_refusal_note(err: &str) -> String {
     }
 }
 
+pub const REFUSAL_PRESERVED_SUFFIX: &str = " — last valid lattice shown";
+pub const REFUSAL_STANDIN_SUFFIX: &str = " — defect-free disk shown";
+
+/// Append an explicit notice stating which geometry is currently drawn on the canvas after a refusal.
+pub fn with_refusal_canvas_notice(note: String, preserved_prev_valid: bool) -> String {
+    let suffix = if preserved_prev_valid {
+        REFUSAL_PRESERVED_SUFFIX
+    } else {
+        REFUSAL_STANDIN_SUFFIX
+    };
+    if note.is_empty() {
+        suffix.trim_start_matches(" — ").to_owned()
+    } else if note.ends_with(suffix) {
+        note
+    } else {
+        format!("{note}{suffix}")
+    }
+}
+
 /// Return a sensible initial cut angle (degrees in `[-180, 180]`) for placed pin `idx`.
 pub fn default_cut_angle_deg(
     info: &CombineLatticeInfo,

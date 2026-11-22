@@ -77,6 +77,11 @@ fn refused_new_pin_preserves_previously_built_crystal_and_sheet() {
     st.wait_idle(square, Some(&mut canvas));
 
     assert!(st.last_build.refused.is_some(), "expected refusal for +360° total");
+    assert!(
+        st.last_build.note.contains("last valid lattice shown"),
+        "expected preserved-crystal notice in refusal note, got: {}",
+        st.last_build.note
+    );
     assert_eq!(
         st.last_build.crystal.pos.len(),
         prev_sites,
@@ -247,3 +252,142 @@ fn x_and_y_dislocation_markers_align_with_drawn_pentagon_centroids() {
         "IDW ref->drawn->ref roundtrip drifted: {probe:?} -> {round:?}"
     );
 }
+
+#[test]
+fn first_build_refusal_notice_fallback_order_and_refused_algebraic_charge() {
+    use papertilling_core::defect::combinations::build_combinations_table;
+    use papertilling_core::defect::combinations_types::{
+        CombinationCandidate, CombinationMode, CombinationsOptions,
+    };
+
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let info = combine_lattice_info(square);
+    let opts = CombineBuildOptions {
+        draw_mode: CombineDrawMode::FastRelaxed,
+        full_planar_repair: false,
+        auto_radius: true,
+        manual_radius: info.r_auto_base,
+        core_radius: 2,
+    };
+
+    // 1. Fallback-order build ([F_{+90}, V_{-90}]) reports "fallback order" in out.note
+    //    and CombinationsTable records the exact surgical build_order [1, 0].
+    let fv_specs = vec![
+        DefectSpec::disclination(90.0, [0.5, 0.5]),
+        DefectSpec::disclination(-90.0, [0.0, 0.0]),
+    ];
+    let out_fv = build_combined_crystal(square, &info, &fv_specs, &opts, false);
+    assert!(out_fv.refused.is_none(), "expected [F_+90, V_-90] to succeed via fallback: {:?}", out_fv.refused);
+    assert!(
+        out_fv.note.contains("fallback order"),
+        "fallback build must disclose fallback order in note, got: {:?}",
+        out_fv.note
+    );
+
+    let table = build_combinations_table(
+        &square.group,
+        &info.cell,
+        square.frame,
+        &CombinationMode::Custom {
+            candidates: vec![CombinationCandidate {
+                label: String::from("F+90 + V-90"),
+                defect_ids: vec![String::from("D(1b, +90)"), String::from("D(1a, -90)")],
+                separation: 0.5_f64.sqrt(),
+                displacements: vec![[-0.5, -0.5]],
+                specs: fv_specs,
+            }],
+        },
+        &CombinationsOptions { draw_thumbnails: false, ..CombinationsOptions::default() },
+        None,
+    )
+    .expect("custom table build");
+    let entry = &table.charge_groups[0].core_groups[0].members[0];
+    assert_eq!(entry.build_order, vec![1, 0], "CombinationEntry.build_order must record exact surgical order");
+    assert_eq!(entry.specs[0], DefectSpec::disclination(-90.0, [0.0, 0.0]));
+
+    // 2. Refused adjacent-corner triple F_{+90} V_{-90} V_{-90} reports D(1b, -90 deg) in charge_detail.
+    let adj_triple = vec![
+        DefectSpec::disclination(90.0, [0.5, 0.5]),
+        DefectSpec::disclination(-90.0, [0.0, 0.0]),
+        DefectSpec::disclination(-90.0, [1.0, 0.0]),
+    ];
+    let out_ref = build_combined_crystal(square, &info, &adj_triple, &opts, false);
+    assert!(out_ref.refused.is_some(), "expected adjacent-corner F+90 V-90 V-90 to be refused");
+    assert_eq!(out_ref.charge_label, "Surgery refused");
+    assert!(
+        out_ref.charge_detail.contains("D(1b, -90 deg)"),
+        "refused adjacent-corner triple must report exact algebraic charge D(1b, -90 deg), got: {}",
+        out_ref.charge_detail
+    );
+
+    // 3. First-build refusal (no prior valid crystal) appends "defect-free disk shown" and stays honest on retry.
+    let mut canvas = test_canvas();
+    let mut st = CombineTabState::new(square, &backend);
+    st.wait_idle(square, Some(&mut canvas));
+    st.last_build.crystal = crate::combine_worker::empty_crystal();
+    st.last_build.refused = None;
+    st.last_build.note.clear();
+    st.specs = adj_triple;
+    st.request_build(square, false, false, false);
+    st.wait_idle(square, Some(&mut canvas));
+    assert!(st.last_build.refused.is_some());
+    assert!(!st.last_build.crystal.pos.is_empty(), "stand-in disk should be drawn on first-build refusal");
+    assert!(
+        st.last_build.note.contains("defect-free disk shown"),
+        "first-build refusal must disclose defect-free disk stand-in, got: {}",
+        st.last_build.note
+    );
+
+    // A second refusal while still on the stand-in disk must keep saying "defect-free disk shown".
+    st.request_build(square, false, false, false);
+    st.wait_idle(square, Some(&mut canvas));
+    assert!(
+        st.last_build.note.contains("defect-free disk shown"),
+        "repeated refusal on stand-in disk must not claim last valid lattice, got: {}",
+        st.last_build.note
+    );
+}
+
+#[test]
+fn place_and_fuse_reports_proved_abelian_charge_on_built_and_refused_configs() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let info = combine_lattice_info(square);
+    let opts = CombineBuildOptions {
+        draw_mode: CombineDrawMode::FastRelaxed,
+        full_planar_repair: false,
+        auto_radius: true,
+        manual_radius: info.r_auto_base,
+        core_radius: 2,
+    };
+
+    // Built configuration: square default neighbour pair.
+    let pair_specs = preset_neighbour_pair(&info);
+    let out_built = build_combined_crystal(square, &info, &pair_specs, &opts, false);
+    assert!(out_built.refused.is_none(), "default square pair must build: {:?}", out_built.refused);
+    for needle in ["Abelian charge:", "(G+)^ab =", "Z/2Z x Z/4Z", "G^ab =", "(Z/2Z)^3", "[PROVED]"] {
+        assert!(
+            out_built.charge_detail.contains(needle),
+            "built square pair charge_detail missing '{needle}': {}",
+            out_built.charge_detail
+        );
+    }
+
+    // Refused configuration: adjacent-corner F_{+90} V^2_{-90}.
+    let adj_triple = vec![
+        DefectSpec::disclination(90.0, [0.5, 0.5]),
+        DefectSpec::disclination(-90.0, [0.0, 0.0]),
+        DefectSpec::disclination(-90.0, [1.0, 0.0]),
+    ];
+    let out_ref = build_combined_crystal(square, &info, &adj_triple, &opts, false);
+    assert!(out_ref.refused.is_some(), "adjacent-corner F+90 V2-90 must be refused");
+    for needle in ["Abelian charge:", "(G+)^ab =", "Z/2Z x Z/4Z", "G^ab =", "(Z/2Z)^3", "[PROVED]"] {
+        assert!(
+            out_ref.charge_detail.contains(needle),
+            "refused adjacent-corner charge_detail missing '{needle}': {}",
+            out_ref.charge_detail
+        );
+    }
+}
+

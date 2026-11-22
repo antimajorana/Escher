@@ -64,6 +64,7 @@ impl PapertillingApp {
                             &tokens,
                             self.advanced,
                         );
+                        self.drain_combine_fusion_cavity();
                     }
                     NavTab::Atlas => {
                         self.atlas.show_inspector_panel(ui, &tokens);

@@ -492,3 +492,57 @@ fn analysis_supports_pristine_plane_surface_and_combined_targets() {
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| { let _ = app.frame_ui(ui); });
     assert!(app.analysis.spectrum.result.is_none(), "moving sites invalidates stale CombinedDefects spectrum");
 }
+
+#[test]
+fn analysis_combined_defects_blocks_stale_crystal_on_refusal() {
+    use papertilling_core::defect::surgery::DefectSpec;
+
+    let mut app = PapertillingApp::new(false, String::from("test"), String::from("test"));
+    let ctx = egui::Context::default();
+    let sq = app.backend.find_named("square").unwrap().clone();
+    app.select_lattice_and_sync(sq.clone());
+    app.select_defects_view(DefectsView::CombineAndFuse);
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| { let _ = app.frame_ui(ui); });
+    while app.combine.is_building() || app.combine.is_initializing() {
+        std::thread::sleep(Duration::from_millis(10));
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| { let _ = app.frame_ui(ui); });
+    }
+    assert!(app.combine.last_build.refused.is_none());
+    assert!(!app.combine.last_build.crystal.pos.is_empty());
+
+    // Valid spectrum runs normally first.
+    app.analysis.view_mode = DefectViewMode::Split2D3D;
+    app.switch_mode(AppMode::Analysis);
+    app.analysis.select_target(AnalysisTarget::CombinedDefects);
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| { let _ = app.frame_ui(ui); });
+    app.analysis.submit_active_source(&sq, &app.surfaces, &app.defects, &app.combine, None);
+    assert!(app.analysis.spectrum.wait_idle().is_some());
+
+    // Now trigger a refused Combine build (preserves stale crystal in combine.last_build.crystal).
+    app.combine.specs = vec![
+        DefectSpec::disclination(90.0, [0.5, 0.5]),
+        DefectSpec::disclination(-90.0, [0.0, 0.0]),
+        DefectSpec::disclination(-90.0, [1.0, 0.0]),
+    ];
+    app.combine.request_build(&sq, false, false, false);
+    app.combine.wait_idle(&sq, None);
+    assert!(app.combine.last_build.refused.is_some());
+    assert!(!app.combine.last_build.crystal.pos.is_empty(), "Combine keeps stale previous crystal on canvas");
+
+    // Analysis CombinedDefects must clear stale spectrum, refuse submission, and clear 2D/3D overlays.
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| { let _ = app.frame_ui(ui); });
+    assert!(app.analysis.spectrum.result.is_none(), "stale spectrum must clear when Combine build is refused");
+    app.analysis.submit_active_source(&sq, &app.surfaces, &app.defects, &app.combine, None);
+    assert!(app.analysis.spectrum.wait_idle().is_none(), "must not compute spectrum on stale refused crystal");
+    assert!(app.analysis.spectrum.result.is_none());
+    assert!(
+        app.analysis.spectrum.last_error.as_deref().is_some_and(|e| e.contains("refused by surgery")),
+        "expected honest refusal error, got: {:?}",
+        app.analysis.spectrum.last_error
+    );
+    app.analysis.sync_canvas(&app.surfaces, &app.defects, &app.combine, &mut app.canvas2d);
+    app.analysis.sync_view3d(&app.surfaces, &app.defects, &app.combine, &mut app.view3d);
+    assert!(app.canvas2d.gauge_overlay().is_none());
+    assert!(!app.view3d.has_geometry());
+    assert!(app.view3d.legend().is_none());
+}

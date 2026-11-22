@@ -4,11 +4,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use papertilling_core::defect::algebraic_fusion::{
+    SpaceGroupAlgebraReport, analyze_space_group_fusion,
+};
 use papertilling_core::defect::combinations::build_combinations_table_cached;
 use papertilling_core::defect::combinations_types::{
     CombinationMode, CombinationsOptions, CombinationsTable,
 };
 use papertilling_core::defect::single_cache::SingleDefectCache;
+use papertilling_core::plane::family::LatticeFamily;
 use papertilling_core::types::{Frame2D, Recipe};
 
 use crate::aliases::LatticeAliasKey;
@@ -91,6 +95,7 @@ struct CombosJob {
     max_sep_scale: f64,
     core_radius: usize,
     scan_grid: usize,
+    bmax: f64,
     cancel: Arc<AtomicBool>,
 }
 
@@ -107,11 +112,15 @@ pub(crate) struct CombosState {
     pub(crate) max_sep_scale: f64,
     pub(crate) core_radius: usize,
     pub(crate) scan_grid: usize,
+    pub(crate) bmax: f64,
     pub(crate) table: Option<CombinationsTable>,
     table_alias: Option<LatticeAliasKey>,
     pub(crate) a_scale: f64,
     pub(crate) error: Option<String>,
     computed_for: Option<CombosKey>,
+    pub(crate) algebra: Option<Result<SpaceGroupAlgebraReport, String>>,
+    algebra_for: Option<String>,
+    pub(crate) algebra_filter: String,
     pub(crate) selected: Option<(usize, usize, usize)>,
     pub(crate) thumb_cache: HashMap<String, ScenePrimitives>,
     pub(crate) inspector_modal: Option<CoreInspectorModal>,
@@ -140,7 +149,7 @@ impl CombosState {
                     grid: job.scan_grid,
                     draw_thumbnails: true,
                     include_single_gallery: false,
-                    bmax: 2.0,
+                    bmax: job.bmax,
                 };
                 let table = build_combinations_table_cached(
                     &job.item.group,
@@ -165,11 +174,15 @@ impl CombosState {
             max_sep_scale: 1.5,
             core_radius: 2,
             scan_grid: 1,
+            bmax: 2.0,
             table: None,
             table_alias: None,
             a_scale: 1.0,
             error: None,
             computed_for: None,
+            algebra: None,
+            algebra_for: None,
+            algebra_filter: String::new(),
             selected: None,
             thumb_cache: HashMap::new(),
             inspector_modal: None,
@@ -214,10 +227,35 @@ impl CombosState {
         self.table_alias = None;
         self.error = None;
         self.computed_for = None;
+        self.algebra = None;
+        self.algebra_for = None;
+        self.algebra_filter.clear();
         self.selected = None;
         self.thumb_cache.clear();
         self.inspector_modal = None;
         self.cancelled_by_user = false;
+    }
+
+    /// Synchronously ensure the exact `[PROVED]` space-group algebraic fusion report is cached
+    /// for `item` (runs in milliseconds without waiting for Volterra surgery).
+    pub(crate) fn ensure_algebra(&mut self, item: &CatalogueItemUi) {
+        let key = format!(
+            "{:?}|{}|{:?}|{:?}|{:.3}",
+            item.alias_key, item.group, item.recipe, item.frame, self.bmax
+        );
+        if self.algebra_for.as_deref() == Some(key.as_str()) && self.algebra.is_some() {
+            return;
+        }
+        let res = LatticeFamily::from_recipe(&item.recipe, Some(item.frame)).and_then(|fam| {
+            let cell = fam.cell();
+            if cell.basis.is_empty() {
+                Err(format!("{}: the recipe gives no sites", item.label))
+            } else {
+                analyze_space_group_fusion(&item.group, &cell, item.frame, self.bmax)
+            }
+        });
+        self.algebra = Some(res);
+        self.algebra_for = Some(key);
     }
 
     /// Cancel the in-flight computation without auto-restarting on the next frame.
@@ -241,6 +279,7 @@ impl CombosState {
             max_sep_scale: self.max_sep_scale,
             core_radius: self.core_radius,
             scan_grid: self.scan_grid,
+            bmax: self.bmax,
             cancel: flag,
         });
     }

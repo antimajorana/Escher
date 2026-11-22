@@ -208,7 +208,7 @@ fn disc(center: [f64; 2], radius: f64, fill: [u8; 4], stroke: ([u8; 4], f32)) ->
 
 /// Position of an edge's number label: outward along a curved edge's bend so it never overlaps a 2-gon face
 /// label inside a lens, or shifted slightly along the normal of a straight edge.
-fn edge_label_pos(m: &PlanarMap, e: usize) -> [f64; 2] {
+fn edge_label_pos(m: &PlanarMap, e: usize, scale: f64) -> [f64; 2] {
     let at = label_point(m, e);
     if m.is_loop(e) {
         return at;
@@ -220,17 +220,46 @@ fn edge_label_pos(m: &PlanarMap, e: usize) -> [f64; 2] {
         let (dx, dy) = (ctrl[0] - mid[0], ctrl[1] - mid[1]);
         let len = dx.hypot(dy);
         if len > 1e-6 {
-            return [at[0] + 0.15 * dx / len, at[1] + 0.15 * dy / len];
+            return [at[0] + 0.15 * scale * dx / len, at[1] + 0.15 * scale * dy / len];
         }
     }
     let len = (b[0] - a[0]).hypot(b[1] - a[1]).max(1e-9);
-    [at[0] - 0.13 * (b[1] - a[1]) / len, at[1] + 0.13 * (b[0] - a[0]) / len]
+    [at[0] - 0.13 * scale * (b[1] - a[1]) / len, at[1] + 0.13 * scale * (b[0] - a[0]) / len]
+}
+
+#[derive(Clone, Copy)]
+struct MapStyle {
+    regular_sides: Option<usize>,
+    regular_valence: Option<usize>,
+    scale: f64,
+}
+
+const WANG_STYLE: MapStyle = MapStyle { regular_sides: Some(4), regular_valence: Some(4), scale: 1.0 };
+
+fn median_edge_scale(m: &PlanarMap) -> f64 {
+    let mut lens: Vec<f64> = m
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|&(i, e)| e.alive && !m.is_loop(i))
+        .map(|(_, e)| {
+            let (a, b) = (m.verts[e.ends[0]].pos, m.verts[e.ends[1]].pos);
+            (b[0] - a[0]).hypot(b[1] - a[1])
+        })
+        .filter(|&d| d.is_finite() && d > 1e-6)
+        .collect();
+    if lens.is_empty() {
+        return 1.0;
+    }
+    lens.sort_by(f64::total_cmp);
+    lens[lens.len() / 2].clamp(0.45, 2.5)
 }
 
 fn build_map_scene(
     m: &PlanarMap,
     highlight: &[u32],
     title: String,
+    style: MapStyle,
     numbers: bool,
     names: bool,
     show_gate_labels: bool,
@@ -259,7 +288,7 @@ fn build_map_scene(
             }
             centroid(&outline)
         };
-        if sides != 4 {
+        if style.regular_sides.is_none_or(|reg| sides != reg) {
             p.labels.push(text(centre, sides.to_string(), INK_RGBA, 15.0));
         }
     }
@@ -276,20 +305,32 @@ fn build_map_scene(
         }
         if numbers {
             // Always use crisp dark charcoal ink so highlighted edge numbers stay legible over tinted faces.
-            p.labels.push(text(edge_label_pos(m, e), edge.label.to_string(), INK_RGBA, 13.0));
+            p.labels.push(text(edge_label_pos(m, e, style.scale), edge.label.to_string(), INK_RGBA, 13.0));
         }
     }
     for v in m.verts.iter().filter(|v| v.kind != VertexKind::Removed) {
-        match (v.kind, v.rot.len()) {
-            (VertexKind::Complete, 4) => p.circles.push(disc(v.pos, 0.07, EDGE_RGBA, (WHITE, 1.0))),
-            (VertexKind::Complete, k) => {
-                p.circles.push(disc(v.pos, 0.13, if k < 4 { UNDER_RGBA } else { OVER_RGBA }, (WHITE, 1.0)));
+        match (v.kind, style.regular_valence, v.rot.len()) {
+            (VertexKind::Complete, Some(reg), k) if k == reg => {
+                p.circles.push(disc(v.pos, 0.07 * style.scale, EDGE_RGBA, (WHITE, 1.0)));
+            }
+            (VertexKind::Complete, Some(reg), k) => {
+                let fill = if k < reg { UNDER_RGBA } else { OVER_RGBA };
+                p.circles.push(disc(v.pos, 0.13 * style.scale, fill, (WHITE, 1.0)));
                 p.labels.push(text(v.pos, k.to_string(), WHITE, 12.0));
             }
-            _ => p.circles.push(disc(v.pos, 0.045, WHITE, (EDGE_RGBA, 1.2))),
+            (VertexKind::Complete, None, k) => {
+                p.circles.push(disc(v.pos, 0.11 * style.scale, EDGE_RGBA, (WHITE, 1.0)));
+                p.labels.push(text(v.pos, k.to_string(), WHITE, 11.0));
+            }
+            _ => p.circles.push(disc(v.pos, 0.045 * style.scale, WHITE, (EDGE_RGBA, 1.2))),
         }
         if names && v.kind == VertexKind::Complete {
-            p.labels.push(text([v.pos[0] - 0.2, v.pos[1] + 0.2], v.name.clone(), INK_RGBA, 13.0));
+            p.labels.push(text(
+                [v.pos[0] - 0.2 * style.scale, v.pos[1] + 0.2 * style.scale],
+                v.name.clone(),
+                INK_RGBA,
+                13.0,
+            ));
         }
     }
     p.site_count = c.vertices;
@@ -300,8 +341,25 @@ fn build_map_scene(
     });
     let pts = p.lines.iter().flat_map(|l| [l.a, l.b]).chain(p.labels.iter().map(|t| t.pos)).chain(rims);
     let (lo, hi) = compute_bbox(pts);
-    p.bbox = ([lo[0] - 0.3, lo[1] - 0.3], [hi[0] + 0.3, hi[1] + 0.3]);
+    let pad = (0.3 * style.scale) as f32;
+    p.bbox = ([lo[0] - pad, lo[1] - pad], [hi[0] + pad, hi[1] + pad]);
     Scene2D::VectorScene { primitives: p }
+}
+
+/// Arbitrary planar cavity map scene (for live Place & fuse cavities on any 2D lattice).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn map_scene(
+    m: &PlanarMap,
+    highlight: &[u32],
+    title: String,
+    regular_sides: Option<usize>,
+    regular_valence: Option<usize>,
+    numbers: bool,
+    names: bool,
+    show_gate_labels: bool,
+) -> Scene2D {
+    let style = MapStyle { regular_sides, regular_valence, scale: median_edge_scale(m) };
+    build_map_scene(m, highlight, title, style, numbers, names, show_gate_labels)
 }
 
 /// The scene of one step along a route.
@@ -319,7 +377,7 @@ pub(super) fn step_scene(
         String::new()
     };
     let title = format!("Step {index} of {}: {}{op}", total.saturating_sub(1), step.title);
-    build_map_scene(&step.map, &step.highlight, title, numbers, names, show_gate_labels)
+    build_map_scene(&step.map, &step.highlight, title, WANG_STYLE, numbers, names, show_gate_labels)
 }
 
 /// The scene of one enumerated core connection for the fixed surrounding cavity.
@@ -331,7 +389,7 @@ pub(super) fn core_scene(
     show_gate_labels: bool,
 ) -> Scene2D {
     let title = format!("Core {} of {total_cores}: {}", core.id + 1, core.title);
-    build_map_scene(&core.map, &[11, 12], title, numbers, names, show_gate_labels)
+    build_map_scene(&core.map, &[11, 12], title, WANG_STYLE, numbers, names, show_gate_labels)
 }
 
 /// The unfused Fig. 8(a) start lattice shown for comparison inside the Core connections sub-view.
@@ -342,5 +400,5 @@ pub(super) fn start_comparison_scene(
     show_gate_labels: bool,
 ) -> Scene2D {
     let title = String::from("Start lattice (Fig. 8(a)): unfused core with 2-valent vertex s");
-    build_map_scene(&start.map, &start.highlight, title, numbers, names, show_gate_labels)
+    build_map_scene(&start.map, &start.highlight, title, WANG_STYLE, numbers, names, show_gate_labels)
 }
