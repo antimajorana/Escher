@@ -3207,7 +3207,7 @@
     },
     "equivalent": false,
     "matches": [],
-    "verdict": "not equivalent to the single defect",
+    "verdict": "no single defect carries this charge (|Frank| > 180 deg)",
     "candidates": []
    }
   },
@@ -3690,7 +3690,7 @@
     },
     "equivalent": false,
     "matches": [],
-    "verdict": "not equivalent to the single defect",
+    "verdict": "no single defect carries this charge",
     "candidates": []
    }
   },
@@ -4639,6 +4639,420 @@
    "python": {
     "ok": false,
     "error": "spec 1: b = [0.0, 0.0] is not a non-zero lattice translation"
+   }
+  },
+  {
+   "name": "square adjacent triple refused",
+   "lattice": {
+    "source": "named",
+    "name": "square",
+    "group": "p4m",
+    "recipe": {
+     "group": "p4m",
+     "sites": [
+      [
+       0.0,
+       0.0
+      ]
+     ],
+     "bonds": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        -1.0,
+        0.0
+       ]
+      ]
+     ],
+     "a": 1.0
+    },
+    "frame": {
+     "q": [
+      [
+       1.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.0
+      ]
+     ],
+     "origin": [
+      0.0,
+      0.0
+     ]
+    }
+   },
+   "specs": [
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      1.0,
+      0.0
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": 90.0,
+     "at": [
+      0.5,
+      0.5
+     ]
+    }
+   ],
+   "grid": 1,
+   "radius": 2,
+   "python": {
+    "ok": false,
+    "error": "defect 3 (disclination): a later cut would remove an existing site-centred disclination core; try another cut direction"
+   }
+  },
+  {
+   "name": "square opposite triple dfs",
+   "lattice": {
+    "source": "named",
+    "name": "square",
+    "group": "p4m",
+    "recipe": {
+     "group": "p4m",
+     "sites": [
+      [
+       0.0,
+       0.0
+      ]
+     ],
+     "bonds": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        -1.0,
+        0.0
+       ]
+      ]
+     ],
+     "a": 1.0
+    },
+    "frame": {
+     "q": [
+      [
+       1.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.0
+      ]
+     ],
+     "origin": [
+      0.0,
+      0.0
+     ]
+    }
+   },
+   "specs": [
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      1.0,
+      1.0
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": 90.0,
+     "at": [
+      0.5,
+      0.5
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      0.0,
+      0.0
+     ]
+    }
+   ],
+   "grid": 1,
+   "radius": 2,
+   "python": {
+    "ok": true,
+    "charge": {
+     "kind": "disclination",
+     "angle": -90.0,
+     "label": "disclination D(1b, -90 deg) about [0.5, 0.5]",
+     "centre": [
+      0.49999999999999994,
+      0.5000000000000003
+     ],
+     "centre_class": "1b"
+    },
+    "cores": [
+     "disclination +90 deg on a 3-ring",
+     "disclination -90 deg on a site with 5 bonds",
+     "disclination -90 deg on a site with 5 bonds"
+    ],
+    "core": {
+     "nodes": 60,
+     "edges": 97,
+     "degrees": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      5,
+      5
+     ]
+    },
+    "equivalent": false,
+    "matches": [],
+    "verdict": "not equivalent to the single defect",
+    "candidates": [
+     "single -90 deg at [0.5, 0.5]"
+    ]
+   }
+  },
+  {
+   "name": "square opposite triple budget refused",
+   "lattice": {
+    "source": "named",
+    "name": "square",
+    "group": "p4m",
+    "recipe": {
+     "group": "p4m",
+     "sites": [
+      [
+       0.0,
+       0.0
+      ]
+     ],
+     "bonds": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        -1.0,
+        0.0
+       ]
+      ]
+     ],
+     "a": 1.0
+    },
+    "frame": {
+     "q": [
+      [
+       1.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.0
+      ]
+     ],
+     "origin": [
+      0.0,
+      0.0
+     ]
+    }
+   },
+   "specs": [
+    {
+     "kind": "disclination",
+     "angle": 90.0,
+     "at": [
+      0.5,
+      0.5
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      1.0,
+      1.0
+     ]
+    }
+   ],
+   "grid": 1,
+   "radius": 2,
+   "python": {
+    "ok": false,
+    "error": "defect 2 (disclination): developed region encloses an earlier defect core (two walks disagree); use another cut direction or defect order"
+   }
+  },
+  {
+   "name": "square five defects greedy refused",
+   "lattice": {
+    "source": "named",
+    "name": "square",
+    "group": "p4m",
+    "recipe": {
+     "group": "p4m",
+     "sites": [
+      [
+       0.0,
+       0.0
+      ]
+     ],
+     "bonds": [
+      [
+       [
+        0.0,
+        0.0
+       ],
+       [
+        -1.0,
+        0.0
+       ]
+      ]
+     ],
+     "a": 1.0
+    },
+    "frame": {
+     "q": [
+      [
+       1.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.0
+      ]
+     ],
+     "origin": [
+      0.0,
+      0.0
+     ]
+    }
+   },
+   "specs": [
+    {
+     "kind": "disclination",
+     "angle": 90.0,
+     "at": [
+      0.5,
+      0.5
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      0.0,
+      0.0
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      1.0,
+      0.0
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      0.0,
+      1.0
+     ]
+    },
+    {
+     "kind": "disclination",
+     "angle": -90.0,
+     "at": [
+      1.0,
+      1.0
+     ]
+    }
+   ],
+   "grid": 1,
+   "radius": 2,
+   "python": {
+    "ok": false,
+    "error": "defect 2 (disclination): developed region encloses an earlier defect core (two walks disagree); use another cut direction or defect order"
    }
   }
  ],

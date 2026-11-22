@@ -35,21 +35,23 @@ pub(crate) fn draw_overlays(
         );
     }
     if !note.is_empty() {
-        let banner_h = 24.0;
         let top_y = if title.is_empty() { 6.0 } else { 24.0 };
+        let max_w = (rect.width() - 32.0).max(40.0);
+        let galley = painter.layout(
+            note.to_string(),
+            egui::FontId::proportional(11.5),
+            tokens.status_warn,
+            max_w,
+        );
+        let pad_y = 5.0;
+        let banner_h = (galley.size().y + 2.0 * pad_y).max(24.0);
         let banner = egui::Rect::from_min_max(
             rect.left_top() + egui::vec2(8.0, top_y),
             egui::pos2(rect.right() - 8.0, (rect.top() + top_y + banner_h).min(rect.bottom() - 4.0)),
         );
         painter.rect_filled(banner, 4.0, tokens.bg_hud);
         painter.rect_stroke(banner, 4.0, egui::Stroke::new(1.0, tokens.status_warn), egui::StrokeKind::Inside);
-        painter.text(
-            banner.left_center() + egui::vec2(8.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            note,
-            egui::FontId::proportional(11.5),
-            tokens.status_warn,
-        );
+        painter.galley(banner.left_top() + egui::vec2(8.0, pad_y), galley, tokens.status_warn);
     }
 }
 

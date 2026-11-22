@@ -120,28 +120,39 @@ impl CombosState {
                     ui.label("Preparing defect combinations...");
                 }
             }
+            ui.add_space(4.0);
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt("combos_algebra_pending_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    self.draw_algebra_panel(ui, item, tokens);
+                });
             return None;
         };
 
         self.draw_bounds_banner(ui, item, &table, tokens);
         ui.separator();
 
-        if table.charge_groups.is_empty() && table.refused.is_empty() {
-            ui.label(format!(
-                "No combinations found for {} within max separation {:.2} a.",
-                self.mode_kind.label(),
-                self.max_sep_scale
-            ));
-            if self.mode_kind == ComboModeKind::DisclinationPairs {
-                ui.small("Lattices without rotation centres have no disclinations; try Dislocation pairs.");
-            }
-            return None;
-        }
-
         egui::ScrollArea::vertical()
             .id_salt("combos_table_scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                self.draw_algebra_panel(ui, item, tokens);
+                ui.add_space(4.0);
+                ui.separator();
+
+                if table.charge_groups.is_empty() && table.refused.is_empty() {
+                    ui.label(format!(
+                        "No combinations found for {} within max separation {:.2} a.",
+                        self.mode_kind.label(),
+                        self.max_sep_scale
+                    ));
+                    if self.mode_kind == ComboModeKind::DisclinationPairs {
+                        ui.small("Lattices without rotation centres have no disclinations; try Dislocation pairs.");
+                    }
+                    return;
+                }
                 let single_indices: Vec<usize> = table
                     .charge_groups
                     .iter()
@@ -195,6 +206,9 @@ impl CombosState {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.strong(&r.label);
                                     ui.small(format!("(d = {:.3})", r.separation));
+                                    if let Some(alg) = &r.algebraic_charge {
+                                        ui.small(format!("Algebraic total charge: {alg}"));
+                                    }
                                     ui.colored_label(tokens.status_warn, &r.reason);
                                 });
                             }
@@ -227,12 +241,13 @@ impl CombosState {
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.strong(format!(
-                    "{} · {}  |  {}  |  max sep = {:.2} a ({:.3})  |  core radius = {}  |  grid = {}×{}",
+                    "{} · {}  |  {}  |  max sep = {:.2} a ({:.3})  |  |b| <= {:.1} b_min  |  core radius = {}  |  grid = {}×{}",
                     item.display_with_orig(),
                     group_with_orbifold(&table.group),
                     self.mode_kind.label(),
                     max_sep_a,
                     table.max_sep,
+                    table.bmax,
                     table.radius,
                     table.grid,
                     table.grid,
@@ -249,8 +264,8 @@ impl CombosState {
                 ui.colored_label(
                     tokens.text_secondary,
                     egui::RichText::new(format!(
-                        "[COMPUTATIONAL EVIDENCE] Search bounded to symmetry-inequivalent placements with separation <= {:.2} a, core radius {}, and {}×{} search grid.",
-                        max_sep_a, table.radius, table.grid, table.grid
+                        "[COMPUTATIONAL EVIDENCE] Bounds: sep <= {:.2} a, |b| <= {:.1} b_min, core radius {}, {}×{} search grid. {} Core grouping reflects the built core of each candidate's working build order.",
+                        max_sep_a, table.bmax, table.radius, table.grid, table.grid, table.symmetry_note
                     ))
                     .small(),
                 );
@@ -472,7 +487,7 @@ impl CombosState {
         ui.add_space(8.0);
         ui.separator();
         ui.small(
-            "[COMPUTATIONAL EVIDENCE] Placements are enumerated modulo proper wallpaper symmetry G+ up to the chosen separation bound, grouped by total topological charge and degree-labelled core graph isomorphism.",
+            "[COMPUTATIONAL EVIDENCE] Placements are reduced modulo proper symmetry G+ (with co-rotated dislocation offsets) within the shown bounds; core grouping reflects the built core of each candidate's working build order.",
         );
         open_specs
     }

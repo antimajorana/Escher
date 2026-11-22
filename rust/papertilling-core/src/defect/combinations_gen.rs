@@ -1,4 +1,13 @@
-//! Exact `G_+` orbit enumeration and deduplication for defect pairs and triples.
+//! Enumeration of defect pairs and triples, one representative per proper symmetry (`G_+`) orbit.
+//!
+//! Every mode applies exact `G_+` symmetry reduction (plus slot-swap for identical species):
+//! - Disclination pairs: exact `G_+` + swap reduction (every core sits on an exact rotation centre).
+//! - Dislocation pairs: exact proper point-group `P_+` + swap reduction; each kept representative sits at
+//!   `core_a = ta.at` (generic point `A * (0.371, 0.413)`), while dropped `g in G_+` rotated copies sit at
+//!   the co-rotated anchor `g(core_a)`, so every merge is an exact symmetry of the lattice.
+//! - Mixed pairs: exact `Stab^+(p_a)` reduction around each disclination centre `p_a`; dropped `g` copies
+//!   carry the co-rotated dislocation core nudge `g(nudge)`.
+//! - Triples: exact `G_+ x S_3` reduction with the same co-rotated generic offsets for dislocation cores.
 
 use std::collections::{HashMap, HashSet};
 
@@ -93,11 +102,6 @@ fn centre_points_near(
     out
 }
 
-/// Proper point-group integer matrices `M_f` with `det(M_f) = +1`.
-fn p_plus_mats(grp: &LatticeGroup) -> Vec<[[i32; 2]; 2]> {
-    grp.opsf.iter().filter(|op| imat2_det(op.mf) == 1).map(|op| op.mf).collect()
-}
-
 /// Proper point-group matrices `M_f` of elements in `G_+` stabilising `point` modulo lattice translations.
 fn stabiliser_mats(grp: &LatticeGroup, point: [f64; 2]) -> Vec<[[i32; 2]; 2]> {
     grp.opsf
@@ -181,28 +185,45 @@ fn gen_disclination_pairs(cat: &DefectCatalogue, max_sep: f64) -> Vec<Combinatio
 
 type DislocPairKey = ([i32; 2], [i32; 2], [i32; 2]);
 
+/// Proper point-group matrices `M_f in P_+` (`det(M_f) = +1`).
+fn proper_point_mats(grp: &LatticeGroup) -> Vec<[[i32; 2]; 2]> {
+    grp.opsf.iter().filter(|op| imat2_det(op.mf) == 1).map(|op| op.mf).collect()
+}
+
+/// Exact `P_+` (+ swap when `allow_swap`) canonical key for a dislocation pair `(ba, bb, df)`.
+///
+/// Each kept representative sits at `core_a = ta.at`; its dropped `g in G_+` rotated copies sit at the
+/// co-rotated anchor `g(core_a)`, so every merge is an exact proper symmetry of the lattice.
 fn canon_disloc_pair(
     p_plus: &[[[i32; 2]; 2]],
     ba: [i32; 2],
     bb: [i32; 2],
     df: [i32; 2],
+    allow_swap: bool,
 ) -> DislocPairKey {
     let mut best: Option<DislocPairKey> = None;
     for &mf in p_plus {
         let k0 = (imat2_vec(mf, ba), imat2_vec(mf, bb), imat2_vec(mf, df));
-        let k1 = (imat2_vec(mf, bb), imat2_vec(mf, ba), imat2_vec(mf, [-df[0], -df[1]]));
-        for k in [k0, k1] {
-            if best.is_none_or(|b| k < b) {
-                best = Some(k);
-            }
+        let k = if allow_swap {
+            let k1 = (imat2_vec(mf, bb), imat2_vec(mf, ba), imat2_vec(mf, [-df[0], -df[1]]));
+            k0.min(k1)
+        } else {
+            k0
+        };
+        if best.is_none_or(|b| k < b) {
+            best = Some(k);
         }
     }
     best.expect("P_+ is non-empty")
 }
 
+/// Enumerate dislocation pairs modulo proper point-group rotations `P_+` and swap (`i == j`).
+///
+/// Because `P_+` acts transitively (and freely) on `ta.members`, fixing `b_a = ta.b` at `core_a = ta.at`
+/// hits every `P_+`-orbit; dropped rotated copies sit at the co-rotated anchor `g(core_a)`.
 fn gen_dislocation_pairs(cat: &DefectCatalogue, max_sep: f64) -> Vec<CombinationCandidate> {
-    let p_plus = p_plus_mats(&cat.grp);
     let disps = lattice_displacements(&cat.grp, max_sep);
+    let p_plus = proper_point_mats(&cat.grp);
     let mut out = Vec::new();
     let mut seen: HashSet<DislocPairKey> = HashSet::new();
     for i in 0..cat.dislocations.len() {
@@ -216,7 +237,7 @@ fn gen_dislocation_pairs(cat: &DefectCatalogue, max_sep: f64) -> Vec<Combination
             for &bb_f in &tb.members {
                 let bb = mat2_vec(cat.grp.a, [bb_f[0] as f64, bb_f[1] as f64]);
                 for &(df, d, sep) in &disps {
-                    let key = canon_disloc_pair(&p_plus, ba_f, bb_f, df);
+                    let key = canon_disloc_pair(&p_plus, ba_f, bb_f, df, i == j);
                     if !seen.insert(key) {
                         continue;
                     }
@@ -244,6 +265,10 @@ fn gen_dislocation_pairs(cat: &DefectCatalogue, max_sep: f64) -> Vec<Combination
     out
 }
 
+/// Enumerate `(disclination, dislocation)` pairs modulo the proper site stabiliser `Stab^+(p_a)`.
+///
+/// Each kept representative places the dislocation core at `p_a + d + nudge`; its dropped `g in Stab^+(p_a)`
+/// rotated copies sit at `p_a + g(d) + g(nudge)` (co-rotated nudge), so every merge is an exact `G_+` symmetry.
 fn gen_mixed_pairs(cat: &DefectCatalogue, max_sep: f64) -> Vec<CombinationCandidate> {
     let disps = lattice_displacements(&cat.grp, max_sep);
     let nudge = mat2_vec(cat.grp.a, MIXED_CORE_NUDGE_FRAC);
@@ -312,7 +337,8 @@ fn resolve_item<'a>(
 
 type TripleKey = [(usize, [i64; 2], [i64; 2]); 3];
 
-/// Exact `G_+ x S_3` canonical key for 3 defects `(tag, pos, b_vec)` when at least one is a disclination.
+/// Exact `G_+ x S_3` canonical key for 3 defects `(tag, pos, b_vec)` (with co-rotated offsets for dropped
+/// `G_+` copies whenever dislocations are present).
 fn canon_triple_general(
     grp: &LatticeGroup,
     tags: [usize; 3],
@@ -458,6 +484,27 @@ fn gen_triple(
         }
     }
     Ok(out)
+}
+
+/// Plain-language description of the exact `G_+` symmetry reduction applied for `mode`.
+pub(crate) fn symmetry_note_for_mode(mode: &CombinationMode) -> String {
+    match mode {
+        CombinationMode::DisclinationPairs => {
+            "Exact G+ reduction (+ swap for identical species); all cores sit on rotation centres.".to_string()
+        }
+        CombinationMode::DislocationPairs => {
+            "Exact P+ rotation reduction (+ swap for identical classes); each kept pair starts at core_a = ta.at and dropped G+ copies sit at the co-rotated anchor g(core_a).".to_string()
+        }
+        CombinationMode::MixedPairs => {
+            "Exact Stab+(p_a) reduction around each disclination centre; dropped G+ copies carry the co-rotated dislocation core offset g(nudge).".to_string()
+        }
+        CombinationMode::Triple { .. } => {
+            "Exact G+ x S_3 reduction; dropped G+ copies carry co-rotated dislocation core offsets.".to_string()
+        }
+        CombinationMode::Custom { .. } => {
+            "Explicit caller-supplied defect placements (no automatic symmetry reduction).".to_string()
+        }
+    }
 }
 
 /// Generate all symmetry-inequivalent defect combination candidates for `mode` within `max_sep`.

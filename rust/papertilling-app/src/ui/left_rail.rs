@@ -70,6 +70,7 @@ impl PapertillingApp {
                             &tokens,
                             self.advanced,
                         );
+                        self.drain_combine_fusion_cavity();
                     }
                     NavTab::Atlas => {
                         let offered = self.atlas_offered_tabs();

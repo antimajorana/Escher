@@ -183,7 +183,8 @@ impl SingleDefectCache {
     }
 
     /// Match an extracted core graph `h_cfg` (with precomputed `wl_hash`) against the single defect(s)
-    /// carrying `charge`, using canonical orbit representatives (`b_rep` and `centre_class_of`) for cache reuse.
+    /// carrying `charge`: for a dislocation its own Burgers vector `charge.b`, for a disclination the class
+    /// of its centre (`centre_class_of`).
     /// Returns `Ok(None)` if `cancel` is set before a new scan/build is started.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn match_core_against_single(
@@ -210,7 +211,9 @@ impl SingleDefectCache {
         let mut gallery = Vec::new();
 
         if charge.kind == "dislocation" {
-            let b = charge.b_rep.or(charge.b).unwrap_or([0.0, 0.0]);
+            // The crystal's own Burgers vector, as `equivalent_single_cached` uses: the scan positions are not
+            // rotation-symmetric, so scanning the class representative instead could give another verdict.
+            let b = charge.b.or(charge.b_rep).unwrap_or([0.0, 0.0]);
             let key = DislocKey { cell: cell.clone(), b: [key6(b[0]), key6(b[1])], radius, grid, draw: draw_gallery };
             let found = if let Some(hit) = touch(&mut self.disloc, &key) {
                 self.hits += 1;
@@ -307,22 +310,16 @@ pub fn equivalent_single_cached(
     let lat_info = LatticeCoreInfo::new(cell);
     let charge = classify_crystal_charge(group, cell, frame, crystal)?;
     let has_half_wall = specs.iter().any(|s| matches!(s, DefectSpec::HalfWall { .. }));
-    let need_core = matches!(charge.kind.as_str(), "dislocation" | "vacuum")
-        || (charge.kind == "disclination" && charge.single.is_some());
 
     let mut config_core = None;
-    let h_cfg_opt: Option<UnGraph<u16, ()>> = if need_core {
-        let rim = resolve_patch_rim(crystal, &lat_info, specs);
-        match core_graph_with_rim(crystal, &rim, &lat_info, radius) {
-            Ok(h) => {
-                config_core = config_core_entry(crystal, &rim, &lat_info, radius, draw_gallery);
-                Some(h)
-            }
-            Err(_) if has_half_wall => None,
-            Err(e) => return Err(e),
+    let rim = resolve_patch_rim(crystal, &lat_info, specs);
+    let h_cfg_opt: Option<UnGraph<u16, ()>> = match core_graph_with_rim(crystal, &rim, &lat_info, radius) {
+        Ok(h) => {
+            config_core = config_core_entry(crystal, &rim, &lat_info, radius, draw_gallery);
+            Some(h)
         }
-    } else {
-        None
+        Err(_) if has_half_wall => None,
+        Err(e) => return Err(e),
     };
 
     let (mut candidates, mut matches, mut scan, mut gallery) = (Vec::new(), Vec::new(), None, Vec::new());
@@ -389,6 +386,12 @@ pub fn equivalent_single_cached(
             "no match among {} distinct cores scanned (grid={}, {} Volterra builds, completions capped {} times, {} skipped at the rim); a larger grid may find more cores",
             sc.distinct, sc.grid, sc.builds, sc.capped, sc.skipped_rim
         )
+    } else if charge.single.is_none() && charge.kind != "vacuum" {
+        if charge.kind == "disclination" && charge.angle.abs() > 180.0 + 1e-6 {
+            "no single defect carries this charge (|Frank| > 180 deg)".to_string()
+        } else {
+            "no single defect carries this charge".to_string()
+        }
     } else {
         "not equivalent to the single defect".to_string()
     };

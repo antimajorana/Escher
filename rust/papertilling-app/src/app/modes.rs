@@ -255,6 +255,13 @@ impl PapertillingApp {
         self.activate_nav_tab(target_tab, changed);
     }
 
+    pub(crate) fn drain_combine_fusion_cavity(&mut self) {
+        if let Some(req) = self.combine.take_open_cavity_in_fusion() {
+            self.workbench.load_fusion_cavity(req);
+            self.select_defects_view(DefectsView::FusionSteps);
+        }
+    }
+
     pub(crate) fn switch_tab(&mut self, tab: NavTab) {
         match tab {
             NavTab::Gallery => self.select_lattices_view(LatticesView::Plane2D),

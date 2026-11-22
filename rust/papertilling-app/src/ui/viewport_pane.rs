@@ -71,6 +71,7 @@ impl PapertillingApp {
                     &mut self.viewport_split_ratio,
                     &tokens,
                 );
+                self.drain_combine_fusion_cavity();
             }
             NavTab::Atlas => {
                 self.atlas.show_central(

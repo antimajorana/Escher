@@ -5,6 +5,7 @@ use crate::defect::core_graph::{
     LatticeCoreInfo, PerfectLattice, SiteKey, cross2, dot2, mat2_vec, norm2, rot_mat, same_iso,
     sub2,
 };
+use crate::defect::equivalence::fmt_vec2_round4;
 use crate::types::{BuiltCrystal, DirectedBondData, Isometry2};
 
 pub(crate) fn ray_distance(y: [f64; 2], p: [f64; 2], u: [f64; 2]) -> f64 {
@@ -161,12 +162,18 @@ impl<'a> ConeBuilder<'a> {
 
     pub(super) fn kill(&mut self, i: usize) -> Result<(), String> {
         if self.cone_sites.contains(&i) {
-            return Err("a later cut would remove an existing site-centred disclination core".to_string());
+            return Err(
+                "a later cut would remove an existing site-centred disclination core; try another cut direction"
+                    .to_string(),
+            );
         }
         let nbrs: Vec<usize> = self.nb[i].keys().copied().collect();
         for v in nbrs {
             if self.cone_sites.contains(&v) {
-                return Err("a later cut removes a neighbour of a site-centred disclination core".to_string());
+                return Err(
+                    "a later cut removes a neighbour of a site-centred disclination core; try another cut direction"
+                        .to_string(),
+                );
             }
             self.nb[v].remove(&i);
         }
@@ -177,7 +184,10 @@ impl<'a> ConeBuilder<'a> {
 
     pub(super) fn new_copy(&mut self, i: usize) -> Result<usize, String> {
         if self.cone_sites.contains(&i) {
-            return Err("a later cut duplicates an existing site-centred disclination core".to_string());
+            return Err(
+                "a later cut duplicates an existing site-centred disclination core; try another cut direction"
+                    .to_string(),
+            );
         }
         let key = self.label[i].0;
         let layer = self.layers.get(&key).copied().unwrap_or(0);
@@ -191,10 +201,9 @@ impl<'a> ConeBuilder<'a> {
     }
 
     pub(super) fn base_site<F: Fn([f64; 2]) -> bool>(&self, p: [f64; 2], inside: &F) -> Result<usize, String> {
-        let inside_eff = |y: [f64; 2]| inside(y) || self.pad.is_some_and(|(q, rho)| norm2(sub2(y, q)) <= rho);
         let mut best: Option<(i64, usize, usize)> = None;
         for i in 0..self.label.len() {
-            if self.alive[i] && !self.cone_sites.contains(&i) && inside_eff(self.ref_pos[i]) {
+            if self.alive[i] && !self.cone_sites.contains(&i) && inside(self.ref_pos[i]) {
                 let d7 = (norm2(sub2(self.ref_pos[i], p)) * 1e7).round() as i64;
                 let k = (d7, self.label[i].1, i);
                 if best.is_none_or(|b| k < b) {
@@ -204,7 +213,10 @@ impl<'a> ConeBuilder<'a> {
         }
         match best {
             Some((d7, _, idx)) if (d7 as f64) * 1e-7 <= self.lmax + self.scale => Ok(idx),
-            _ => Err(format!("no crystal site near {p:?}: point is outside patch or inside a removed region")),
+            _ => Err(format!(
+                "no crystal site near {}: point is outside patch or inside a previously removed wedge/strip",
+                fmt_vec2_round4(p)
+            )),
         }
     }
 
@@ -221,16 +233,18 @@ impl<'a> ConeBuilder<'a> {
             let du = d_map[&u];
             for (&v, e) in &self.nb[u] {
                 let dv = e.seam.map_or(du, |g| du.compose(&g.inverse()));
-                let yv = dv.apply(self.ref_pos[v]);
-                if self.cone_sites.contains(&v) && !inside_eff(yv) {
-                    continue;
-                }
                 if let Some(&existing) = d_map.get(&v) {
+                    // Two walks reaching the same site must carry the same isometry. A disagreement means the
+                    // region wraps round an earlier core, where cut-and-reglue is not defined: always refuse.
                     if !same_iso(&dv, &existing, 1e-6) {
-                        return Err("developed region encloses an earlier defect core (two walks disagree)".to_string());
+                        return Err(
+                            "developed region encloses an earlier defect core (two walks disagree); use another cut direction or defect order"
+                                .to_string(),
+                        );
                     }
                     continue;
                 }
+                let yv = dv.apply(self.ref_pos[v]);
                 if inside_eff(yv) {
                     d_map.insert(v, dv);
                     y_map.insert(v, yv);
@@ -244,7 +258,10 @@ impl<'a> ConeBuilder<'a> {
         for (&i, &y) in &y_map {
             let k = self.lat.locate(y).ok_or("developed position fell off the lattice")?;
             if where_map.insert(k, i).is_some() {
-                return Err("developed region overlaps itself round an earlier disclination".to_string());
+                return Err(
+                    "developed region overlaps itself round an earlier disclination; try another cut direction"
+                        .to_string(),
+                );
             }
         }
         Ok((d_map, y_map, where_map))
@@ -276,7 +293,10 @@ impl<'a> ConeBuilder<'a> {
         if (self.cone_sites.contains(&u) && Some(u) != allow_cone)
             || (self.cone_sites.contains(&v) && Some(v) != allow_cone)
         {
-            return Err("a later cut would overwrite bonds of an earlier site-centred disclination".to_string());
+            return Err(
+                "a later cut would overwrite bonds of an earlier site-centred disclination; try another cut direction"
+                    .to_string(),
+            );
         }
         let du = d_map[&u];
         let g = d_map[&v].inverse().compose(&t_iso.compose(&du));
@@ -296,7 +316,10 @@ impl<'a> ConeBuilder<'a> {
     ) -> Result<(), String> {
         for (&(u, v), &(_, j, _)) in rule {
             if (self.cone_sites.contains(&u) || self.cone_sites.contains(&v)) && j != 0 {
-                return Err("seam crosses a bond incident on an earlier site-centred disclination".to_string());
+                return Err(
+                    "seam crosses a bond incident on an earlier site-centred disclination; try another cut direction"
+                        .to_string(),
+                );
             }
         }
         let keptset: HashSet<usize> = kept.iter().copied().filter(|u| !self.cone_sites.contains(u)).collect();
@@ -315,14 +338,21 @@ impl<'a> ConeBuilder<'a> {
             }
             if self.cone_sites.contains(&u) || self.cone_sites.contains(&v) {
                 if !self.nb[u].contains_key(&v) {
-                    return Err("cut runs into a missing bond of an earlier cone site".to_string());
+                    return Err(
+                        "cut runs into a missing bond of an earlier cone site; try another cut direction".to_string(),
+                    );
                 }
                 continue;
             }
             if j == 0 && !fresh.contains(&u) && !fresh.contains(&v) {
-                let e = self.nb[u].get(&v).ok_or("cut runs into the core of an earlier defect (missing bond)")?;
+                let e = self.nb[u].get(&v).ok_or(
+                    "cut runs into the core of an earlier defect (missing/altered bond); try another cut direction",
+                )?;
                 if norm2(sub2(mat2_vec(d_map[&u].m, e.vec), vec)) > 1e-5 {
-                    return Err("cut runs into the core of an earlier defect (altered bond)".to_string());
+                    return Err(
+                        "cut runs into the core of an earlier defect (missing/altered bond); try another cut direction"
+                            .to_string(),
+                    );
                 }
                 continue;
             }

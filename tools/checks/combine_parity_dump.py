@@ -198,6 +198,12 @@ CASES = [
     ("square two dislocations same end", SQ, lambda lat: [disl((1, 0), (0.371, 0.413)), disl((0, 1), (0.371, 0.413))], 1),
     ("square non-lattice b refused", SQ, lambda lat: [disl((0.5, 0), (0.371, 0.413))], 1),
     ("square zero b refused", SQ, lambda lat: [disl((0, 0), (0.371, 0.413))], 1),
+    # fallback order, DFS backtracking, budget exhaustion, and n > 4 greedy-only refusal parity
+    ("square adjacent triple refused", SQ, lambda lat: [disc(-90, (0, 0)), disc(-90, (1, 0)), disc(90, (0.5, 0.5))], 1),
+    ("square opposite triple dfs", SQ, lambda lat: [disc(-90, (1, 1)), disc(90, (0.5, 0.5)), disc(-90, (0, 0))], 1),
+    ("square opposite triple budget refused", SQ, lambda lat: [disc(90, (0.5, 0.5)), disc(-90, (0, 0)), disc(-90, (1, 1))], 1),
+    ("square five defects greedy refused", SQ, lambda lat: [disc(90, (0.5, 0.5)), disc(-90, (0, 0)), disc(-90, (1, 0)),
+                                                            disc(-90, (0, 1)), disc(-90, (1, 1))], 1),
 ]
 
 SNAP_LATTICES = [SQ, HC, SS, ("named", "kagome"), P4G, P3, P31M, ("points", "p6", 0), ("points", "p2", 0),

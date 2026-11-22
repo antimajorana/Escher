@@ -193,9 +193,101 @@ pub(super) fn convex_partition(poly: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
     }
 }
 
-fn centroid(poly: &[[f64; 2]]) -> [f64; 2] {
-    let n = poly.len().max(1) as f64;
-    [poly.iter().map(|p| p[0]).sum::<f64>() / n, poly.iter().map(|p| p[1]).sum::<f64>() / n]
+fn point_in_poly_f64(pt: [f64; 2], poly: &[[f64; 2]]) -> bool {
+    if poly.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = poly.len() - 1;
+    for i in 0..poly.len() {
+        let (xi, yi) = (poly[i][0], poly[i][1]);
+        let (xj, yj) = (poly[j][0], poly[j][1]);
+        if (yi > pt[1]) != (yj > pt[1]) {
+            let x_int = (xj - xi) * (pt[1] - yi) / (yj - yi) + xi;
+            if pt[0] < x_int {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+fn dist_to_seg_f64(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dy * dy;
+    if l2 < 1e-18 {
+        return (p[0] - a[0]).hypot(p[1] - a[1]);
+    }
+    let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0);
+    (p[0] - (a[0] + t * dx)).hypot(p[1] - (a[1] + t * dy))
+}
+
+/// Interior label anchor maximizing clearance to face boundary segments and vertex discs.
+fn face_label_pos(poly: &[[f64; 2]], m: &PlanarMap, scale: f64) -> [f64; 2] {
+    let n = poly.len();
+    if n == 0 {
+        return [0.0, 0.0];
+    }
+    if n < 3 {
+        return [poly.iter().map(|p| p[0]).sum::<f64>() / n as f64, poly.iter().map(|p| p[1]).sum::<f64>() / n as f64];
+    }
+    let discs: Vec<([f64; 2], f64)> = m
+        .verts
+        .iter()
+        .filter(|v| v.kind != VertexKind::Removed)
+        .map(|v| {
+            let r = if v.kind == VertexKind::Complete { 0.17 * scale } else { 0.07 * scale };
+            (v.pos, r)
+        })
+        .collect();
+    let clearance = |pt: [f64; 2]| -> f64 {
+        let edge_d = (0..n)
+            .map(|i| dist_to_seg_f64(pt, poly[i], poly[(i + 1) % n]))
+            .fold(f64::INFINITY, f64::min);
+        let vert_d = discs
+            .iter()
+            .map(|&(vp, r)| (pt[0] - vp[0]).hypot(pt[1] - vp[1]) - r)
+            .fold(f64::INFINITY, f64::min);
+        edge_d.min(vert_d)
+    };
+
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for &p in poly {
+        x0 = x0.min(p[0]);
+        y0 = y0.min(p[1]);
+        x1 = x1.max(p[0]);
+        y1 = y1.max(p[1]);
+    }
+    let mut best_pt = triangulate(poly)
+        .first()
+        .map_or([0.5 * (x0 + x1), 0.5 * (y0 + y1)], |t| [(t[0][0] + t[1][0] + t[2][0]) / 3.0, (t[0][1] + t[1][1] + t[2][1]) / 3.0]);
+    let mut best_d = if point_in_poly_f64(best_pt, poly) { clearance(best_pt) } else { f64::NEG_INFINITY };
+
+    let grid = 20usize;
+    let (mut hx, mut hy) = (0.5 * (x1 - x0), 0.5 * (y1 - y0));
+    let mut center = [0.5 * (x0 + x1), 0.5 * (y0 + y1)];
+    for round in 0..3 {
+        let steps = if round == 0 { grid } else { 8 };
+        for ix in 0..=steps {
+            let fx = (ix as f64 / steps as f64) * 2.0 - 1.0;
+            for iy in 0..=steps {
+                let fy = (iy as f64 / steps as f64) * 2.0 - 1.0;
+                let cand = [center[0] + fx * hx, center[1] + fy * hy];
+                if point_in_poly_f64(cand, poly) {
+                    let d = clearance(cand);
+                    if d > best_d {
+                        best_d = d;
+                        best_pt = cand;
+                    }
+                }
+            }
+        }
+        center = best_pt;
+        hx *= 0.25;
+        hy *= 0.25;
+    }
+    best_pt
 }
 
 fn text(pos: [f64; 2], s: String, color: [u8; 4], size_px: f32) -> TextPrim {
@@ -208,7 +300,7 @@ fn disc(center: [f64; 2], radius: f64, fill: [u8; 4], stroke: ([u8; 4], f32)) ->
 
 /// Position of an edge's number label: outward along a curved edge's bend so it never overlaps a 2-gon face
 /// label inside a lens, or shifted slightly along the normal of a straight edge.
-fn edge_label_pos(m: &PlanarMap, e: usize) -> [f64; 2] {
+fn edge_label_pos(m: &PlanarMap, e: usize, scale: f64) -> [f64; 2] {
     let at = label_point(m, e);
     if m.is_loop(e) {
         return at;
@@ -220,17 +312,46 @@ fn edge_label_pos(m: &PlanarMap, e: usize) -> [f64; 2] {
         let (dx, dy) = (ctrl[0] - mid[0], ctrl[1] - mid[1]);
         let len = dx.hypot(dy);
         if len > 1e-6 {
-            return [at[0] + 0.15 * dx / len, at[1] + 0.15 * dy / len];
+            return [at[0] + 0.15 * scale * dx / len, at[1] + 0.15 * scale * dy / len];
         }
     }
     let len = (b[0] - a[0]).hypot(b[1] - a[1]).max(1e-9);
-    [at[0] - 0.13 * (b[1] - a[1]) / len, at[1] + 0.13 * (b[0] - a[0]) / len]
+    [at[0] - 0.13 * scale * (b[1] - a[1]) / len, at[1] + 0.13 * scale * (b[0] - a[0]) / len]
+}
+
+#[derive(Clone, Copy)]
+struct MapStyle {
+    regular_sides: Option<usize>,
+    regular_valence: Option<usize>,
+    scale: f64,
+}
+
+const WANG_STYLE: MapStyle = MapStyle { regular_sides: Some(4), regular_valence: Some(4), scale: 1.0 };
+
+fn median_edge_scale(m: &PlanarMap) -> f64 {
+    let mut lens: Vec<f64> = m
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|&(i, e)| e.alive && !m.is_loop(i))
+        .map(|(_, e)| {
+            let (a, b) = (m.verts[e.ends[0]].pos, m.verts[e.ends[1]].pos);
+            (b[0] - a[0]).hypot(b[1] - a[1])
+        })
+        .filter(|&d| d.is_finite() && d > 1e-6)
+        .collect();
+    if lens.is_empty() {
+        return 1.0;
+    }
+    lens.sort_by(f64::total_cmp);
+    lens[lens.len() / 2].clamp(0.45, 2.5)
 }
 
 fn build_map_scene(
     m: &PlanarMap,
     highlight: &[u32],
     title: String,
+    style: MapStyle,
     numbers: bool,
     names: bool,
     show_gate_labels: bool,
@@ -257,9 +378,9 @@ fn build_map_scene(
             for poly in convex_partition(&outline) {
                 p.polygons.push(PolyPrim { points: poly.iter().map(|&q| f32p(q)).collect(), fill: tint, stroke: None });
             }
-            centroid(&outline)
+            face_label_pos(&outline, m, style.scale)
         };
-        if sides != 4 {
+        if style.regular_sides.is_none_or(|reg| sides != reg) {
             p.labels.push(text(centre, sides.to_string(), INK_RGBA, 15.0));
         }
     }
@@ -276,20 +397,32 @@ fn build_map_scene(
         }
         if numbers {
             // Always use crisp dark charcoal ink so highlighted edge numbers stay legible over tinted faces.
-            p.labels.push(text(edge_label_pos(m, e), edge.label.to_string(), INK_RGBA, 13.0));
+            p.labels.push(text(edge_label_pos(m, e, style.scale), edge.label.to_string(), INK_RGBA, 13.0));
         }
     }
     for v in m.verts.iter().filter(|v| v.kind != VertexKind::Removed) {
-        match (v.kind, v.rot.len()) {
-            (VertexKind::Complete, 4) => p.circles.push(disc(v.pos, 0.07, EDGE_RGBA, (WHITE, 1.0))),
-            (VertexKind::Complete, k) => {
-                p.circles.push(disc(v.pos, 0.13, if k < 4 { UNDER_RGBA } else { OVER_RGBA }, (WHITE, 1.0)));
+        match (v.kind, style.regular_valence, v.rot.len()) {
+            (VertexKind::Complete, Some(reg), k) if k == reg => {
+                p.circles.push(disc(v.pos, 0.07 * style.scale, EDGE_RGBA, (WHITE, 1.0)));
+            }
+            (VertexKind::Complete, Some(reg), k) => {
+                let fill = if k < reg { UNDER_RGBA } else { OVER_RGBA };
+                p.circles.push(disc(v.pos, 0.13 * style.scale, fill, (WHITE, 1.0)));
                 p.labels.push(text(v.pos, k.to_string(), WHITE, 12.0));
             }
-            _ => p.circles.push(disc(v.pos, 0.045, WHITE, (EDGE_RGBA, 1.2))),
+            (VertexKind::Complete, None, k) => {
+                p.circles.push(disc(v.pos, 0.11 * style.scale, EDGE_RGBA, (WHITE, 1.0)));
+                p.labels.push(text(v.pos, k.to_string(), WHITE, 11.0));
+            }
+            _ => p.circles.push(disc(v.pos, 0.045 * style.scale, WHITE, (EDGE_RGBA, 1.2))),
         }
         if names && v.kind == VertexKind::Complete {
-            p.labels.push(text([v.pos[0] - 0.2, v.pos[1] + 0.2], v.name.clone(), INK_RGBA, 13.0));
+            p.labels.push(text(
+                [v.pos[0] - 0.2 * style.scale, v.pos[1] + 0.2 * style.scale],
+                v.name.clone(),
+                INK_RGBA,
+                13.0,
+            ));
         }
     }
     p.site_count = c.vertices;
@@ -300,8 +433,25 @@ fn build_map_scene(
     });
     let pts = p.lines.iter().flat_map(|l| [l.a, l.b]).chain(p.labels.iter().map(|t| t.pos)).chain(rims);
     let (lo, hi) = compute_bbox(pts);
-    p.bbox = ([lo[0] - 0.3, lo[1] - 0.3], [hi[0] + 0.3, hi[1] + 0.3]);
+    let pad = (0.3 * style.scale) as f32;
+    p.bbox = ([lo[0] - pad, lo[1] - pad], [hi[0] + pad, hi[1] + pad]);
     Scene2D::VectorScene { primitives: p }
+}
+
+/// Arbitrary planar cavity map scene (for live Place & fuse cavities on any 2D lattice).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn map_scene(
+    m: &PlanarMap,
+    highlight: &[u32],
+    title: String,
+    regular_sides: Option<usize>,
+    regular_valence: Option<usize>,
+    numbers: bool,
+    names: bool,
+    show_gate_labels: bool,
+) -> Scene2D {
+    let style = MapStyle { regular_sides, regular_valence, scale: median_edge_scale(m) };
+    build_map_scene(m, highlight, title, style, numbers, names, show_gate_labels)
 }
 
 /// The scene of one step along a route.
@@ -319,7 +469,7 @@ pub(super) fn step_scene(
         String::new()
     };
     let title = format!("Step {index} of {}: {}{op}", total.saturating_sub(1), step.title);
-    build_map_scene(&step.map, &step.highlight, title, numbers, names, show_gate_labels)
+    build_map_scene(&step.map, &step.highlight, title, WANG_STYLE, numbers, names, show_gate_labels)
 }
 
 /// The scene of one enumerated core connection for the fixed surrounding cavity.
@@ -331,7 +481,7 @@ pub(super) fn core_scene(
     show_gate_labels: bool,
 ) -> Scene2D {
     let title = format!("Core {} of {total_cores}: {}", core.id + 1, core.title);
-    build_map_scene(&core.map, &[11, 12], title, numbers, names, show_gate_labels)
+    build_map_scene(&core.map, &[11, 12], title, WANG_STYLE, numbers, names, show_gate_labels)
 }
 
 /// The unfused Fig. 8(a) start lattice shown for comparison inside the Core connections sub-view.
@@ -342,5 +492,5 @@ pub(super) fn start_comparison_scene(
     show_gate_labels: bool,
 ) -> Scene2D {
     let title = String::from("Start lattice (Fig. 8(a)): unfused core with 2-valent vertex s");
-    build_map_scene(&start.map, &start.highlight, title, numbers, names, show_gate_labels)
+    build_map_scene(&start.map, &start.highlight, title, WANG_STYLE, numbers, names, show_gate_labels)
 }

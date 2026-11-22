@@ -28,6 +28,27 @@ pub(crate) fn point_in_polygon(pt: [f32; 2], poly: &[[f32; 2]]) -> bool {
     inside
 }
 
+fn is_convex_screen_poly(pts: &[egui::Pos2]) -> bool {
+    let n = pts.len();
+    if n < 3 {
+        return false;
+    }
+    let (mut has_pos, mut has_neg) = (false, false);
+    for i in 0..n {
+        let (a, b, c) = (pts[i], pts[(i + 1) % n], pts[(i + 2) % n]);
+        let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        if cross > 1e-3 {
+            has_pos = true;
+        } else if cross < -1e-3 {
+            has_neg = true;
+        }
+        if has_pos && has_neg {
+            return false;
+        }
+    }
+    true
+}
+
 /// Label ink on the 2D canvas. In `Studio`, the ring numbers of a `CrystalPatch` take near-black or white ink,
 /// whichever has the higher WCAG contrast against every face under the label composited on the canvas in draw
 /// order (the compiled dark ink reached only about 2:1 there). Every other label keeps its compiled colour over a
@@ -82,17 +103,25 @@ impl Canvas2D {
                 let stroke = poly
                     .stroke
                     .map_or(egui::Stroke::NONE, |(c, w)| egui::Stroke::new(w, tokens.remap_scene_ink(c)));
-                let mut c_pos = egui::Pos2::ZERO;
-                for &pt in &pts {
-                    c_pos.x += pt.x / (pts.len() as f32);
-                    c_pos.y += pt.y / (pts.len() as f32);
-                }
-                for m in 0..pts.len() {
+                if is_convex_screen_poly(&pts) {
                     painter.add(egui::Shape::convex_polygon(
-                        vec![c_pos, pts[m], pts[(m + 1) % pts.len()]],
+                        pts.clone(),
                         fill,
                         egui::Stroke::NONE,
                     ));
+                } else {
+                    let mut c_pos = egui::Pos2::ZERO;
+                    for &pt in &pts {
+                        c_pos.x += pt.x / (pts.len() as f32);
+                        c_pos.y += pt.y / (pts.len() as f32);
+                    }
+                    for m in 0..pts.len() {
+                        painter.add(egui::Shape::convex_polygon(
+                            vec![c_pos, pts[m], pts[(m + 1) % pts.len()]],
+                            fill,
+                            egui::Stroke::NONE,
+                        ));
+                    }
                 }
                 if stroke != egui::Stroke::NONE {
                     painter.add(egui::Shape::closed_line(pts, stroke));

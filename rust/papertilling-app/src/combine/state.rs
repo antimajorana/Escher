@@ -98,6 +98,7 @@ pub struct CombineTabState {
     pub core_panel: CorePanelState,
     pub half_wall: CombineHalfWallState,
     pub inspectors: DefectInspectors,
+    pub(crate) open_cavity_in_fusion: Option<crate::workbench::CavityRequest>,
     pub(super) builder: LatestWorker<BuildJob, BuildWorkerOutput>,
     pub(super) comparer: LatestWorker<CompareJob, CompareOutput>,
     pub(super) initializer: LatestWorker<CatalogueItemUi, Arc<CombineLatticeInfo>>,
@@ -166,12 +167,34 @@ impl CombineTabState {
             core_panel: CorePanelState::default(),
             half_wall: CombineHalfWallState::from_item(gallery_item),
             inspectors: DefectInspectors::new(),
+            open_cavity_in_fusion: None,
             builder: spawn_build_worker(),
             comparer: spawn_compare_worker(),
             initializer: spawn_lattice_worker(),
         };
         st.request_build(gallery_item, false, false, true);
         st
+    }
+
+    pub(crate) fn take_open_cavity_in_fusion(&mut self) -> Option<crate::workbench::CavityRequest> {
+        self.open_cavity_in_fusion.take()
+    }
+
+    pub(crate) fn build_cavity_request(&self, gallery_item: &CatalogueItemUi) -> crate::workbench::CavityRequest {
+        let item = self.effective_item(gallery_item);
+        let existing_crystal = if self.last_build.refused.is_none() && !self.last_build.crystal.pos.is_empty() {
+            Some(self.last_build.crystal.clone())
+        } else {
+            None
+        };
+        crate::workbench::CavityRequest {
+            group: item.group.clone(),
+            cell: self.info.cell.clone(),
+            frame: item.frame,
+            lattice_name: item.display_with_orig(),
+            specs: self.specs.clone(),
+            existing_crystal,
+        }
     }
 
     pub fn effective_item<'a>(&'a self, gallery_item: &'a CatalogueItemUi) -> &'a CatalogueItemUi {
@@ -206,6 +229,7 @@ impl CombineTabState {
         self.clear_kinematic_drag_state(true);
         self.clear_selection();
         self.inspectors.clear_for_switch();
+        self.open_cavity_in_fusion = None;
         self.half_wall.refresh(gallery_item);
         self.init_error = None;
         self.selected_angle_deg = info.allowed_angles.first().copied().unwrap_or(90);
@@ -238,6 +262,7 @@ impl CombineTabState {
         self.clear_kinematic_drag_state(true);
         self.clear_selection();
         self.inspectors.clear_for_switch();
+        self.open_cavity_in_fusion = None;
         self.override_item = None;
         self.init_error = None;
         self.builder.cancel();

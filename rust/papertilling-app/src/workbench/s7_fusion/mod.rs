@@ -1,20 +1,33 @@
 //! Core connections & fusion routes: explicit planar lattice graphs for one fixed surrounding cavity
-//! (`papertilling_core::fusion`). First example: Wang Fig. 8(a)'s 8-gon cavity (12 fixed edges).
+//! (`papertilling_core::fusion`). Supports both the built-in Wang Fig. 8(a) 8-gon cavity (12 fixed edges)
+//! and live defect cavities sent from `Place & fuse`.
 //!
 //! Geometry is shown by default (vertex valences, face sizes, core connections, routes between cores).
-//! Toric-code stabilizer terms (`X`/`Z`) and gate notation (`CX`/`H`) are an optional annotation, off by default.
+//! Toric-code stabilizer and gate annotations are optional and off by default.
 
+#[cfg(test)]
+use papertilling_core::fusion::PlanarMap;
 use papertilling_core::fusion::{
-    CoreConnection, CoreEnumeration, FusionStep, PlanarMap, gate_route, hamiltonian_route, wang_core_connections,
+    CoreConnection, CoreEnumeration, FusionStep, gate_route, hamiltonian_route, wang_core_connections,
 };
 use serde_json::{Value, json};
 
 use super::{WbCtx, WbPanel, WbScenes};
 use crate::theme::ThemeTokens;
 
+mod cavity_ui;
 mod scene;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use cavity_ui::CavityRequest;
+#[cfg(test)]
+pub(crate) use cavity_ui::LoadedCavity;
+#[cfg(not(test))]
+use cavity_ui::LoadedCavity;
+#[cfg(test)]
+use cavity_ui::count_rows;
+use cavity_ui::{counts_grid, fmt_sorted, show_geometry_tables, slide_reachability_note};
 
 /// Sub-row cards exposed to the Command Deck (matches `realms.rs` `0..=1`).
 const DECK_LABELS: [&str; 2] = ["Core connections", "Routes between cores"];
@@ -29,7 +42,9 @@ const ROUTE_SOURCES: [&str; 2] = [
     "Route 1 (edge slides): 5 edge-preserving moves ending at Eq. (58) of the paper with edge 15 renamed 12 and edge 16 renamed 11.",
     "Route 2 (merge & add): the two steps of the paper, Eq. (57), Fig. 8(b) and Eq. (58), Fig. 8(c).",
 ];
-const UNIQUENESS_PROVED: &str = "[PROVED] With 2 interior edges and valence ≥ 3, sides ≥ 3, all 5 lattice cores on {c,d,g,h} are listed; even over all 120 cavity chord pairs, {c–h, d–g} is the unique regular square core.";
+const ORBIT_SUMMARY: &str = "The 5 listed cores are labelled by fixed cavity vertices and form 2 symmetry orbits under the cavity's D₂ symmetry (order 4): 1 regular square core {c–h, d–g} and 1 orbit of 4 {3,4,4,5} cores.";
+const ROUTE_SCOPE_NOTE: &str = "Both routes start at Fig. 8(a) (which has a 2-valent vertex s and lies outside the valence ≥ 3 lattice-core list). Route 2 also passes through E = 13 (outside the fixed-E = 14 set).";
+const UNIQUENESS_PROVED: &str = "[COMPUTATIONAL EVIDENCE, exhaustive search] With 2 interior edges and valence ≥ 3, sides ≥ 3, all 5 labelled lattice cores (2 D₂ symmetry orbits) on {c,d,g,h} are listed; even over all 120 cavity chord pairs, {c–h, d–g} is the unique regular square core.";
 
 const ROUTE1_GEOM_LABELS: [&str; 6] = [
     "Start (four dislocations)",
@@ -46,7 +61,7 @@ const ROUTE2_GEOM_LABELS: [&str; 3] = [
 ];
 
 pub(crate) struct Panel {
-    /// Active sub-view: 0 = Core connections, 1 = Route 1 (edge slides), 2 = Route 2 (merge & add).
+    /// Active sub-view for the built-in Wang example: 0 = Core connections, 1 = Route 1, 2 = Route 2.
     route: usize,
     /// Selected index per sub-view: [core_index (0..5 cores, 5 = Fig. 8a start), route1_step, route2_step].
     step: [usize; 3],
@@ -55,6 +70,8 @@ pub(crate) struct Panel {
     show_gate_labels: bool,
     enumeration: CoreEnumeration,
     routes: [Vec<FusionStep>; 2],
+    /// Optional live cavity sent from `Place & fuse`; `None` shows the built-in Wang Fig. 8(a) example.
+    pub(crate) live_cavity: Option<LoadedCavity>,
     error: Option<String>,
 }
 
@@ -80,26 +97,10 @@ impl Default for Panel {
             show_gate_labels: false,
             enumeration,
             routes,
+            live_cavity: None,
             error,
         }
     }
-}
-
-fn op_text(letter: char, labels: &[u32]) -> String {
-    labels.iter().map(|l| format!("{letter}{l}")).collect::<Vec<_>>().join(" ")
-}
-
-fn edge_list_text(labels: &[u32]) -> String {
-    labels.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")
-}
-
-fn signed(d: i64) -> String {
-    if d == 0 { String::from("no change") } else { format!("{d:+}") }
-}
-
-fn fmt_sorted(mut xs: Vec<usize>) -> String {
-    xs.sort_unstable();
-    xs.iter().map(usize::to_string).collect::<Vec<_>>().join(",")
 }
 
 fn step_list_label(route_idx: usize, step_idx: usize, st: &FusionStep, show_gate_labels: bool) -> String {
@@ -124,13 +125,18 @@ fn step_explanation(route_idx: usize, step_idx: usize, st: &FusionStep, show_gat
     }
     match (route_idx, step_idx) {
         (0, 5) => "The end of edge 11 at g slides along edge 9 to vertex h. Every inner face has four sides and every inner vertex four edges again, reaching the unique regular square core {c–h, d–g}.",
-        (1, 1) => "The two edges meeting at the two-valent vertex s merge into one edge 15 from d to g, and s is removed. One edge fewer (E = 13); the seven-sided face now has six sides.",
+        (1, 1) => "The two edges meeting at the two-valent vertex s merge into one edge 15 from d to g, and s is removed. One edge fewer (E = 13, outside the fixed-E = 14 set); the seven-sided face now has six sides.",
         (1, 2) => "A new edge 16 from h to c splits the six-sided face into two four-sided faces, restoring E = 14 and reaching the same regular square core.",
         _ => &st.explanation,
     }
 }
 
 impl Panel {
+    pub(crate) fn load_cavity(&mut self, req: CavityRequest) {
+        self.live_cavity = Some(LoadedCavity::from_request(req));
+        self.route = 0;
+    }
+
     fn start_step(&self) -> Option<&FusionStep> {
         self.routes[0].first()
     }
@@ -170,92 +176,54 @@ impl Panel {
     }
 
     /// Rows of the counts table: (what, how many now, change since the start lattice).
+    #[cfg(test)]
     pub(super) fn count_rows(
         now: &PlanarMap,
         start: &PlanarMap,
         show_gate_labels: bool,
     ) -> [(&'static str, usize, String); 3] {
-        let (a, b) = (now.census(), start.census());
-        let row = |name, x: usize, y: usize| (name, x, signed(x as i64 - y as i64));
-        let edges_label = if show_gate_labels { "Edges (qubits)" } else { "Edges" };
-        [
-            row("Inner vertices", a.vertices, b.vertices),
-            row(edges_label, a.edges, b.edges),
-            row("Inner faces", a.faces, b.faces),
-        ]
-    }
-
-    fn counts_grid(ui: &mut egui::Ui, now: &PlanarMap, start: &PlanarMap, ref_col: &str, show_gate_labels: bool) {
-        egui::Grid::new("wb_s7_counts").num_columns(3).striped(true).show(ui, |ui| {
-            ui.strong("In this picture");
-            ui.strong("now");
-            ui.strong(ref_col);
-            ui.end_row();
-            for (name, x, change) in Self::count_rows(now, start, show_gate_labels) {
-                ui.label(name);
-                ui.label(x.to_string());
-                ui.label(change);
-                ui.end_row();
-            }
-        });
-    }
-
-    fn show_geometry_tables(ui: &mut egui::Ui, m: &PlanarMap, tokens: &ThemeTokens, show_gate_labels: bool) {
-        ui.strong("Vertices");
-        let v_cols = if show_gate_labels { 3 } else { 2 };
-        egui::Grid::new("wb_s7_vertices").num_columns(v_cols).striped(true).show(ui, |ui| {
-            for v in m.complete_vertices() {
-                let k = m.verts[v].rot.len();
-                ui.label(&m.verts[v].name);
-                let edges = egui::RichText::new(format!("{k} edges"));
-                ui.label(if k == 4 { edges } else { edges.color(tokens.status_warn) });
-                if show_gate_labels {
-                    ui.monospace(op_text('X', &m.vertex_op(v)));
-                }
-                ui.end_row();
-            }
-        });
-        ui.strong("Faces");
-        egui::Grid::new("wb_s7_faces").num_columns(2).striped(true).show(ui, |ui| {
-            for f in m.bounded_faces() {
-                let sides = egui::RichText::new(format!("{} sides", f.sides()));
-                ui.label(if f.sides() == 4 { sides } else { sides.color(tokens.status_warn) });
-                if show_gate_labels {
-                    ui.monospace(op_text('Z', &PlanarMap::face_op(&f)));
-                } else {
-                    ui.small(format!("edges {}", edge_list_text(&f.labels)));
-                }
-                ui.end_row();
-            }
-        });
-        if show_gate_labels {
-            ui.small("X…: vertex term; Z…: face term. An edge met twice (a loop at a vertex, a dangling edge in a face) drops out.");
-        }
+        count_rows(now, start, show_gate_labels)
     }
 
     fn show_cores_comparison_table(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
-        ui.strong("All 5 lattice cores for this fixed surrounding");
-        egui::Grid::new("wb_s7_cores_table").num_columns(4).striped(true).show(ui, |ui| {
-            ui.strong("Core");
-            ui.strong("V/E/F");
-            ui.strong("Valences");
-            ui.strong("Faces");
-            ui.end_row();
-            for core in &self.enumeration.cores {
-                let c = &core.census;
-                let vals = fmt_sorted(c.valences.iter().map(|&(_, k)| k).collect());
-                let faces = fmt_sorted(c.face_sides.clone());
-                let name = if core.is_regular_square {
-                    egui::RichText::new(format!("{}. {}", core.id + 1, core.title)).strong().color(tokens.status_ok)
-                } else {
-                    egui::RichText::new(format!("{}. {}", core.id + 1, core.title))
-                };
-                ui.label(name);
-                ui.monospace(format!("{}/{}/{}", c.vertices, c.edges, c.faces));
-                ui.monospace(format!("{{{vals}}}"));
-                ui.monospace(format!("{{{faces}}}"));
-                ui.end_row();
-            }
+        ui.strong(format!(
+            "All {} labelled lattice cores ({} symmetry orbits, cavity D₂ order {})",
+            self.enumeration.cores.len(),
+            self.enumeration.symmetry_orbit_count,
+            self.enumeration.cavity_symmetry_order
+        ));
+        ui.small(ORBIT_SUMMARY);
+        ui.small(slide_reachability_note(self.enumeration.slide_connected_to_regular));
+        egui::ScrollArea::horizontal().id_salt("wb_s7_cores_hscroll").show(ui, |ui| {
+            egui::Grid::new("wb_s7_cores_table")
+                .num_columns(5)
+                .spacing([4.0, 3.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.strong("Core");
+                    ui.strong("Orb.");
+                    ui.strong("V/E/F");
+                    ui.strong("Val.");
+                    ui.strong("Faces");
+                    ui.end_row();
+                    for core in &self.enumeration.cores {
+                        let c = &core.census;
+                        let vals = fmt_sorted(c.valences.iter().map(|&(_, k)| k).collect());
+                        let faces = fmt_sorted(c.face_sides.clone());
+                        let short_title = core.title.replace(" (regular squares)", "");
+                        let name = if core.is_regular_square {
+                            egui::RichText::new(format!("{}. {short_title}", core.id + 1)).strong().color(tokens.status_ok)
+                        } else {
+                            egui::RichText::new(format!("{}. {short_title}", core.id + 1))
+                        };
+                        ui.label(name).on_hover_text(&core.title);
+                        ui.monospace(format!("#{}({})", core.orbit_id + 1, core.orbit_size));
+                        ui.monospace(format!("{}/{}/{}", c.vertices, c.edges, c.faces));
+                        ui.monospace(format!("{{{vals}}}"));
+                        ui.monospace(format!("{{{faces}}}"));
+                        ui.end_row();
+                    }
+                });
         });
     }
 }
@@ -266,7 +234,7 @@ impl WbPanel for Panel {
     }
 
     fn sub_index(&self) -> usize {
-        if self.route == 0 { 0 } else { 1 }
+        if self.live_cavity.is_some() || self.route == 0 { 0 } else { 1 }
     }
 
     fn select_sub(&mut self, i: usize) -> bool {
@@ -276,6 +244,7 @@ impl WbPanel for Panel {
                 true
             }
             1 if self.route == 0 => {
+                self.live_cavity = None;
                 self.route = 1;
                 true
             }
@@ -284,6 +253,20 @@ impl WbPanel for Panel {
     }
 
     fn show_controls(&mut self, ui: &mut egui::Ui, _cx: &WbCtx) -> bool {
+        if let Some(live) = &mut self.live_cavity {
+            let (rebuild, switch_to_wang) = live.show_controls(
+                ui,
+                &mut self.show_numbers,
+                &mut self.show_names,
+                &mut self.show_gate_labels,
+            );
+            if switch_to_wang {
+                self.live_cavity = None;
+                return true;
+            }
+            return rebuild;
+        }
+
         let mut rebuild = false;
         ui.label("How one fixed 8-gon cavity (12 fixed edges) can be connected inside, and two routes between cores.");
         ui.add_space(4.0);
@@ -299,12 +282,30 @@ impl WbPanel for Panel {
 
         if self.route == 0 {
             let mut sel = self.step[0];
-            ui.strong("Lattice cores (valence ≥ 3, sides ≥ 3, E = 14)");
+            ui.strong(format!(
+                "{} labelled lattice cores in {} symmetry orbits (D₂ order {}, E = 14)",
+                self.enumeration.cores.len(),
+                self.enumeration.symmetry_orbit_count,
+                self.enumeration.cavity_symmetry_order
+            ));
             for core in &self.enumeration.cores {
                 let vals = fmt_sorted(core.census.valences.iter().map(|&(_, k)| k).collect());
                 let faces = fmt_sorted(core.census.face_sides.clone());
-                let tag = if core.is_regular_square { "regular" } else { "3,4,5" };
-                let label = format!("{}. {}  [{} | {}]", core.id + 1, core.title, vals, faces);
+                let tag = format!(
+                    "orbit #{} (size {}) · {}",
+                    core.orbit_id + 1,
+                    core.orbit_size,
+                    if core.is_regular_square { "regular square core" } else { "{3,4,4,5} core" }
+                );
+                let label = format!(
+                    "{}. {}  [orbit #{} (size {}) | {} | {}]",
+                    core.id + 1,
+                    core.title,
+                    core.orbit_id + 1,
+                    core.orbit_size,
+                    vals,
+                    faces
+                );
                 if ui.selectable_label(sel == core.id, label).on_hover_text(tag).clicked() {
                     sel = core.id;
                 }
@@ -338,15 +339,15 @@ impl WbPanel for Panel {
                     k = i;
                 }
             }
+            ui.add_space(4.0);
+            ui.small(ROUTE_SCOPE_NOTE);
             rebuild |= self.set_step(k);
         }
 
         ui.separator();
         rebuild |= ui.checkbox(&mut self.show_numbers, "Edge numbers").changed();
         rebuild |= ui.checkbox(&mut self.show_names, "Vertex names").changed();
-        rebuild |= ui
-            .checkbox(&mut self.show_gate_labels, "Show toric-code / gate labels (CX, H, X/Z)")
-            .changed();
+        rebuild |= ui.checkbox(&mut self.show_gate_labels, "Show toric-code / gate annotations").changed();
         ui.add_space(4.0);
         ui.label("Blue faces have four sides. Dark dots are four-valent vertices. Everything else is coloured and numbered.");
         ui.label("Dashed edges and hollow dots continue outside the picture; hollow dots are not counted.");
@@ -358,6 +359,11 @@ impl WbPanel for Panel {
     }
 
     fn show_inspector(&mut self, ui: &mut egui::Ui, _cx: &WbCtx, tokens: &ThemeTokens) {
+        if let Some(live) = &self.live_cavity {
+            live.show_inspector(ui, tokens, self.show_gate_labels);
+            return;
+        }
+
         let Some(start) = self.start_step() else {
             ui.label("No lattice to show.");
             return;
@@ -365,24 +371,26 @@ impl WbPanel for Panel {
         if self.route == 0 {
             if let Some(core) = self.selected_core() {
                 ui.strong(&core.title);
+                ui.label(format!("orbit #{} (size {})", core.orbit_id + 1, core.orbit_size));
                 ui.label(&core.description);
                 ui.separator();
-                Self::counts_grid(ui, &core.map, &start.map, "vs Fig. 8(a)", self.show_gate_labels);
+                counts_grid(ui, &core.map, &start.map, "vs Fig. 8(a)", self.show_gate_labels);
                 ui.separator();
                 self.show_cores_comparison_table(ui, tokens);
                 ui.separator();
-                Self::show_geometry_tables(ui, &core.map, tokens, self.show_gate_labels);
+                show_geometry_tables(ui, &core.map, tokens, Some(4), Some(4), self.show_gate_labels);
             } else {
                 ui.strong("Start lattice: Fig. 8(a) (unfused)");
                 ui.label("Unfused comparison map with 2-valent interior vertex s (not in the valence ≥ 3 lattice-core list).");
                 ui.separator();
-                Self::counts_grid(ui, &start.map, &start.map, "vs Fig. 8(a)", self.show_gate_labels);
+                counts_grid(ui, &start.map, &start.map, "vs Fig. 8(a)", self.show_gate_labels);
                 ui.separator();
                 self.show_cores_comparison_table(ui, tokens);
                 ui.separator();
-                Self::show_geometry_tables(ui, &start.map, tokens, self.show_gate_labels);
+                show_geometry_tables(ui, &start.map, tokens, Some(4), Some(4), self.show_gate_labels);
             }
             ui.separator();
+            ui.small(ROUTE_SCOPE_NOTE);
             ui.small(UNIQUENESS_PROVED);
             ui.small(format!("[COMPUTATIONAL EVIDENCE] {}", self.enumeration.provenance));
             ui.small(SOURCE);
@@ -399,10 +407,11 @@ impl WbPanel for Panel {
         }
         ui.label(step_explanation(route_idx, step_idx, st, self.show_gate_labels));
         ui.separator();
-        Self::counts_grid(ui, &st.map, &start.map, "since step 0", self.show_gate_labels);
+        counts_grid(ui, &st.map, &start.map, "since step 0", self.show_gate_labels);
         ui.separator();
-        Self::show_geometry_tables(ui, &st.map, tokens, self.show_gate_labels);
+        show_geometry_tables(ui, &st.map, tokens, Some(4), Some(4), self.show_gate_labels);
         ui.separator();
+        ui.small(ROUTE_SCOPE_NOTE);
         ui.small("[COMPUTATIONAL EVIDENCE] Counts, valences and face sizes are computed directly from the planar map of each step and checked against Eqs. (56)-(58) and hand counts.");
         if self.show_gate_labels {
             ui.small("Signs and couplings are not shown: which anyon the fused state holds is not read off this view.");
@@ -419,6 +428,14 @@ impl WbPanel for Panel {
     }
 
     fn scenes(&self) -> WbScenes {
+        if let Some(live) = &self.live_cavity {
+            return WbScenes {
+                scene2d: live.scene(self.show_numbers, self.show_names, self.show_gate_labels),
+                mesh: None,
+                caption: String::new(),
+                overlay: None,
+            };
+        }
         let scene2d = if self.route == 0 {
             if let Some(core) = self.selected_core() {
                 scene::core_scene(
@@ -447,7 +464,11 @@ impl WbPanel for Panel {
     }
 
     fn error(&self) -> Option<&str> {
-        self.error.as_deref()
+        if let Some(live) = &self.live_cavity {
+            live.error.as_deref()
+        } else {
+            self.error.as_deref()
+        }
     }
 
     fn save(&self) -> Value {
@@ -466,7 +487,10 @@ impl WbPanel for Panel {
             return;
         };
         let as_index = |x: &Value| x.as_u64().and_then(|n| usize::try_from(n).ok());
-        match o.get("route").map(as_index) {
+        // A session saved before the core list existed has two steps and numbers its routes from 0:
+        // its route r is view r + 1 now.
+        let legacy = o.get("step").and_then(Value::as_array).is_some_and(|s| s.len() == 2);
+        match o.get("route").map(as_index).map(|r| r.and_then(|r| r.checked_add(usize::from(legacy)))) {
             Some(Some(r)) if r < VIEW_LABELS.len() => self.route = r,
             Some(_) => notes.push(String::from("Fusion steps: unknown route (kept current)")),
             None => {}

@@ -114,6 +114,8 @@ pub struct RefusedCombination {
     pub displacements: Vec<[f64; 2]>,
     pub specs: Vec<DefectSpec>,
     pub reason: String,
+    /// Exact algebraic total charge in `G~+` from the product of `specs` holonomies, if applicable.
+    pub algebraic_charge: Option<String>,
 }
 
 /// Complete Combinations ("Equivalence") table grouped by total charge and distinct core graph.
@@ -121,8 +123,11 @@ pub struct RefusedCombination {
 pub struct CombinationsTable {
     pub group: String,
     pub max_sep: f64,
+    pub bmax: f64,
     pub radius: usize,
     pub grid: usize,
+    /// Plain-language description of the exact `G_+` symmetry reduction (including co-rotated offsets).
+    pub symmetry_note: String,
     pub total_candidates: usize,
     pub built_count: usize,
     pub refused_count: usize,

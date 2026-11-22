@@ -354,13 +354,21 @@ fn candidate_cuts(idx: usize, specs: &[NormSpec], lmax: f64) -> Vec<[f64; 2]> {
     cand
 }
 
-/// Build single or multi-defect configurations, returning `(crystal, applied_cuts, coalesced_count)`.
-pub fn build_point_defects_with_cuts(
+/// Metadata describing how `build_point_defects_detailed` ordered and solved the surgery steps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SurgeryBuildMeta {
+    pub used_order: Vec<usize>,
+    pub used_fallback_order: bool,
+    pub used_backtracking: bool,
+}
+
+/// Build single or multi-defect configurations, returning `(crystal, applied_cuts, coalesced_count, meta)`.
+pub fn build_point_defects_detailed(
     cell: &Cell2D,
     specs: &[DefectSpec],
     r_opt: Option<f64>,
     centre_opt: Option<[f64; 2]>,
-) -> Result<(BuiltCrystal, Vec<AppliedCut>, usize), String> {
+) -> Result<(BuiltCrystal, Vec<AppliedCut>, usize, SurgeryBuildMeta), String> {
     let det = cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0];
     if cell.basis.is_empty() || cell.bonds.is_empty() || !det.is_finite() || det == 0.0
         || cell.a1.iter().chain(&cell.a2).chain(cell.basis.iter().flatten()).any(|x| !x.is_finite())
@@ -368,16 +376,27 @@ pub fn build_point_defects_with_cuts(
         return Err("invalid lattice cell: finite independent vectors, sites and valid bonds are required".to_string());
     }
     let lat_info = LatticeCoreInfo::new(cell);
-    build_point_defects_with_info(&lat_info, specs, r_opt, centre_opt)
+    build_point_defects_with_info_detailed(&lat_info, specs, r_opt, centre_opt)
+}
+
+/// Build single or multi-defect configurations, returning `(crystal, applied_cuts, coalesced_count)`.
+pub fn build_point_defects_with_cuts(
+    cell: &Cell2D, specs: &[DefectSpec], r_opt: Option<f64>, centre_opt: Option<[f64; 2]>,
+) -> Result<(BuiltCrystal, Vec<AppliedCut>, usize), String> {
+    build_point_defects_detailed(cell, specs, r_opt, centre_opt).map(|(c, cuts, coal, _)| (c, cuts, coal))
 }
 
 /// Internal builder reusing a precomputed `LatticeCoreInfo` across many defect configurations.
 pub(crate) fn build_point_defects_with_info(
-    lat_info: &LatticeCoreInfo,
-    specs: &[DefectSpec],
-    r_opt: Option<f64>,
-    centre_opt: Option<[f64; 2]>,
+    lat_info: &LatticeCoreInfo, specs: &[DefectSpec], r_opt: Option<f64>, centre_opt: Option<[f64; 2]>,
 ) -> Result<(BuiltCrystal, Vec<AppliedCut>, usize), String> {
+    build_point_defects_with_info_detailed(lat_info, specs, r_opt, centre_opt).map(|(c, cuts, coal, _)| (c, cuts, coal))
+}
+
+/// Internal detailed builder reusing a precomputed `LatticeCoreInfo`, also returning `SurgeryBuildMeta`.
+pub(crate) fn build_point_defects_with_info_detailed(
+    lat_info: &LatticeCoreInfo, specs: &[DefectSpec], r_opt: Option<f64>, centre_opt: Option<[f64; 2]>,
+) -> Result<(BuiltCrystal, Vec<AppliedCut>, usize, SurgeryBuildMeta), String> {
     if r_opt.is_some_and(|r| !r.is_finite() || r <= 0.0)
         || centre_opt.is_some_and(|p| p.iter().any(|x| !x.is_finite())) {
         return Err("patch radius must be finite and positive; centre must be finite".to_string());
@@ -386,14 +405,9 @@ pub(crate) fn build_point_defects_with_info(
     let (ctr, r_patch) = centre_and_radius_from_validated(lat_info, &norm, hw.as_ref(), r_opt, centre_opt)?;
     if let (true, Some(hw_res)) = (norm.is_empty(), hw.as_ref()) {
         let built = build_half_wall_raw(lat_info, hw_res, Some(r_patch), Some(ctr), true)?;
-        let hw_cut = AppliedCut {
-            origin: hw_res.at,
-            dir: hw_res.direction,
-            strip_end: None,
-            is_insertion: false,
-            is_half_wall: true,
-        };
-        return Ok((built.crystal, vec![hw_cut], 0));
+        let hw_cut = AppliedCut { origin: hw_res.at, dir: hw_res.direction, strip_end: None, is_insertion: false, is_half_wall: true };
+        let meta = SurgeryBuildMeta { used_order: Vec::new(), used_fallback_order: false, used_backtracking: false };
+        return Ok((built.crystal, vec![hw_cut], 0, meta));
     }
     let eff = coalesce_coincident_specs(&norm)?;
     let hw_frank = hw.as_ref().and_then(|h| h.ending.frank_angle_deg).unwrap_or(0.0);
@@ -410,21 +424,14 @@ pub(crate) fn build_point_defects_with_info(
     };
     let mut applied_cuts = Vec::with_capacity(eff.len() + usize::from(hw.is_some()));
     if let Some(ref hw_res) = hw {
-        applied_cuts.push(AppliedCut {
-            origin: hw_res.at,
-            dir: hw_res.direction,
-            strip_end: None,
-            is_insertion: false,
-            is_half_wall: true,
-        });
+        applied_cuts.push(AppliedCut { origin: hw_res.at, dir: hw_res.direction, strip_end: None, is_insertion: false, is_half_wall: true });
     }
     let init_snap = (eff.len() >= 2).then(|| builder.snapshot());
-    let allow_dfs = eff.len() >= 2 && eff.iter().any(|d| d.cut.is_none());
-    let cut_lists: Vec<Vec<[f64; 2]>> = eff
-        .iter()
-        .enumerate()
-        .map(|(idx, d)| d.cut.map_or_else(|| candidate_cuts(idx, &eff, lat_info.lmax), |c| vec![c]))
-        .collect();
+    // The same bounds as the Python builder (`_surgery.run_eff_with_fallback`): other orders and the cut
+    // search are tried for 2 to 4 defects only, so both give the same lattice or the same refusal.
+    let allow_dfs = (2..=4).contains(&eff.len());
+    let cut_lists: Vec<Vec<[f64; 2]>> = eff.iter().enumerate()
+        .map(|(idx, d)| d.cut.map_or_else(|| candidate_cuts(idx, &eff, lat_info.lmax), |c| vec![c])).collect();
     let orders = candidate_orders(lat_info, &eff);
     let mut first_err: Option<String> = None;
 
@@ -446,31 +453,29 @@ pub(crate) fn build_point_defects_with_info(
             }
             if let Some(e) = last_err {
                 let kind = if d.is_disloc { "dislocation" } else { "disclination" };
-                let advice = if e.contains("two walks disagree") { "; use another cut direction or defect order" } else { "" };
-                greedy_err = Some(format!("defect {} ({kind}): {e}{advice}", idx + 1));
+                greedy_err = Some(format!("defect {} ({kind}): {e}", idx + 1));
                 break;
             }
             if let Some(cut) = chosen { greedy_cuts.push(cut); }
         }
         if greedy_err.is_none() {
-            match finish_and_check(&mut builder, lat_info, expected_frank) {
-                Ok(crystal) => {
-                    applied_cuts.extend(reorder_applied_cuts(&eff, order, &greedy_cuts));
-                    return Ok((crystal, applied_cuts, coalesced));
-                }
-                Err(e) => greedy_err = Some(e),
-            }
+            // Every step was accepted: this is the lattice. A failed final check is reported, never searched
+            // round (a lattice that fails it is refused, as before the fallback existed and as in Python).
+            let crystal = finish_and_check(&mut builder, lat_info, expected_frank)?;
+            applied_cuts.extend(reorder_applied_cuts(&eff, order, &greedy_cuts));
+            let meta = SurgeryBuildMeta { used_order: order.clone(), used_fallback_order: oi > 0, used_backtracking: false };
+            return Ok((crystal, applied_cuts, coalesced, meta));
         }
-        if oi == 0 {
-            first_err = greedy_err;
-        }
+        if oi == 0 { first_err = greedy_err; }
         // Bounded backtracking fallback over earlier defects' cuts when greedy choice causes a conflict.
         if allow_dfs {
             builder.restore(init_snap.as_ref().expect("snapshot for n >= 2").clone());
             let (mut chosen, mut budget) = (Vec::with_capacity(eff.len()), 160usize);
-            if let Some(crystal) = search_cuts_dfs(&mut builder, lat_info, &eff, order, &cut_lists, 0, expected_frank, &mut chosen, &mut budget) {
+            if search_cuts_dfs(&mut builder, &eff, order, &cut_lists, 0, &mut chosen, &mut budget) {
+                let crystal = finish_and_check(&mut builder, lat_info, expected_frank)?;
                 applied_cuts.extend(reorder_applied_cuts(&eff, order, &chosen));
-                return Ok((crystal, applied_cuts, coalesced));
+                let meta = SurgeryBuildMeta { used_order: order.clone(), used_fallback_order: oi > 0, used_backtracking: true };
+                return Ok((crystal, applied_cuts, coalesced, meta));
             }
         }
     }
@@ -537,33 +542,32 @@ fn finish_and_check(builder: &mut ConeBuilder, lat_info: &LatticeCoreInfo, expec
     Ok(crystal)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Depth-first search over the candidate cuts in `order`, at most `budget` cut applications. True when every
+/// defect was applied; the builder then holds that state and `chosen` the cuts. Mirrors the Python `_dfs`.
 fn search_cuts_dfs(
-    builder: &mut ConeBuilder, lat_info: &LatticeCoreInfo, eff: &[NormSpec], order: &[usize],
-    cut_lists: &[Vec<[f64; 2]>], pos: usize, expected_frank: f64, chosen: &mut Vec<[f64; 2]>, budget: &mut usize,
-) -> Option<BuiltCrystal> {
+    builder: &mut ConeBuilder, eff: &[NormSpec], order: &[usize], cut_lists: &[Vec<[f64; 2]>], pos: usize,
+    chosen: &mut Vec<[f64; 2]>, budget: &mut usize,
+) -> bool {
     if pos == order.len() {
-        let snap = builder.snapshot();
-        if let Ok(crystal) = finish_and_check(builder, lat_info, expected_frank) { return Some(crystal); }
-        builder.restore(snap);
-        return None;
+        return true;
     }
     let idx = order[pos];
-    let limit = if pos + 1 == order.len() { cut_lists[idx].len() } else { cut_lists[idx].len().min(8) };
-    for &cut in &cut_lists[idx][..limit] {
-        if *budget == 0 { return None; }
+    for &cut in &cut_lists[idx] {
+        if *budget == 0 {
+            return false;
+        }
         *budget -= 1;
         let snap = builder.snapshot();
         if apply_one_step(builder, &eff[idx], cut).is_ok() {
             chosen.push(cut);
-            if let Some(c) = search_cuts_dfs(builder, lat_info, eff, order, cut_lists, pos + 1, expected_frank, chosen, budget) {
-                return Some(c);
+            if search_cuts_dfs(builder, eff, order, cut_lists, pos + 1, chosen, budget) {
+                return true;
             }
             chosen.pop();
         }
         builder.restore(snap);
     }
-    None
+    false
 }
 
 /// Build single or multi-defect configurations on an open disk patch using cone-safe Volterra surgery.
