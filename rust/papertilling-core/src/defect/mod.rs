@@ -34,6 +34,7 @@ mod sheet3d_energy;
 mod sheet3d_opt;
 pub(crate) mod sheet3d_topology;
 pub mod single_cache;
+pub mod single_crystal;
 #[cfg(test)]
 mod consistency_tests;
 #[cfg(test)]

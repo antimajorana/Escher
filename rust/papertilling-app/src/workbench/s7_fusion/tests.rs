@@ -213,13 +213,22 @@ fn canvas_title(app: &PapertillingApp) -> String {
 
 #[test]
 fn fusion_view_defaults_to_geometry_first_core_connections_and_optional_gate_labels() {
+    use crate::analysis_mode::tests::equip_keys;
+    use crate::game_menu::Realm;
+
     let mut h = harness();
     h.run_steps(3);
     assert!(!h.state().advanced);
     click_top(&mut h, "Defects");
     wait_until(&mut h, "Defects", settled);
-    click_top(&mut h, "Fusion steps");
-    wait_until(&mut h, "Fusion steps", settled);
+    assert!(
+        h.query_all_by_label("Fusion steps").next().is_none(),
+        "Fusion steps is demoted from Default HUD in favour of Fuse & compare"
+    );
+    h.state_mut().set_advanced(true);
+    h.run_steps(2);
+    equip_keys(&mut h, Realm::Forge, "Core connections");
+    wait_until(&mut h, "Core connections", settled);
     {
         let app = h.state();
         assert_eq!(
@@ -229,7 +238,7 @@ fn fusion_view_defaults_to_geometry_first_core_connections_and_optional_gate_lab
         assert_eq!(app.workbench.view, WorkbenchView::S7Fusion);
         assert!(app.workbench.error().is_none());
         assert!(canvas_title(app).starts_with("Core 1 of 5"), "{}", canvas_title(app));
-        assert!(!app.advanced, "the view does not need Advanced");
+        assert!(app.advanced, "Core connections is an Advanced view");
     }
     assert_no_forbidden_tokens(&h, "Fusion core connections");
     assert!(h.query_all_by_label_contains("Workbench").next().is_none(), "internal route name never shown");
@@ -353,47 +362,37 @@ fn counts_table_reports_the_change_per_row() {
 }
 
 #[test]
-fn fusion_view_reachable_and_kept_for_advanced_off_and_on() {
+fn fusion_view_reachable_in_advanced_and_snaps_to_default_when_advanced_turned_off() {
     use crate::analysis_mode::tests::equip_keys;
     use crate::game_menu::Realm;
 
-    for on in [false, true] {
-        let mut h = harness();
-        h.run_steps(2);
-        h.state_mut().set_advanced(on);
-        h.run_steps(2);
-        if on {
-            equip_keys(&mut h, Realm::Forge, "Core connections");
-            wait_until(&mut h, "Fusion steps (Advanced=on)", settled);
-        } else {
-            click_top(&mut h, "Defects");
-            wait_until(&mut h, "Defects", settled);
-            click_top(&mut h, "Fusion steps");
-            wait_until(&mut h, "Fusion steps", settled);
-        }
+    let mut h = harness();
+    h.run_steps(2);
+    h.state_mut().set_advanced(true);
+    h.run_steps(2);
+    equip_keys(&mut h, Realm::Forge, "Core connections");
+    wait_until(&mut h, "Fusion steps (Advanced=on)", settled);
+
+    {
         let app = h.state();
-        assert_eq!(app.advanced, on);
+        assert!(app.advanced);
         assert_eq!(
             (app.active_mode, app.defects_view, app.active_tab),
             (AppMode::Defects, DefectsView::FusionSteps, NavTab::Workbench),
-            "Advanced = {on}"
         );
         assert_eq!(app.workbench.view, WorkbenchView::S7Fusion);
-        assert!(canvas_title(app).starts_with("Core 1 of 5"), "Advanced = {on}: {}", canvas_title(app));
-        assert_no_forbidden_tokens(&h, if on { "Fusion Advanced=on" } else { "Fusion Advanced=off" });
-
-        // Toggling Advanced back and forth must preserve FusionSteps without snapping away.
-        h.state_mut().set_advanced(!on);
-        h.run_steps(3);
-        let app = h.state();
-        assert_eq!(
-            (app.active_mode, app.defects_view, app.active_tab),
-            (AppMode::Defects, DefectsView::FusionSteps, NavTab::Workbench),
-            "after toggling Advanced from {on} to {}",
-            !on
-        );
         assert!(canvas_title(app).starts_with("Core 1 of 5"), "{}", canvas_title(app));
+        assert_no_forbidden_tokens(&h, "Fusion Advanced=on");
     }
+
+    // Turning Advanced off snaps an Advanced-only view cleanly back to Default Catalogue2D.
+    h.state_mut().set_advanced(false);
+    wait_until(&mut h, "Snap back to Default Catalogue2D", settled);
+    let app = h.state();
+    assert_eq!(
+        (app.active_mode, app.defects_view, app.active_tab),
+        (AppMode::Defects, DefectsView::Catalogue2D, NavTab::Defects),
+    );
 }
 
 #[test]
@@ -476,6 +475,12 @@ fn combine_inspect_core_reconnections_button_opens_live_fusion_view() {
     click_top(&mut h, "Place & fuse");
     wait_until(&mut h, "Place & fuse", settled);
     assert!(!h.state().combine.specs.is_empty(), "Combine opens with a non-empty preset");
+    assert!(
+        h.query_by_label("Inspect core reconnections").is_none(),
+        "Inspect core reconnections is hidden in Default mode"
+    );
+    h.state_mut().set_advanced(true);
+    h.run_steps(2);
     h.get_by_label("Inspect core reconnections").click();
     h.run_steps(4);
     let app = h.state();

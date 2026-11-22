@@ -17,7 +17,6 @@ mod builder;
 pub mod cuts;
 mod snap;
 
-#[cfg(test)]
 pub(crate) use builder::align_crystal_orientation;
 pub use builder::{build_combined_crystal, item_from_notebook_json};
 pub use snap::{

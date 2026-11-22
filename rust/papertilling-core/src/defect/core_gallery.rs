@@ -222,7 +222,7 @@ fn set_chord_edge(y: &mut BuiltCrystal, u: usize, v: usize, fw: ChordEndOption, 
     }
 }
 
-fn add_chords(
+pub(crate) fn add_chords(
     y: &mut BuiltCrystal,
     ring: &[usize],
     chords: &[(usize, usize)],

@@ -166,6 +166,17 @@ impl PapertillingApp {
                     checkpoint,
                 });
             }
+            PresetSettings::Fuse { reaction } => {
+                let it = self.gallery.active_item().clone();
+                self.fuse_seen = item_key(&it);
+                self.fuse.sync_views = true;
+                self.fuse.show_burgers_loop = true;
+                self.fuse.show_target_sites = true;
+                self.fuse.relaxed = true;
+                self.fuse.auto_radius = true;
+                self.fuse.reload_for_item(&it, &mut self.canvas2d);
+                self.fuse.apply_preset(reaction, &it, true);
+            }
             PresetSettings::Analysis {
                 target,
                 defect_sub_tab,
@@ -231,6 +242,7 @@ impl PapertillingApp {
             PresetSettings::Surfaces { .. } => self.select_lattices_view(LatticesView::Manifolds),
             PresetSettings::Defects { .. } => self.select_defects_view(DefectsView::Catalogue2D),
             PresetSettings::Combine { .. } => self.select_defects_view(DefectsView::CombineAndFuse),
+            PresetSettings::Fuse { .. } => self.select_defects_view(DefectsView::FuseAndCompare),
             PresetSettings::Analysis { .. } => self.switch_mode(AppMode::Analysis),
             PresetSettings::Atlas(AtlasScene::SpaceGroup { .. }) => {
                 self.select_defects_view(DefectsView::AtlasDefects);

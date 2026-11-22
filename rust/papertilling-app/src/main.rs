@@ -17,6 +17,7 @@ mod defects_tab;
 mod defects_ui;
 mod export;
 mod export_obj;
+mod fuse_tab;
 mod gallery_tab;
 mod game_menu;
 mod live_combine;

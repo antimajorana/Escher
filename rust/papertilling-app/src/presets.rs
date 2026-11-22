@@ -14,6 +14,7 @@ use crate::app::NavTab;
 use crate::app::AppMode;
 use crate::backend::{CatalogueRuleUi, SurfaceTargetUi};
 use crate::defects_tab::DefectSubTab;
+use crate::fuse_tab::FusePreset;
 use crate::live_ops_ao::Defect2dMode;
 use crate::mesh3d::{DefectViewMode, Sheet3dColorMode};
 use crate::surfaces_elastic::SurfaceShapeMode;
@@ -64,6 +65,7 @@ pub enum PresetSettings {
         colour: Sheet3dColorMode,
     },
     Combine { pins: CombinePins, view: DefectViewMode },
+    Fuse { reaction: FusePreset },
     Analysis {
         target: AnalysisTarget,
         defect_sub_tab: DefectSubTab,
@@ -95,7 +97,7 @@ impl Preset {
         }
     }
 
-    /// True when the preset targets one of the two Default modes (`Gallery`, `Surfaces`, `Defects`, `Combine`).
+    /// True when the preset targets one of the Default views (`Gallery`, `Surfaces`, `Defects`, `Combine`, `Fuse`).
     pub fn is_default(&self) -> bool {
         matches!(
             self.settings,
@@ -103,6 +105,7 @@ impl Preset {
                 | PresetSettings::Surfaces { .. }
                 | PresetSettings::Defects { .. }
                 | PresetSettings::Combine { .. }
+                | PresetSettings::Fuse { .. }
         )
     }
 
@@ -114,7 +117,7 @@ impl Preset {
     pub fn mode(&self) -> AppMode {
         match self.settings {
             PresetSettings::Gallery { .. } | PresetSettings::Surfaces { .. } => AppMode::Lattices,
-            PresetSettings::Defects { .. } | PresetSettings::Combine { .. } => AppMode::Defects,
+            PresetSettings::Defects { .. } | PresetSettings::Combine { .. } | PresetSettings::Fuse { .. } => AppMode::Defects,
             PresetSettings::Analysis { .. } => AppMode::Analysis,
             PresetSettings::Atlas(AtlasScene::SpaceGroup { .. }) => AppMode::Defects,
             PresetSettings::Atlas(AtlasScene::Hyperbolic { .. }) => AppMode::Lattices,
@@ -128,6 +131,7 @@ impl Preset {
             PresetSettings::Surfaces { .. } => NavTab::Surfaces,
             PresetSettings::Defects { .. } => NavTab::Defects,
             PresetSettings::Combine { .. } => NavTab::Combine,
+            PresetSettings::Fuse { .. } => NavTab::Fuse,
             PresetSettings::Analysis { .. } => NavTab::Analysis,
             PresetSettings::Atlas(_) => NavTab::Atlas,
         }
@@ -232,6 +236,12 @@ pub const PRESETS: &[Preset] = &[
         description: "+60 deg and -60 deg disclinations at neighbouring hexagon centres: a 5-7 pair, i.e. a dislocation.",
         lattice: named("honeycomb"),
         settings: PresetSettings::Combine { pins: CombinePins::NeighbourDisclinationPair, view: DefectViewMode::Planar2D },
+    },
+    Preset {
+        name: "Fuse: honeycomb 5-7 equivalence",
+        description: "Side-by-side +60 deg / -60 deg disclination dipole and its equivalent healed 5-7 single dislocation.",
+        lattice: named("honeycomb"),
+        settings: PresetSettings::Fuse { reaction: FusePreset::DipoleToDislocation },
     },
     Preset {
         name: "Atlas: rutile #136 screw dispiration",

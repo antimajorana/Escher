@@ -162,6 +162,22 @@ impl Canvas2D {
         (self.compiled.site_count, self.compiled.bond_count)
     }
 
+    pub(crate) fn camera_tuple(&self) -> (egui::Vec2, f32, [f32; 2], bool) {
+        (self.pan, self.zoom, self.world_center, self.auto_fit_pending)
+    }
+
+    pub(crate) fn copy_camera_from(&mut self, other: &Self) {
+        self.pan = other.pan;
+        self.zoom = other.zoom;
+        self.fit_zoom = other.fit_zoom;
+        self.world_center = other.world_center;
+        self.auto_fit_pending = false;
+    }
+
+    pub(crate) fn world_to_screen_last(&self, p: [f32; 2]) -> Option<egui::Pos2> {
+        (self.last_rect.width() > 1.0).then(|| self.world_to_screen_at(self.last_rect, p))
+    }
+
     #[cfg(test)]
     pub(crate) fn scene(&self) -> &Scene2D {
         &self.scene

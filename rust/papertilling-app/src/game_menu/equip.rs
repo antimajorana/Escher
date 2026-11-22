@@ -37,6 +37,7 @@ impl PapertillingApp {
                 }
             }
             CardId::Combine => self.select_defects_view(DefectsView::CombineAndFuse),
+            CardId::FuseAndCompare => self.select_defects_view(DefectsView::FuseAndCompare),
             CardId::Surface(t) => {
                 self.surfaces.choose_target(t);
                 self.surfaces.clamp_params(self.gallery.active_item());

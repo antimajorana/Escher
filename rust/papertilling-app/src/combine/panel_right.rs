@@ -83,10 +83,11 @@ impl CombineTabState {
                     self.sync_selection_to_canvas(canvas);
                     build_preview = Some(false);
                 }
-                if ui
-                    .button("Inspect core reconnections")
-                    .on_hover_text("Cut a fixed-boundary cavity around these defects and enumerate valid lattice core reconnections")
-                    .clicked()
+                if advanced
+                    && ui
+                        .button("Inspect core reconnections")
+                        .on_hover_text("Cut a fixed-boundary cavity around these defects and enumerate valid lattice core reconnections")
+                        .clicked()
                 {
                     self.open_cavity_in_fusion = Some(self.build_cavity_request(gallery_item));
                 }

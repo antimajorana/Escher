@@ -38,7 +38,7 @@ fn presets_menu_lists_every_preset_on_every_tab_and_a_click_applies_it() {
         h.state_mut().set_advanced(adv);
         h.run_steps(2);
         for tab in NavTab::ALL {
-            if !adv && !matches!(tab, NavTab::Gallery | NavTab::Surfaces | NavTab::Defects | NavTab::Combine) {
+            if !adv && !matches!(tab, NavTab::Gallery | NavTab::Surfaces | NavTab::Defects | NavTab::Combine | NavTab::Fuse) {
                 continue;
             }
             h.state_mut().switch_tab(tab);

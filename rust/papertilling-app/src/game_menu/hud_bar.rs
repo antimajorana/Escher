@@ -107,7 +107,7 @@ impl PapertillingApp {
                     for (v, label) in [
                         (DefectsView::Catalogue2D, "Allowed defects"),
                         (DefectsView::CombineAndFuse, "Place & fuse"),
-                        (DefectsView::FusionSteps, "Fusion steps"),
+                        (DefectsView::FuseAndCompare, "Fuse & compare"),
                     ] {
                         if ui.selectable_label(self.defects_view == v, label).clicked() && self.defects_view != v {
                             self.select_defects_view(v);

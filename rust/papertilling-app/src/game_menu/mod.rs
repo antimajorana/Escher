@@ -359,6 +359,7 @@ impl PapertillingApp {
                 DefectsView::Catalogue2D => CardId::DefectCatalogue(self.defects.sub_tab),
                 DefectsView::AtlasDefects => CardId::AtlasDefects(self.atlas.sub_tab),
                 DefectsView::CombineAndFuse => CardId::Combine,
+                DefectsView::FuseAndCompare => CardId::FuseAndCompare,
                 DefectsView::PointAndBoundary => wb(WorkbenchView::S2Defects),
                 DefectsView::DetectFields => wb(WorkbenchView::S3Detect),
                 DefectsView::FusionSteps => wb(WorkbenchView::S7Fusion),

@@ -54,6 +54,7 @@ fn settled(app: &PapertillingApp) -> bool {
             let c = &app.combine;
             app.preset_pending.is_none() && !c.is_initializing() && !c.is_building() && !c.view3d_dirty
         }
+        NavTab::Fuse => app.preset_pending.is_none() && !app.fuse.is_busy(),
         NavTab::Analysis => {
             let a = &app.analysis;
             app.preset_pending.is_none()
@@ -103,6 +104,7 @@ fn snapshot(app: &PapertillingApp) -> String {
             format!("{:?} {:?} {} {:?} {:?} {}", d.current_selection(), d.sub_tab, d.radius, d.view_mode, d.sheet_opts.color_mode, d.readout.title)
         }
         NavTab::Combine => format!("{:?} {:?} {}", app.combine.specs, app.combine.view_mode, app.combine.undo_stack.len()),
+        NavTab::Fuse => format!("{:?}", app.fuse.current_specs()),
         NavTab::Workbench => format!("{:?}", app.workbench.view),
         NavTab::Atlas => {
             let a = &app.atlas;
@@ -129,7 +131,7 @@ fn snapshot(app: &PapertillingApp) -> String {
 }
 
 /// Hand-written expectations: tab, named key (`None`: not a named lattice / lattice kept) and ITA plane group.
-const EXPECT: [(&str, NavTab, Option<&str>, &str); 15] = [
+const EXPECT: [(&str, NavTab, Option<&str>, &str); 16] = [
     ("Kagome: ITA symmetry + Voronoi", NavTab::Gallery, Some("kagome"), "p6m"),
     ("Chiral kagome (p6, no mirrors)", NavTab::Gallery, Some("chiral_kagome"), "p6"),
     ("p4g bond net #1 + Voronoi", NavTab::Gallery, None, "p4g"),
@@ -143,6 +145,7 @@ const EXPECT: [(&str, NavTab, Option<&str>, &str); 15] = [
     ("Analysis: -60 deg honeycomb eigenmodes", NavTab::Analysis, Some("honeycomb"), "p6m"),
     ("Combine: square dislocation dipole", NavTab::Combine, Some("square"), "p4m"),
     ("Combine: honeycomb 5-7 pair", NavTab::Combine, Some("honeycomb"), "p6m"),
+    ("Fuse: honeycomb 5-7 equivalence", NavTab::Fuse, Some("honeycomb"), "p6m"),
     ("Atlas: rutile #136 screw dispiration", NavTab::Atlas, None, ""),
     ("Atlas: hyperbolic {7,3} tiling", NavTab::Atlas, None, ""),
 ];
@@ -219,6 +222,12 @@ fn check_known_answers(name: &str, app: &PapertillingApp) {
                 _ => panic!("{name}: disclinations only"),
             }).collect();
             assert_eq!(angles, [60.0, -60.0], "{name}: +-360/6");
+        }
+        "Fuse: honeycomb 5-7 equivalence" => {
+            let b = app.fuse.last_bundle.as_ref().expect("bundle").as_ref().expect("bundle ok");
+            assert!(b.report.equivalent && b.report.match_tier == "completion", "{name}");
+            let cand = app.fuse.active_single_candidate().expect("candidate");
+            assert!(cand.is_match && cand.kind == "completion", "{name}");
         }
         "Atlas: rutile #136 screw dispiration" => {
             assert_eq!((app.active_mode, app.defects_view), (super::AppMode::Defects, super::DefectsView::AtlasDefects));
@@ -338,6 +347,11 @@ fn combine_presets_place_their_pins() {
 }
 
 #[test]
+fn fuse_presets_compare_equivalent_single_defect() {
+    check_tab(NavTab::Fuse);
+}
+
+#[test]
 fn atlas_presets_build_their_scenes() {
     check_tab(NavTab::Atlas);
 }
@@ -350,7 +364,7 @@ fn analysis_presets_compute_spectral_ldos() {
 #[test]
 fn preset_list_has_unique_names_descriptions_and_valid_lattices() {
     let app = PapertillingApp::new(false, String::from("test"), String::from("test"));
-    assert!((12..=15).contains(&PRESETS.len()));
+    assert!((12..=16).contains(&PRESETS.len()));
     let mut names: Vec<&str> = PRESETS.iter().map(|p| p.name).collect();
     names.sort_unstable();
     names.dedup();
@@ -361,7 +375,7 @@ fn preset_list_has_unique_names_descriptions_and_valid_lattices() {
             assert!(app.preset_lattice_item(l).is_some(), "{}: lattice {l:?}", p.name);
         }
     }
-    // Workbench views have no preset yet; PRESETS is capped at 15 by the assertion above.
+    // Workbench views have no preset yet; PRESETS is capped at 16 by the assertion above.
     for tab in NavTab::ALL.into_iter().filter(|t| *t != NavTab::Workbench) {
         assert!(PRESETS.iter().any(|p| p.tab() == tab), "{tab:?} has a preset");
     }

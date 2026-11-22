@@ -29,6 +29,7 @@ pub(crate) enum CardId {
     WallpaperGroups,
     CustomBuilder,
     Combine,
+    FuseAndCompare,
     AtlasPristine(AtlasSubTab),
     AtlasDefects(AtlasSubTab),
     DefectCatalogue(DefectSubTab),
@@ -80,7 +81,7 @@ pub(crate) fn card_realm(id: CardId) -> Realm {
         CardId::WallpaperGroups | CardId::AtlasPristine(_) => Realm::Groups,
         CardId::CustomBuilder | CardId::Lattice(_) => Realm::Tilings,
         CardId::Surface(_) => Realm::Manifolds,
-        CardId::Combine | CardId::AtlasDefects(_) | CardId::DefectCatalogue(_) => Realm::Forge,
+        CardId::Combine | CardId::FuseAndCompare | CardId::AtlasDefects(_) | CardId::DefectCatalogue(_) => Realm::Forge,
         CardId::Wb(v, i) => match v {
             WorkbenchView::S2Defects | WorkbenchView::S3Detect | WorkbenchView::S7Fusion => Realm::Forge,
             WorkbenchView::S4Flat3d => Realm::Manifolds,
@@ -168,6 +169,7 @@ impl PapertillingApp {
                 CardId::WallpaperGroups => "Gallery · browse by group".to_owned(),
                 CardId::CustomBuilder => "Gallery · your own recipe".to_owned(),
                 CardId::Combine => "place, fuse and move defects".to_owned(),
+                CardId::FuseAndCompare => "side-by-side single-defect equivalence".to_owned(),
                 CardId::DefectCatalogue(s) => match s {
                     DefectSubTab::Dislocations => counts
                         .map_or_else(|| "catalogue of the selected lattice".to_owned(), |n| format!("{} entries", n[0])),
@@ -290,6 +292,7 @@ impl PapertillingApp {
                 }
                 if matches!(pill, 0 | 2) {
                     out.push(Card::new(CardId::Combine, "Place & fuse defects"));
+                    out.push(Card::new(CardId::FuseAndCompare, "Fuse & single-defect equivalence"));
                     out.extend(self.wb_cards(WorkbenchView::S7Fusion, 0..=1));
                 }
                 if matches!(pill, 0 | 3) {
