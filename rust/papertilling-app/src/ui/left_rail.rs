@@ -72,6 +72,10 @@ impl PapertillingApp {
                         );
                         self.drain_combine_fusion_cavity();
                     }
+                    NavTab::Fuse => {
+                        let item = self.gallery.active_item().clone();
+                        self.fuse.show_left_panel(ui, &item, &mut self.canvas2d, &tokens);
+                    }
                     NavTab::Atlas => {
                         let offered = self.atlas_offered_tabs();
                         self.atlas.show_left_panel(

@@ -72,6 +72,7 @@ impl Default for TestLayoutRects {
 pub struct PapertillingApp {
     defects_seen: ItemKey,
     combine_seen: ItemKey,
+    fuse_seen: ItemKey,
     pub(crate) smoke_test: bool,
     smoke_reported: bool,
     last_smoke_stage: u32,
@@ -109,6 +110,7 @@ pub struct PapertillingApp {
     pub(crate) surfaces: SurfacesTabState,
     pub(crate) defects: DefectsTabState,
     pub(crate) combine: CombineTabState,
+    pub(crate) fuse: crate::fuse_tab::FuseTabState,
     pub(crate) atlas: crate::atlas_tab::AtlasTabState,
     pub(crate) analysis: AnalysisModeState,
     /// Stage S2..S6 panels behind `NavTab::Workbench`.
@@ -141,6 +143,7 @@ impl PapertillingApp {
         let mut surfaces = SurfacesTabState::new();
         let defects = DefectsTabState::new(gallery.active_item(), &backend);
         let combine = CombineTabState::new(gallery.active_item(), &backend);
+        let fuse = crate::fuse_tab::FuseTabState::new(gallery.active_item(), &backend);
         let atlas = crate::atlas_tab::AtlasTabState::new();
         let analysis = AnalysisModeState::new();
 
@@ -169,6 +172,7 @@ impl PapertillingApp {
         Self {
             defects_seen: item_key(gallery.active_item()),
             combine_seen: item_key(gallery.active_item()),
+            fuse_seen: item_key(gallery.active_item()),
             smoke_test,
             smoke_reported: false,
             last_smoke_stage: 0,
@@ -202,6 +206,7 @@ impl PapertillingApp {
             surfaces,
             defects,
             combine,
+            fuse,
             atlas,
             analysis,
             workbench: WorkbenchState::new(),
@@ -287,7 +292,11 @@ impl PapertillingApp {
                     .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
                 self.combine.sync_view3d(&item, &mut self.view3d);
             }
-            NavTab::Defects | NavTab::Combine => {}
+            NavTab::Fuse if item_key(&item) != self.fuse_seen => {
+                self.fuse_seen = item_key(&item);
+                self.fuse.reload_for_item(&item, &mut self.canvas2d);
+            }
+            NavTab::Defects | NavTab::Combine | NavTab::Fuse => {}
             // the Gallery redraw above replaced the Atlas 2D scene: restore it
             NavTab::Atlas => self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d),
             NavTab::Analysis => {
@@ -338,12 +347,17 @@ impl PapertillingApp {
             self.export_status = String::from("Wait for the scene build before exporting.");
             return;
         }
+        if self.active_tab == NavTab::Fuse && self.fuse.is_busy() {
+            self.export_status = String::from("Wait for the fusion build before exporting.");
+            return;
+        }
         let wb_name = format!("{}_scene.svg", self.workbench.view.file_stem());
         let default_name = match self.active_tab {
             NavTab::Gallery => "lattice_gallery.svg",
             NavTab::Surfaces => "surface_net.svg",
             NavTab::Defects => "defect_crystal.svg",
             NavTab::Combine => "combined_defects.svg",
+            NavTab::Fuse => "fused_defects.svg",
             NavTab::Atlas => "atlas_scene.svg",
             NavTab::Analysis => "analysis_spectrum.svg",
             NavTab::Workbench => wb_name.as_str(),
@@ -369,7 +383,7 @@ impl PapertillingApp {
             return;
         }
         self.finish_gallery_moves();
-        if self.active_tab == NavTab::Gallery {
+        if matches!(self.active_tab, NavTab::Gallery | NavTab::Fuse) {
             self.export_status =
                 String::from("Open Surfaces, Defects, Combine or Atlas to export a 3D .obj mesh.");
             return;
@@ -399,7 +413,7 @@ impl PapertillingApp {
         }
         let wb_name = format!("{}_mesh.obj", self.workbench.view.file_stem());
         let default_name = match self.active_tab {
-            NavTab::Gallery => "mesh.obj",
+            NavTab::Gallery | NavTab::Fuse => "mesh.obj",
             NavTab::Surfaces => "surface_mesh.obj",
             NavTab::Defects => "defect_sheet.obj",
             NavTab::Combine => "combined_sheet.obj",
@@ -413,7 +427,7 @@ impl PapertillingApp {
             .add_filter("Wavefront OBJ", &["obj"]);
         if let Some(path) = dialog.save_file() {
             let res = match self.active_tab {
-                NavTab::Gallery => unreachable!(),
+                NavTab::Gallery | NavTab::Fuse => unreachable!(),
                 NavTab::Surfaces => self.surfaces.export_active_obj(&path),
                 NavTab::Defects => self.defects.export_active_obj(&path),
                 NavTab::Combine => self.combine.export_active_obj(self.gallery.active_item(), &path),
@@ -457,6 +471,10 @@ impl PapertillingApp {
                 self.combine_seen = item_key(&item);
                 self.combine.sync_to_canvas(&item, &mut self.canvas2d, false);
                 self.combine.view3d_dirty = true;
+            }
+            NavTab::Fuse => {
+                self.fuse_seen = item_key(&item);
+                self.fuse.sync_canvases(&item, &mut self.canvas2d, false);
             }
             // the renamed Gallery cell was redrawn into the shared canvas: restore the Atlas scene
             NavTab::Atlas => self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d),

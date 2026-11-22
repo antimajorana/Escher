@@ -102,6 +102,10 @@ impl PapertillingApp {
                 row(ui, t, "View", DefectsView::CombineAndFuse.label());
                 row(ui, t, "Lattice", &self.gallery.active_item().display_with_orig());
             }
+            CardId::FuseAndCompare => {
+                row(ui, t, "View", DefectsView::FuseAndCompare.label());
+                row(ui, t, "Lattice", &self.gallery.active_item().display_with_orig());
+            }
             CardId::Analysis(_) => row(ui, t, "Lattice", &self.gallery.active_item().display_with_orig()),
             CardId::Preset(i) => {
                 if let Some(p) = PRESETS.get(i) {

@@ -108,6 +108,7 @@ pub(crate) fn settled(a: &PapertillingApp) -> bool {
         NavTab::Surfaces => !a.surfaces.is_building(),
         NavTab::Defects => !a.defects.is_busy() && !a.defects.initializing,
         NavTab::Combine => !a.combine.is_building() && !a.combine.is_initializing(),
+        NavTab::Fuse => !a.fuse.is_busy(),
         NavTab::Atlas => !a.atlas.dirty,
         NavTab::Analysis => !a.analysis.is_busy(),
         NavTab::Gallery => true,
@@ -197,6 +198,7 @@ fn defects_card(a: &PapertillingApp, v: DefectsView) -> (Realm, String) {
         DefectsView::Catalogue2D => (Realm::Forge, a.defects.sub_tab.label().to_string()),
         DefectsView::AtlasDefects => (Realm::Forge, a.atlas.last_defect_subtab.defect_label().to_string()),
         DefectsView::CombineAndFuse => (Realm::Forge, String::from("Place & fuse defects")),
+        DefectsView::FuseAndCompare => (Realm::Forge, String::from("Fuse & single-defect equivalence")),
         DefectsView::PointAndBoundary | DefectsView::DetectFields | DefectsView::FusionSteps => {
             wb_card(a, v.workbench_view().expect("stage panel view"))
         }

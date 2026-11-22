@@ -154,6 +154,7 @@ fn defects_card(v: DefectsView) -> CardId {
         DefectsView::Catalogue2D => CardId::DefectCatalogue(DefectSubTab::Disclinations),
         DefectsView::AtlasDefects => CardId::AtlasDefects(AtlasSubTab::HyperbolicH2), // C1: 3D line defects hidden
         DefectsView::CombineAndFuse => CardId::Combine,
+        DefectsView::FuseAndCompare => CardId::FuseAndCompare,
         DefectsView::PointAndBoundary => CardId::Wb(WorkbenchView::S2Defects, 0),
         DefectsView::DetectFields => CardId::Wb(WorkbenchView::S3Detect, 0),
         DefectsView::FusionSteps => CardId::Wb(WorkbenchView::S7Fusion, 0),

@@ -174,6 +174,7 @@ impl PapertillingApp {
                 Some(NavTab::Surfaces) => self.select_lattices_view(LatticesView::Manifolds),
                 Some(NavTab::Defects) => self.select_defects_view(DefectsView::Catalogue2D),
                 Some(NavTab::Combine) => self.select_defects_view(DefectsView::CombineAndFuse),
+                Some(NavTab::Fuse) => self.select_defects_view(DefectsView::FuseAndCompare),
                 Some(NavTab::Analysis) => self.restore_postponed_analysis(notes),
                 // never written by a v1 app (the tab did not exist); listed because the match is exhaustive
                 Some(NavTab::Workbench) => self.select_lattices_view(LatticesView::Plane2D),

@@ -71,6 +71,13 @@ impl PapertillingApp {
                         );
                         self.drain_combine_fusion_cavity();
                     }
+                    NavTab::Fuse => {
+                        let item = self.gallery.active_item().clone();
+                        self.fuse.show_inspector_panel(ui, &item, &tokens);
+                        if let Some(specs) = self.fuse.take_open_in_combine() {
+                            self.open_specs_in_combine(specs);
+                        }
+                    }
                     NavTab::Atlas => {
                         self.atlas.show_inspector_panel(ui, &tokens);
                     }

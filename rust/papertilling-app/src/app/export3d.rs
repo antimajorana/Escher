@@ -29,7 +29,7 @@ impl PapertillingApp {
         if self.export3d_job.is_some() {
             return refuse("A 3D PNG export is still being written.");
         }
-        if self.active_tab == NavTab::Gallery {
+        if matches!(self.active_tab, NavTab::Gallery | NavTab::Fuse) {
             return refuse("Open Surfaces, Defects, Combine or Atlas to export a 3D PNG.");
         }
         // before the stale-view guards: a 2D-only view never clears view3d_dirty, so "wait" would never resolve
@@ -89,7 +89,7 @@ impl PapertillingApp {
         }
         let wb_name = format!("{}_mesh.png", self.workbench.view.file_stem());
         let default_name = match self.active_tab {
-            NavTab::Gallery => "mesh.png",
+            NavTab::Gallery | NavTab::Fuse => "mesh.png",
             NavTab::Surfaces => "surface_mesh.png",
             NavTab::Defects => "defect_sheet.png",
             NavTab::Combine => "combined_sheet.png",

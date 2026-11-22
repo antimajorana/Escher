@@ -13,6 +13,7 @@ pub enum NavTab {
     Surfaces,
     Defects,
     Combine,
+    Fuse,
     Atlas,
     Analysis,
     /// Internal route for the S2..S6 panels (`crate::workbench`), never shown: the user reaches them through
@@ -21,11 +22,12 @@ pub enum NavTab {
 }
 
 impl NavTab {
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::Gallery,
         Self::Surfaces,
         Self::Defects,
         Self::Combine,
+        Self::Fuse,
         Self::Atlas,
         Self::Analysis,
         Self::Workbench,
@@ -111,16 +113,18 @@ pub enum DefectsView {
     Catalogue2D,
     AtlasDefects,
     CombineAndFuse,
+    FuseAndCompare,
     PointAndBoundary,
     DetectFields,
     FusionSteps,
 }
 
 impl DefectsView {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Catalogue2D,
         Self::AtlasDefects,
         Self::CombineAndFuse,
+        Self::FuseAndCompare,
         Self::PointAndBoundary,
         Self::DetectFields,
         Self::FusionSteps,
@@ -128,7 +132,7 @@ impl DefectsView {
 
     /// Views reachable in the two-mode Default view (`Advanced` off).
     pub fn is_default(self) -> bool {
-        matches!(self, Self::Catalogue2D | Self::CombineAndFuse | Self::FusionSteps)
+        matches!(self, Self::Catalogue2D | Self::CombineAndFuse | Self::FuseAndCompare)
     }
 
     pub fn label(self) -> &'static str {
@@ -136,6 +140,7 @@ impl DefectsView {
             Self::Catalogue2D => "Catalogue (2D)",
             Self::AtlasDefects => "0D–1D & H² Defects",
             Self::CombineAndFuse => "Combine, Fuse & Move",
+            Self::FuseAndCompare => "Fuse & Equivalence",
             Self::PointAndBoundary => "Point, Stone-Wales & GB",
             Self::DetectFields => "Detect & Fields",
             Self::FusionSteps => "Fusion steps (graphs)",
@@ -147,6 +152,7 @@ impl DefectsView {
             Self::Catalogue2D => NavTab::Defects,
             Self::AtlasDefects => NavTab::Atlas,
             Self::CombineAndFuse => NavTab::Combine,
+            Self::FuseAndCompare => NavTab::Fuse,
             Self::PointAndBoundary | Self::DetectFields | Self::FusionSteps => NavTab::Workbench,
         }
     }
@@ -268,6 +274,7 @@ impl PapertillingApp {
             NavTab::Surfaces => self.select_lattices_view(LatticesView::Manifolds),
             NavTab::Defects => self.select_defects_view(DefectsView::Catalogue2D),
             NavTab::Combine => self.select_defects_view(DefectsView::CombineAndFuse),
+            NavTab::Fuse => self.select_defects_view(DefectsView::FuseAndCompare),
             NavTab::Analysis => self.switch_mode(AppMode::Analysis),
             NavTab::Workbench => match self.workbench.view.mode_view() {
                 ModeView::Lattices(v) => self.select_lattices_view(v),
@@ -340,6 +347,16 @@ impl PapertillingApp {
                             .reload_for_item(&item, &self.backend, &mut self.canvas2d, true);
                     }
                     self.combine.sync_view3d(&item, &mut self.view3d);
+                }
+            }
+            NavTab::Fuse => {
+                let item = self.gallery.active_item().clone();
+                self.view3d.set_legend(None);
+                if item_key(&item) == self.fuse_seen {
+                    self.fuse.activate_and_sync(&item, &mut self.canvas2d);
+                } else {
+                    self.fuse_seen = item_key(&item);
+                    self.fuse.reload_for_item(&item, &mut self.canvas2d);
                 }
             }
             NavTab::Atlas => {

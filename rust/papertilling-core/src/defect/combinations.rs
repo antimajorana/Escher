@@ -164,7 +164,7 @@ fn dan_sunday_winding(p: [f64; 2], poly: &[[f64; 2]]) -> i32 {
 }
 
 /// Exact site-count excess `V_crystal - V_perfect` for a vacuum (`H = I`) crystal patch.
-fn vacuum_delta_v(lat_info: &LatticeCoreInfo, crystal: &BuiltCrystal) -> Option<i32> {
+pub(crate) fn vacuum_delta_v(lat_info: &LatticeCoreInfo, crystal: &BuiltCrystal) -> Option<i32> {
     let faces = frame_faces(crystal);
     if faces.is_empty() {
         return None;

@@ -78,7 +78,7 @@ impl PapertillingApp {
                 self.defects.error.is_some() || self.analysis.spectrum.last_error.is_some()
             }
             NavTab::Workbench => self.workbench.error().is_some(),
-            NavTab::Gallery | NavTab::Atlas => false,
+            NavTab::Gallery | NavTab::Atlas | NavTab::Fuse => false,
         }
     }
 
