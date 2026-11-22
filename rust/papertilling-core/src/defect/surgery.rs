@@ -419,7 +419,9 @@ pub(crate) fn build_point_defects_with_info(
         });
     }
     let init_snap = (eff.len() >= 2).then(|| builder.snapshot());
-    let allow_dfs = eff.len() >= 2 && eff.iter().any(|d| d.cut.is_none());
+    // The same bounds as the Python builder (`_surgery.run_eff_with_fallback`): other orders and the cut
+    // search are tried for 2 to 4 defects only, so both give the same lattice or the same refusal.
+    let allow_dfs = (2..=4).contains(&eff.len());
     let cut_lists: Vec<Vec<[f64; 2]>> = eff
         .iter()
         .enumerate()
@@ -453,13 +455,11 @@ pub(crate) fn build_point_defects_with_info(
             if let Some(cut) = chosen { greedy_cuts.push(cut); }
         }
         if greedy_err.is_none() {
-            match finish_and_check(&mut builder, lat_info, expected_frank) {
-                Ok(crystal) => {
-                    applied_cuts.extend(reorder_applied_cuts(&eff, order, &greedy_cuts));
-                    return Ok((crystal, applied_cuts, coalesced));
-                }
-                Err(e) => greedy_err = Some(e),
-            }
+            // Every step was accepted: this is the lattice. A failed final check is reported, never searched
+            // round (a lattice that fails it is refused, as before the fallback existed and as in Python).
+            let crystal = finish_and_check(&mut builder, lat_info, expected_frank)?;
+            applied_cuts.extend(reorder_applied_cuts(&eff, order, &greedy_cuts));
+            return Ok((crystal, applied_cuts, coalesced));
         }
         if oi == 0 {
             first_err = greedy_err;
@@ -468,7 +468,8 @@ pub(crate) fn build_point_defects_with_info(
         if allow_dfs {
             builder.restore(init_snap.as_ref().expect("snapshot for n >= 2").clone());
             let (mut chosen, mut budget) = (Vec::with_capacity(eff.len()), 160usize);
-            if let Some(crystal) = search_cuts_dfs(&mut builder, lat_info, &eff, order, &cut_lists, 0, expected_frank, &mut chosen, &mut budget) {
+            if search_cuts_dfs(&mut builder, &eff, order, &cut_lists, 0, &mut chosen, &mut budget) {
+                let crystal = finish_and_check(&mut builder, lat_info, expected_frank)?;
                 applied_cuts.extend(reorder_applied_cuts(&eff, order, &chosen));
                 return Ok((crystal, applied_cuts, coalesced));
             }
@@ -537,33 +538,32 @@ fn finish_and_check(builder: &mut ConeBuilder, lat_info: &LatticeCoreInfo, expec
     Ok(crystal)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Depth-first search over the candidate cuts in `order`, at most `budget` cut applications. True when every
+/// defect was applied; the builder then holds that state and `chosen` the cuts. Mirrors the Python `_dfs`.
 fn search_cuts_dfs(
-    builder: &mut ConeBuilder, lat_info: &LatticeCoreInfo, eff: &[NormSpec], order: &[usize],
-    cut_lists: &[Vec<[f64; 2]>], pos: usize, expected_frank: f64, chosen: &mut Vec<[f64; 2]>, budget: &mut usize,
-) -> Option<BuiltCrystal> {
+    builder: &mut ConeBuilder, eff: &[NormSpec], order: &[usize], cut_lists: &[Vec<[f64; 2]>], pos: usize,
+    chosen: &mut Vec<[f64; 2]>, budget: &mut usize,
+) -> bool {
     if pos == order.len() {
-        let snap = builder.snapshot();
-        if let Ok(crystal) = finish_and_check(builder, lat_info, expected_frank) { return Some(crystal); }
-        builder.restore(snap);
-        return None;
+        return true;
     }
     let idx = order[pos];
-    let limit = if pos + 1 == order.len() { cut_lists[idx].len() } else { cut_lists[idx].len().min(8) };
-    for &cut in &cut_lists[idx][..limit] {
-        if *budget == 0 { return None; }
+    for &cut in &cut_lists[idx] {
+        if *budget == 0 {
+            return false;
+        }
         *budget -= 1;
         let snap = builder.snapshot();
         if apply_one_step(builder, &eff[idx], cut).is_ok() {
             chosen.push(cut);
-            if let Some(c) = search_cuts_dfs(builder, lat_info, eff, order, cut_lists, pos + 1, expected_frank, chosen, budget) {
-                return Some(c);
+            if search_cuts_dfs(builder, eff, order, cut_lists, pos + 1, chosen, budget) {
+                return true;
             }
             chosen.pop();
         }
         builder.restore(snap);
     }
-    None
+    false
 }
 
 /// Build single or multi-defect configurations on an open disk patch using cone-safe Volterra surgery.

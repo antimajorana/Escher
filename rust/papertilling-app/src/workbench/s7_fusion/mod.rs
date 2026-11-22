@@ -29,7 +29,7 @@ const ROUTE_SOURCES: [&str; 2] = [
     "Route 1 (edge slides): 5 edge-preserving moves ending at Eq. (58) of the paper with edge 15 renamed 12 and edge 16 renamed 11.",
     "Route 2 (merge & add): the two steps of the paper, Eq. (57), Fig. 8(b) and Eq. (58), Fig. 8(c).",
 ];
-const UNIQUENESS_PROVED: &str = "[PROVED] With 2 interior edges and valence ≥ 3, sides ≥ 3, all 5 lattice cores on {c,d,g,h} are listed; even over all 120 cavity chord pairs, {c–h, d–g} is the unique regular square core.";
+const UNIQUENESS_PROVED: &str = "[COMPUTATIONAL EVIDENCE, exhaustive search] With 2 interior edges and valence ≥ 3, sides ≥ 3, all 5 lattice cores on {c,d,g,h} are listed; even over all 120 cavity chord pairs, {c–h, d–g} is the unique regular square core.";
 
 const ROUTE1_GEOM_LABELS: [&str; 6] = [
     "Start (four dislocations)",
@@ -466,7 +466,10 @@ impl WbPanel for Panel {
             return;
         };
         let as_index = |x: &Value| x.as_u64().and_then(|n| usize::try_from(n).ok());
-        match o.get("route").map(as_index) {
+        // A session saved before the core list existed has two steps and numbers its routes from 0:
+        // its route r is view r + 1 now.
+        let legacy = o.get("step").and_then(Value::as_array).is_some_and(|s| s.len() == 2);
+        match o.get("route").map(as_index).map(|r| r.map(|r| r + usize::from(legacy))) {
             Some(Some(r)) if r < VIEW_LABELS.len() => self.route = r,
             Some(_) => notes.push(String::from("Fusion steps: unknown route (kept current)")),
             None => {}

@@ -63,6 +63,9 @@ fn switch_to_square_combinations(h: &mut egui_kittest::Harness<'static, Papertil
         let sq = app.backend.find_named("square").expect("square").clone();
         app.select_lattice_and_sync(sq);
         app.select_defects_view(DefectsView::Catalogue2D);
+        // A smaller table than the default bound of 1.5: these tests check the screen and the hand-over to
+        // Place & fuse, not the table's contents, and must not depend on how fast the machine is.
+        app.defects.combos.max_sep_scale = 1.0;
     }
     wait_until(h, "square Allowed defects init", settled);
     h.get_by_label("Combinations").click();

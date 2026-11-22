@@ -262,7 +262,8 @@ fn session_restore_clamps_and_reports_and_handles_legacy_json() {
     // Legacy 2-element step JSON without `gate_labels` remains backward-compatible.
     p.restore(&serde_json::json!({"route": 1, "step": [3, 2], "numbers": false}), &mut notes);
     assert!(notes.is_empty(), "{notes:?}");
-    assert_eq!((p.route, p.step, p.show_numbers, p.show_gate_labels), (1, [0, 3, 2], false, false));
+    // The old route 1 was the Hamiltonian route, now view 2, shown at its saved step 2.
+    assert_eq!((p.route, p.step, p.show_numbers, p.show_gate_labels), (2, [0, 3, 2], false, false));
 
     // New 3-element step JSON with `gate_labels`.
     p.restore(&serde_json::json!({"route": 2, "step": [2, 4, 1], "gate_labels": true}), &mut notes);

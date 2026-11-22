@@ -210,7 +210,9 @@ impl SingleDefectCache {
         let mut gallery = Vec::new();
 
         if charge.kind == "dislocation" {
-            let b = charge.b_rep.or(charge.b).unwrap_or([0.0, 0.0]);
+            // The crystal's own Burgers vector, as `equivalent_single_cached` uses: the scan positions are not
+            // rotation-symmetric, so scanning the class representative instead could give another verdict.
+            let b = charge.b.or(charge.b_rep).unwrap_or([0.0, 0.0]);
             let key = DislocKey { cell: cell.clone(), b: [key6(b[0]), key6(b[1])], radius, grid, draw: draw_gallery };
             let found = if let Some(hit) = touch(&mut self.disloc, &key) {
                 self.hits += 1;

@@ -277,7 +277,9 @@ fn square_p4m_dislocation_pairs_glide_climb_and_sum() {
     let mut climb_neg = None;
     for core in &vac.core_groups {
         for m in &core.members {
-            if m.defect_ids != ["T1", "T1"] || (m.separation - 1.0).abs() > 1e-5 {
+            // The dipole b = (1,0), -b = (-1,0): glide when the second core is displaced along b, climb when
+            // across it. Every orientation of the Burgers vectors is listed, so select this one by name.
+            if !m.label.starts_with("T1(1,0) + T1(-1,0) @") || (m.separation - 1.0).abs() > 1e-5 {
                 continue;
             }
             let d = m.displacements[0];
@@ -456,4 +458,26 @@ fn cancellation_stops_immediately() {
     .expect("cancelled call returns Ok");
     assert!(table.cancelled);
     assert_eq!(table.built_count, 0);
+}
+
+#[test]
+fn square_dislocation_pairs_are_counted_without_merging_rotated_placements() {
+    // Hand count. The square lattice has two classes of shortest Burgers vectors, T1 = {(+-1,0), (0,+-1)} and
+    // T2 = {(+-1,+-1)}, four orientations each. The second core sits a lattice vector d away from the first,
+    // 0 < |d| <= 1, so d is one of 4 vectors. Ordered choices: T1-T1 4*4*4 = 64, halved because naming the two
+    // defects the other way round (with d -> -d) is the same pair and never fixes a choice: 32. T2-T2: 32.
+    // T1-T2: 64, no halving (the classes differ). Total 128. Rotated placements are not merged: every first
+    // core sits at the same generic point of the cell, which no rotation of the lattice maps to itself.
+    let cell = square_cell();
+    let table = build_combinations_table(
+        "p4m",
+        &cell,
+        Frame2D::default(),
+        &CombinationMode::DislocationPairs,
+        &fast_opts(1.0),
+        None,
+    )
+    .expect("square p4m dislocation pairs");
+    assert_eq!(table.total_candidates, 128);
+    assert_eq!(table.built_count + table.refused_count, 128);
 }

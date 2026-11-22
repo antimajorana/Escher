@@ -93,11 +93,6 @@ fn centre_points_near(
     out
 }
 
-/// Proper point-group integer matrices `M_f` with `det(M_f) = +1`.
-fn p_plus_mats(grp: &LatticeGroup) -> Vec<[[i32; 2]; 2]> {
-    grp.opsf.iter().filter(|op| imat2_det(op.mf) == 1).map(|op| op.mf).collect()
-}
-
 /// Proper point-group matrices `M_f` of elements in `G_+` stabilising `point` modulo lattice translations.
 fn stabiliser_mats(grp: &LatticeGroup, point: [f64; 2]) -> Vec<[[i32; 2]; 2]> {
     grp.opsf
@@ -181,42 +176,31 @@ fn gen_disclination_pairs(cat: &DefectCatalogue, max_sep: f64) -> Vec<Combinatio
 
 type DislocPairKey = ([i32; 2], [i32; 2], [i32; 2]);
 
-fn canon_disloc_pair(
-    p_plus: &[[[i32; 2]; 2]],
-    ba: [i32; 2],
-    bb: [i32; 2],
-    df: [i32; 2],
-) -> DislocPairKey {
-    let mut best: Option<DislocPairKey> = None;
-    for &mf in p_plus {
-        let k0 = (imat2_vec(mf, ba), imat2_vec(mf, bb), imat2_vec(mf, df));
-        let k1 = (imat2_vec(mf, bb), imat2_vec(mf, ba), imat2_vec(mf, [-df[0], -df[1]]));
-        for k in [k0, k1] {
-            if best.is_none_or(|b| k < b) {
-                best = Some(k);
-            }
-        }
-    }
-    best.expect("P_+ is non-empty")
+/// Key of a dislocation pair up to naming the two defects in the other order. Every pair has its first core
+/// at the same generic point of the cell, and no rotation of the lattice maps that point to itself modulo
+/// the lattice, so two pairs that differ by a rotation are NOT symmetric copies: both are kept.
+fn canon_disloc_pair(ba: [i32; 2], bb: [i32; 2], df: [i32; 2]) -> DislocPairKey {
+    let k0 = (ba, bb, df);
+    let k1 = (bb, ba, [-df[0], -df[1]]);
+    k0.min(k1)
 }
 
 fn gen_dislocation_pairs(cat: &DefectCatalogue, max_sep: f64) -> Vec<CombinationCandidate> {
-    let p_plus = p_plus_mats(&cat.grp);
     let disps = lattice_displacements(&cat.grp, max_sep);
     let mut out = Vec::new();
     let mut seen: HashSet<DislocPairKey> = HashSet::new();
     for i in 0..cat.dislocations.len() {
         let ta = &cat.dislocations[i];
-        let ba_f = ta.b_frac;
-        let ba = ta.b;
         let core_a = ta.at;
-        let at_a = sub2(core_a, [0.5 * ba[0], 0.5 * ba[1]]);
         for j in i..cat.dislocations.len() {
             let tb = &cat.dislocations[j];
-            for &bb_f in &tb.members {
+            // Every orientation of both Burgers vectors: see `canon_disloc_pair` for why none is skipped.
+            for (&ba_f, &bb_f) in ta.members.iter().flat_map(|a| tb.members.iter().map(move |b| (a, b))) {
+                let ba = mat2_vec(cat.grp.a, [ba_f[0] as f64, ba_f[1] as f64]);
+                let at_a = sub2(core_a, [0.5 * ba[0], 0.5 * ba[1]]);
                 let bb = mat2_vec(cat.grp.a, [bb_f[0] as f64, bb_f[1] as f64]);
                 for &(df, d, sep) in &disps {
-                    let key = canon_disloc_pair(&p_plus, ba_f, bb_f, df);
+                    let key = canon_disloc_pair(ba_f, bb_f, df);
                     if !seen.insert(key) {
                         continue;
                     }
