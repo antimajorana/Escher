@@ -287,6 +287,7 @@ def classify_charge(lat: LatticeData, frank: float | None, H) -> dict:
     c = np.linalg.solve(np.eye(2) - M, t)
     rec = lat.centre_class(c)
     w = rec["label"] if rec else "?"
+    # Author decision (2026-11-22): keep single = None for 180° < |angle| < 360°, matching docs/RUST_PLAN.md §9.
     allowed = (rec is not None and abs(frank) <= 180 + 1e-6
                and abs(frank * rec["order"] / 360.0 - round(frank * rec["order"] / 360.0)) < 1e-6)
     out.update(kind="disclination", centre=c, centre_class=w,
@@ -398,7 +399,11 @@ def _run(lat: LatticeData, specs, R=None, centre=None, check=True, fast=None):
                    frank=_fast.total_frank(d, fast), min_degree=int(d.degrees().min()))
         bad = rep["frames_bad"] != 0 or rep["euler"] != 2 or abs(rep["frank"] - expected) > 1e-2 or rep["min_degree"] < 1
         if bad and check:
-            raise ValueError(f"combinatorial check failed ({rep}); move the defects apart or give other cuts")
+            raise ValueError(
+                f"combinatorial check failed (frames_bad={rep['frames_bad']}, euler={rep['euler']}, "
+                f"frank={rep['frank']:.3f} vs {expected:.3f}, min_deg={rep['min_degree']}); "
+                "move the defects apart or give other cuts"
+            )
     return d, rep
 
 

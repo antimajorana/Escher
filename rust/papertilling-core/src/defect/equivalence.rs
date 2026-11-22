@@ -362,6 +362,7 @@ fn classify_holonomy_inner(
     let rec = cat.centre_class_of(c);
     let w = rec.map_or("?", |r| r.label.as_str()).to_string();
     let label = format!("disclination D({w}, {:+.0} deg) about {}", angle, fmt_vec2_round4(c));
+    // Author decision (2026-11-22): keep single = None for 180° < |angle| < 360°, matching docs/RUST_PLAN.md §9.
     let allowed = rec.is_some_and(|r| {
         let k = angle * (r.order as f64) / 360.0;
         angle.abs() <= 180.0 + 1e-6 && (k - round_even(k)).abs() < 1e-6

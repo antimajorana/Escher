@@ -145,16 +145,13 @@ def equivalent_single(config: Configuration, radius: int = 2, grid: int = 3, sho
     q = config.total_charge()
     res = dict(charge=q["label"], kind=q["kind"], single=q["single"], candidates=[], matches=[],
                volterra_matches=[], completion_matches=[], match_tier="none", equivalent=False, gallery=[])
-    if q["kind"] in ("dislocation", "vacuum") or (q["kind"] == "disclination" and q["single"] is not None):
-        try:
-            H = config.core_graph(radius)
-        except ValueError:
-            if any(s.get("kind") == "half_wall" for s in config.specs):
-                H = None
-            else:
-                raise
-    else:
-        H = None
+    try:
+        H = config.core_graph(radius)
+    except ValueError:
+        if any(s.get("kind") == "half_wall" for s in config.specs):
+            H = None
+        else:
+            raise
     if H is None:
         pass
     elif q["kind"] == "dislocation":
@@ -190,6 +187,11 @@ def equivalent_single(config: Configuration, radius: int = 2, grid: int = 3, sho
         res["verdict"] = (f"no match among {sc['distinct']} distinct cores scanned (grid={sc['grid']}, {sc['builds']} "
                           f"Volterra builds, completions capped {sc['capped']} times, {sc['skipped_rim']} skipped at the rim); "
                           f"a larger grid may find more cores")
+    elif q["single"] is None and q["kind"] != "vacuum":
+        if q["kind"] == "disclination" and abs(float(q["angle"])) > 180.0 + 1e-6:
+            res["verdict"] = "no single defect carries this charge (|Frank| > 180 deg)"
+        else:
+            res["verdict"] = "no single defect carries this charge"
     else:
         res["verdict"] = "not equivalent to the single defect"
     if show:

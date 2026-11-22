@@ -146,9 +146,46 @@ fn assert_all_disclination_dipoles_obey_burgers_law(table: &CombinationsTable, t
     assert!(checked > 0, "{tag}: expected at least one disclination dipole");
 }
 
+fn assert_all_within_max_sep(table: &CombinationsTable, tag: &str) {
+    for cg in &table.charge_groups {
+        for core in &cg.core_groups {
+            for m in &core.members {
+                assert!(
+                    m.separation <= table.max_sep + 1e-6,
+                    "{tag}: built {} has sep {:.6} > max_sep {:.6}",
+                    m.label,
+                    m.separation,
+                    table.max_sep
+                );
+            }
+        }
+    }
+}
+
+fn assert_algebraic_matches_built(cat: &DefectCatalogue, table: &CombinationsTable, tag: &str) {
+    for cg in &table.charge_groups {
+        for core in &cg.core_groups {
+            for m in &core.members {
+                let alg = algebraic_specs_classified(cat, Frame2D::default(), &m.specs)
+                    .unwrap_or_else(|| panic!("{tag}: algebraic charge missing for {}", m.label));
+                assert_eq!(alg.kind, cg.charge.kind, "{tag}: kind mismatch on {}", m.label);
+                assert!((alg.angle - cg.charge.angle).abs() < 1e-4, "{tag}: angle mismatch on {}", m.label);
+                if cg.charge.kind == "dislocation" {
+                    let la = alg.length.expect("alg |b|");
+                    let lb = cg.charge.length.expect("built |b|");
+                    assert!((la - lb).abs() < 1e-4, "{tag}: |b| mismatch on {}: {la} vs {lb}", m.label);
+                } else if cg.charge.kind == "disclination" {
+                    assert_eq!(alg.centre_class, cg.charge.centre_class, "{tag}: centre mismatch on {}", m.label);
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn square_p4m_disclination_pairs_algebraic_laws() {
     let cell = square_cell();
+    let cat = catalogue_for_combinations("p4m", &cell, Frame2D::default(), 2.0);
     let table = build_combinations_table(
         "p4m",
         &cell,
@@ -160,7 +197,20 @@ fn square_p4m_disclination_pairs_algebraic_laws() {
     .expect("square p4m disclination pairs");
     assert!(!table.cancelled);
     assert_eq!(table.group, "p4m");
-    assert_eq!(table.built_count + table.refused_count, table.total_candidates);
+    // Exact hand count of G_+ + swap orbits on square p4m (4 species on 1a, 4 on 1b, 2 on 2c):
+    // Within 1.5a: 1a-1a (10 pairs * 2 C4-orbits: sep 1, sqrt(2)) = 20; 1b-1b = 20;
+    // 1a-1b (16 * 1 orbit: sep sqrt(0.5)) = 16; 1a-2c (8 * 4 orbits: 0.5, two at sqrt(1.25), 1.5) = 32;
+    // 1b-2c = 32; 2c-2c: distinct (-180/+180) has 2+2+2 = 6 orbits (sqrt(0.5), 1, sqrt(2)),
+    // while each identical pair merges the two sqrt(0.5) diagonals via swap+R_{-90} -> 1+2+2 = 5 -> 2*5 = 10.
+    // Total = 20 + 20 + 16 + 32 + 32 + 16 = 136; Frank +360 deg (+180/+180) refused = 2+2+1+4+4+5 = 18.
+    assert_eq!(table.total_candidates, 136);
+    assert_eq!(table.built_count + table.refused_count, 136);
+    let frank360 = table.refused.iter().filter(|r| r.reason.contains("360")).count();
+    assert_eq!(frank360, 18, "exact count of Frank +360 deg orbits within 1.5a");
+    assert!(table.refused.iter().all(|r| r.algebraic_charge.is_some()));
+    assert!(table.refused.iter().all(|r| r.reason.contains("360") || r.reason.contains("encloses an earlier defect core")));
+    assert_all_within_max_sep(&table, "square p4m discl 1.5a");
+    assert_algebraic_matches_built(&cat, &table, "square p4m discl 1.5a");
 
     // 1. Exact dipole Burgers formula |b| = 2 sin(|theta|/2) * sep on every dipole.
     assert_all_disclination_dipoles_obey_burgers_law(&table, "square p4m");
@@ -191,6 +241,9 @@ fn square_p4m_disclination_pairs_algebraic_laws() {
     }
 
     // 3. D(1a, +90) + D(1b, -90) at sep = sqrt(0.5) -> dislocation |b| = 1, MatchesSingle (volterra).
+    //    Hand derivation of the core match: removing a +90 deg quadrant at vertex 1a drops its valence
+    //    from 4 to 3 (3-valent site), while inserting a -90 deg quadrant at the adjacent face 1b turns
+    //    that square face into a pentagon -> the exact unit square Volterra edge-dislocation (3-5) core.
     let ab = find_built(&table, "D(1a, +90)", "D(1b, -90)", 0.5_f64.sqrt());
     assert_eq!(ab.len(), 1);
     assert_eq!(ab[0].0.charge.kind, "dislocation");
@@ -235,7 +288,7 @@ fn square_p4m_disclination_pairs_algebraic_laws() {
         .iter()
         .filter(|r| r.defect_ids == ["D(1a, +180)", "D(1a, +180)"])
         .collect();
-    assert!(!ref_360.is_empty(), "D(1a, +180) + D(1a, +180) must be refused");
+    assert_eq!(ref_360.len(), 2, "D(1a, +180) + D(1a, +180) has 2 refused orbits within 1.5a");
     assert!(ref_360.iter().all(|r| r.reason.contains("360")));
 
     // 10. D(2c, +180) + D(2c, -180) keeps (-0.5, 0.5) and (+0.5, 0.5) distinct under G_+.
@@ -254,6 +307,7 @@ fn square_p4m_disclination_pairs_algebraic_laws() {
 #[test]
 fn square_p4m_dislocation_pairs_glide_climb_and_sum() {
     let cell = square_cell();
+    let cat = catalogue_for_combinations("p4m", &cell, Frame2D::default(), 2.0);
     let table = build_combinations_table(
         "p4m",
         &cell,
@@ -264,6 +318,13 @@ fn square_p4m_dislocation_pairs_glide_climb_and_sum() {
     )
     .expect("square p4m dislocation pairs");
     assert!(!table.cancelled);
+    // Exact P_+ (C_4) + swap hand count at max_sep = 1.5 (8 non-zero lattice displacements):
+    // T1+T1: fix b_a=(1,0); b_b=(1,0) halved (8/2=4), b_b=(-1,0) fixed by R=-I (-R d = d -> 8),
+    // b_b=(0,+-1) exchanged (8) -> 4+8+8 = 20. T2+T2 = 20. T1+T2 (no swap): 4*8 = 32. Total = 72.
+    assert_eq!(table.total_candidates, 72);
+    assert_eq!(table.built_count + table.refused_count, 72);
+    assert_all_within_max_sep(&table, "square p4m disloc 1.5a");
+    assert_algebraic_matches_built(&cat, &table, "square p4m disloc 1.5a");
 
     let vac = table
         .charge_groups
@@ -271,38 +332,32 @@ fn square_p4m_dislocation_pairs_glide_climb_and_sum() {
         .find(|cg| cg.charge.kind == "vacuum")
         .expect("expected vacuum charge group for antiparallel dislocation dipoles");
 
-    let mut glide_pos = None;
-    let mut glide_neg = None;
-    let mut climb_pos = None;
-    let mut climb_neg = None;
+    let (mut glide_pos, mut glide_neg, mut climb_pos, mut climb_neg) = (None, None, None, None);
     for core in &vac.core_groups {
         for m in &core.members {
-            // The dipole b = (1,0), -b = (-1,0): glide when the second core is displaced along b, climb when
-            // across it. Every orientation of the Burgers vectors is listed, so select this one by name.
-            if !m.label.starts_with("T1(1,0) + T1(-1,0) @") || (m.separation - 1.0).abs() > 1e-5 {
+            if m.defect_ids != ["T1", "T1"] || (m.separation - 1.0).abs() > 1e-5 {
                 continue;
             }
+            let DefectSpec::Dislocation { b: b0, .. } = m.specs[0] else { continue };
             let d = m.displacements[0];
-            if (d[0] - 1.0).abs() < 1e-5 && d[1].abs() < 1e-5 {
-                glide_pos = Some(m.delta_v);
-            } else if (d[0] + 1.0).abs() < 1e-5 && d[1].abs() < 1e-5 {
-                glide_neg = Some(m.delta_v);
-            } else if d[0].abs() < 1e-5 && (d[1] - 1.0).abs() < 1e-5 {
-                climb_pos = Some(m.delta_v);
-            } else if d[0].abs() < 1e-5 && (d[1] + 1.0).abs() < 1e-5 {
-                climb_neg = Some(m.delta_v);
+            let cr = cross2(b0, d);
+            let dt = dot2(b0, d);
+            if cr.abs() < 1e-6 {
+                if dt > 0.0 { glide_pos = Some(m.delta_v); } else { glide_neg = Some(m.delta_v); }
+            } else if dt.abs() < 1e-6 {
+                if cr > 0.0 { climb_pos = Some(m.delta_v); } else { climb_neg = Some(m.delta_v); }
             }
         }
     }
-    assert_eq!(glide_pos, Some(Some(0)), "glide dipole d=(1,0) must have delta_v=0; refused={:?}", table.refused);
+    assert_eq!(glide_pos, Some(Some(0)), "glide dipole (b.d > 0) must have delta_v=0; refused={:?}", table.refused);
     assert_eq!(
         glide_neg,
         Some(Some(0)),
-        "glide dipole d=(-1,0) must not be falsely coalesced and must have delta_v=0; refused={:?}",
+        "glide dipole (b.d < 0) must not be falsely coalesced and must have delta_v=0; refused={:?}",
         table.refused
     );
-    let dv_pos = climb_pos.flatten().expect("climb dipole d=(0,1) must yield exact delta_v");
-    let dv_neg = climb_neg.flatten().expect("climb dipole d=(0,-1) must yield exact delta_v");
+    let dv_pos = climb_pos.flatten().expect("climb dipole (b x d > 0) must yield exact delta_v");
+    let dv_neg = climb_neg.flatten().expect("climb dipole (b x d < 0) must yield exact delta_v");
     assert_eq!(dv_pos.abs(), 1, "square climb dipole |delta_v| = |b x d| / area = 1");
     assert_eq!(dv_neg, -dv_pos, "opposite climb dipoles must have opposite signs of delta_v");
 
@@ -323,11 +378,17 @@ fn square_p4m_mixed_pairs_disclination_plus_dislocation() {
         &cell,
         Frame2D::default(),
         &CombinationMode::MixedPairs,
-        &fast_opts(1.2),
+        &fast_opts(1.0),
         None,
     )
     .expect("square p4m mixed pairs");
     assert!(!table.cancelled);
+    // Exact hand count of Stab^+(p_a) orbits at max_sep = 1.0 (4 lattice displacements, 2 classes T1, T2 of 4):
+    // Stab^+(p_a) acts freely on (b, d), giving |members| * |disps| / |Stab^+| orbits per (discl, disloc):
+    // 1a (4 discl, |C4|=4): 4 * 2 * (4*4/4) = 32; 1b: 32; 2c (2 discl, |C2|=2): 2 * 2 * (4*4/2) = 32. Total = 96.
+    assert_eq!(table.total_candidates, 96);
+    assert_eq!(table.built_count + table.refused_count, 96);
+    assert_all_within_max_sep(&table, "square p4m mixed 1.0a");
 
     // D(1a, +90) + T1 shifts the +90 rotation centre from 1a to 1b: R_{90} * T_{-b} fixes b(1-i)/2 in 1b.
     let found = table.charge_groups.iter().any(|cg| {
@@ -353,6 +414,7 @@ fn square_p4m_triple_f90_v90_v90_charge_and_strict_overlap_rule() {
     // A face centre with two of its corners: the corners are adjacent (1 apart) or opposite (sqrt 2 apart).
     assert_eq!(table.total_candidates, 2, "adjacent vs opposite corners of the face -> exactly 2 orbits");
     assert_eq!(table.built_count + table.refused_count, 2);
+    assert_all_within_max_sep(&table, "square p4m triple");
     let mut seps: Vec<f64> = table
         .charge_groups
         .iter()
@@ -373,9 +435,15 @@ fn square_p4m_triple_f90_v90_v90_charge_and_strict_overlap_rule() {
     assert_eq!(cg.charge.centre_class.as_deref(), Some("1b"));
 
     // The author's rule (2026-11-22): the validity check stays strict. Three cores this close can overlap;
-    // such a placement is refused for that reason and no other, and is never built by relaxing the check.
+    // such a placement is refused for that reason and still carries its exact algebraic total charge.
+    assert!(!table.refused.is_empty(), "adjacent-corner triple is refused under strict overlap rule");
     for r in &table.refused {
         assert!(r.reason.contains("encloses an earlier defect core"), "{}: {}", r.label, r.reason);
+        let alg = r.algebraic_charge.as_deref().expect("refused triple must carry algebraic_charge");
+        assert!(
+            alg.starts_with("disclination D(1b, -90 deg)"),
+            "expected D(1b, -90 deg) algebraic charge, got {alg:?}"
+        );
     }
 }
 
@@ -474,23 +542,44 @@ fn cancellation_stops_immediately() {
 }
 
 #[test]
-fn square_dislocation_pairs_are_counted_without_merging_rotated_placements() {
-    // Hand count. The square lattice has two classes of shortest Burgers vectors, T1 = {(+-1,0), (0,+-1)} and
-    // T2 = {(+-1,+-1)}, four orientations each. The second core sits a lattice vector d away from the first,
-    // 0 < |d| <= 1, so d is one of 4 vectors. Ordered choices: T1-T1 4*4*4 = 64, halved because naming the two
-    // defects the other way round (with d -> -d) is the same pair and never fixes a choice: 32. T2-T2: 32.
-    // T1-T2: 64, no halving (the classes differ). Total 128. Rotated placements are not merged: every first
-    // core sits at the same generic point of the cell, which no rotation of the lattice maps to itself.
+fn square_p4m_exact_orbit_counts_at_1a_and_pair_order_independence() {
     let cell = square_cell();
-    let table = build_combinations_table(
-        "p4m",
-        &cell,
-        Frame2D::default(),
-        &CombinationMode::DislocationPairs,
-        &fast_opts(1.0),
-        None,
-    )
-    .expect("square p4m dislocation pairs");
-    assert_eq!(table.total_candidates, 128);
-    assert_eq!(table.built_count + table.refused_count, 128);
+    // 1. Disclination pairs within 1.0a: 1a-1a (10*1=10), 1b-1b (10*1=10), 1a-1b (16*1=16),
+    //    1a-2c (8*1=8), 1b-2c (8*1=8), 2c-2c (distinct: 2+2=4; 2 identical: 2*(1+2)=6 -> 10).
+    //    Total = 62; Frank +360 deg (+180/+180) refused = 1+1+1+1+1+3 = 8.
+    let discl = build_combinations_table(
+        "p4m", &cell, Frame2D::default(), &CombinationMode::DisclinationPairs, &fast_opts(1.0), None,
+    ).expect("square p4m discl 1.0a");
+    assert_eq!(discl.total_candidates, 62);
+    assert_eq!(discl.built_count + discl.refused_count, 62);
+    assert_eq!(discl.refused.iter().filter(|r| r.reason.contains("360")).count(), 8);
+    assert!(discl.refused.iter().all(|r| r.algebraic_charge.is_some()));
+    assert!(discl.refused.iter().all(|r| r.reason.contains("360") || r.reason.contains("encloses an earlier defect core")));
+    assert_all_within_max_sep(&discl, "square p4m discl 1.0a");
+
+    // 2. Dislocation pairs within 1.0a under P_+ (C_4) + swap (4 unit displacements):
+    //    T1+T1: b_b=(1,0) halved -> 2, b_b=(-1,0) fixed by R=-I (-R d = d) -> 4, b_b=(0,+-1) swapped -> 4 => 10.
+    //    T2+T2 = 10; T1+T2 (no swap) = 4*4 = 16. Total = 10 + 16 + 10 = 36.
+    let disloc = build_combinations_table(
+        "p4m", &cell, Frame2D::default(), &CombinationMode::DislocationPairs, &fast_opts(1.0), None,
+    ).expect("square p4m disloc 1.0a");
+    assert_eq!(disloc.total_candidates, 36);
+    assert_eq!(disloc.built_count + disloc.refused_count, 36);
+    assert_all_within_max_sep(&disloc, "square p4m disloc 1.0a");
+
+    // 3. Pair order-independence: D(1a, +90) at (0,0) + D(1b, -90) at (0.5,0.5) built as [0,1] vs [1,0].
+    let lat_info = LatticeCoreInfo::new(&cell);
+    let cat = catalogue_for_combinations("p4m", &cell, Frame2D::default(), 2.0);
+    let s0 = DefectSpec::disclination(90.0, [0.0, 0.0]);
+    let s1 = DefectSpec::disclination(-90.0, [0.5, 0.5]);
+    let (c01, _, _) = build_point_defects_with_info(&lat_info, &[s0.clone(), s1.clone()], None, None).expect("[0,1]");
+    let (c10, _, _) = build_point_defects_with_info(&lat_info, &[s1.clone(), s0.clone()], None, None).expect("[1,0]");
+    let q01 = classify_crystal_charge_with_cat(&cat, &c01).expect("charge [0,1]");
+    let q10 = classify_crystal_charge_with_cat(&cat, &c10).expect("charge [1,0]");
+    assert!(same_charge_in_grp(&cat.grp, &q01, &q10, false), "total charge must be order-independent");
+    assert_eq!(q01.kind, "dislocation");
+    assert!((q01.length.unwrap() - 1.0).abs() < 1e-5);
+    let h01 = core_graph_with_rim(&c01, &resolve_patch_rim(&c01, &lat_info, &[s0.clone(), s1.clone()]), &lat_info, 2).expect("core [0,1]");
+    let h10 = core_graph_with_rim(&c10, &resolve_patch_rim(&c10, &lat_info, &[s1, s0]), &lat_info, 2).expect("core [1,0]");
+    assert!(isomorphic_cores(&h01, &h10), "D(1a,+90)+D(1b,-90) yields isomorphic 3-5 cores in both orders");
 }

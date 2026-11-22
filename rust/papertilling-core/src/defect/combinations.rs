@@ -12,8 +12,9 @@ use std::time::Instant;
 
 use petgraph::graph::UnGraph;
 
+use crate::defect::catalogue::DefectCatalogue;
 use crate::defect::charge::{frame_faces, outer_face_index};
-use crate::defect::combinations_gen::generate_candidates;
+use crate::defect::combinations_gen::{generate_candidates, symmetry_note_for_mode};
 use crate::defect::combinations_types::{
     ChargeGroup, CombinationCandidate, CombinationEntry, CombinationMode, CombinationsOptions,
     CombinationsTable, CoreGroup, RefusedCombination, SingleMatchStatus,
@@ -25,11 +26,14 @@ use crate::defect::core_graph::{
     LatticeCoreInfo, SiteKey, core_graph_with_rim, isomorphic_cores, patch_rim,
 };
 use crate::defect::equivalence::{
-    catalogue_for_combinations, classify_crystal_charge_with_cat, fmt_signed_g, same_charge_in_grp,
+    catalogue_for_combinations, classify_crystal_charge_with_cat, classify_holonomy_charge,
+    fmt_signed_g, same_charge_in_grp, same_proper_holonomy,
 };
 use crate::defect::single_cache::SingleDefectCache;
-use crate::defect::surgery::{DefectSpec, build_point_defects_with_info, patch_centre_and_radius};
-use crate::defect::sym_helper::round_dec;
+#[cfg(test)]
+use crate::defect::surgery::build_point_defects_with_info;
+use crate::defect::surgery::{DefectSpec, build_point_defects_with_info_detailed, patch_centre_and_radius};
+use crate::defect::sym_helper::{rotation_about, round_dec};
 use crate::defect::volterra_patch::wl_hash_labelled;
 use crate::types::{BuiltCrystal, Cell2D, Frame2D, Isometry2};
 
@@ -43,16 +47,65 @@ fn build_orders(n: usize) -> Vec<Vec<usize>> {
         0 => Vec::new(),
         1 => vec![vec![0]],
         2 => vec![vec![0, 1], vec![1, 0]],
-        3 => vec![
-            vec![0, 1, 2],
-            vec![0, 2, 1],
-            vec![1, 0, 2],
-            vec![1, 2, 0],
-            vec![2, 0, 1],
-            vec![2, 1, 0],
-        ],
+        3 => vec![vec![0, 1, 2], vec![0, 2, 1], vec![1, 0, 2], vec![1, 2, 0], vec![2, 0, 1], vec![2, 1, 0]],
         _ => vec![(0..n).collect(), (0..n).rev().collect()],
     }
+}
+
+fn specs_holonomy(specs: &[DefectSpec]) -> Option<(f64, Isometry2)> {
+    if specs.is_empty() {
+        return None;
+    }
+    let (mut frank, mut h) = (0.0, Isometry2::IDENTITY);
+    for s in specs {
+        let hi = match *s {
+            DefectSpec::Disclination { angle_deg, at, .. } => {
+                if !angle_deg.is_finite() || !at[0].is_finite() || !at[1].is_finite() {
+                    return None;
+                }
+                frank += angle_deg;
+                rotation_about(at, angle_deg.to_radians())
+            }
+            DefectSpec::Dislocation { b, .. } => {
+                if !b[0].is_finite() || !b[1].is_finite() {
+                    return None;
+                }
+                Isometry2 { m: [[1.0, 0.0], [0.0, 1.0]], t: [-b[0], -b[1]] }
+            }
+            DefectSpec::HalfWall { .. } => return None,
+        };
+        h = h.compose(&hi);
+    }
+    Some((frank, h))
+}
+
+/// Exact algebraic total charge in `G~+` from composing the holonomies of `specs` in order.
+pub(crate) fn algebraic_specs_classified(
+    cat: &DefectCatalogue, frame: Frame2D, specs: &[DefectSpec],
+) -> Option<ClassifiedCharge> {
+    let (frank, h) = specs_holonomy(specs)?;
+    classify_holonomy_charge(cat.group.as_str(), &cat.cell, frame, Some(frank), h, [0.0, 0.0]).ok()
+}
+
+/// Exact algebraic total charge label in `G~+` from composing the holonomies of `specs` in order.
+pub fn algebraic_specs_charge_label(
+    group: &str, cell: &Cell2D, frame: Frame2D, specs: &[DefectSpec],
+) -> Option<String> {
+    let (frank, h) = specs_holonomy(specs)?;
+    classify_holonomy_charge(group, cell, frame, Some(frank), h, [0.0, 0.0]).ok().map(|q| q.label)
+}
+
+fn algebraic_specs_charge(cat: &DefectCatalogue, frame: Frame2D, specs: &[DefectSpec]) -> Option<String> {
+    algebraic_specs_classified(cat, frame, specs).map(|q| q.label)
+}
+
+fn charge_matches_specs(cat: &DefectCatalogue, specs: &[DefectSpec], built: &ClassifiedCharge) -> bool {
+    let ok = |s: &[DefectSpec]| match specs_holonomy(s) {
+        None => true,
+        Some((f, h)) => (built.angle - f).abs() <= 1e-3
+            && same_proper_holonomy(built.holonomy, h, &cat.grp.plus, cat.grp.a, cat.grp.ainv, 1e-4),
+    };
+    ok(specs) || (specs.len() == 3 && ok(&[specs[0].clone(), specs[2].clone(), specs[1].clone()]))
 }
 
 fn canonical_charge_label(charge: &ClassifiedCharge) -> String {
@@ -63,20 +116,16 @@ fn canonical_charge_label(charge: &ClassifiedCharge) -> String {
             let len = charge.length.unwrap_or_else(|| norm2(b));
             format!("dislocation b = ({:.3}, {:.3}), |b| = {:.3}", clean0(b[0]), clean0(b[1]), len)
         }
-        "disclination" => {
-            let cls = charge.centre_class.as_deref().unwrap_or("?");
-            format!("disclination {}° at {cls}", fmt_signed_g(charge.angle))
-        }
+        "disclination" => format!(
+            "disclination {}° at {}",
+            fmt_signed_g(charge.angle),
+            charge.centre_class.as_deref().unwrap_or("?")
+        ),
         "whole_turn" => format!("whole turn ({}°)", fmt_signed_g(charge.angle)),
         "partial_dislocation" => {
             let b = charge.b.unwrap_or([0.0, 0.0]);
             let len = charge.length.unwrap_or_else(|| norm2(b));
-            format!(
-                "partial dislocation b = ({:.3}, {:.3}), |b| = {:.3}",
-                clean0(b[0]),
-                clean0(b[1]),
-                len
-            )
+            format!("partial dislocation b = ({:.3}, {:.3}), |b| = {:.3}", clean0(b[0]), clean0(b[1]), len)
         }
         _ => charge.label.clone(),
     }
@@ -203,14 +252,10 @@ fn try_build_candidate(
     cand: &CombinationCandidate,
     radius: usize,
 ) -> Result<BuiltRecord, String> {
-    let frank_sum: f64 = cand
-        .specs
-        .iter()
-        .filter_map(|s| match s {
-            DefectSpec::Disclination { angle_deg, .. } => Some(*angle_deg),
-            _ => None,
-        })
-        .sum();
+    let frank_sum: f64 = cand.specs.iter().filter_map(|s| match s {
+        DefectSpec::Disclination { angle_deg, .. } => Some(*angle_deg),
+        _ => None,
+    }).sum();
     if frank_sum >= 360.0 - 1e-6 {
         return Err(format!(
             "total Frank angle {frank_sum:+} deg >= 360 deg: an open patch cannot close into a cone"
@@ -224,62 +269,57 @@ fn try_build_candidate(
     let mut last_err = "candidate build failed".to_string();
     for order in orders {
         let ordered_specs: Vec<DefectSpec> = order.iter().map(|&i| cand.specs[i].clone()).collect();
-        let (mut crystal, _, _) = match build_point_defects_with_info(lat_info, &ordered_specs, None, None) {
-            Ok(built) => built,
-            Err(e) => {
-                last_err = e;
-                continue;
-            }
-        };
+        let (mut crystal, _, mut coalesced, mut meta) =
+            match build_point_defects_with_info_detailed(lat_info, &ordered_specs, None, None) {
+                Ok(built) => built,
+                Err(e) => { last_err = e; continue; }
+            };
         let mut rim = resolve_patch_rim(&crystal, lat_info, &ordered_specs);
         let h_cfg = match core_graph_with_rim(&crystal, &rim, lat_info, radius) {
             Ok(h) => h,
             Err(e) if e.contains("rim") => {
-                let retry = patch_centre_and_radius(lat_info, &ordered_specs, None, None).and_then(
-                    |(ctr, r_def)| {
-                        let r_big = r_def * 1.4;
-                        let (c2, _, _) =
-                            build_point_defects_with_info(lat_info, &ordered_specs, Some(r_big), None)?;
-                        let rim2 = patch_rim(&c2, lat_info, ctr, r_big);
-                        let h2 = core_graph_with_rim(&c2, &rim2, lat_info, radius)?;
-                        Ok((c2, rim2, h2))
-                    },
-                );
+                let retry = patch_centre_and_radius(lat_info, &ordered_specs, None, None).and_then(|(ctr, r_def)| {
+                    let r_big = r_def * 1.4;
+                    let (c2, _, coal2, meta2) =
+                        build_point_defects_with_info_detailed(lat_info, &ordered_specs, Some(r_big), None)?;
+                    let rim2 = patch_rim(&c2, lat_info, ctr, r_big);
+                    let h2 = core_graph_with_rim(&c2, &rim2, lat_info, radius)?;
+                    Ok((c2, rim2, h2, coal2, meta2))
+                });
                 match retry {
-                    Ok((c2, rim2, h2)) => {
-                        crystal = c2;
-                        rim = rim2;
+                    Ok((c2, rim2, h2, coal2, meta2)) => {
+                        (crystal, rim, coalesced, meta) = (c2, rim2, coal2, meta2);
                         h2
                     }
-                    Err(e2) => {
-                        last_err = e2;
-                        continue;
-                    }
+                    Err(e2) => { last_err = e2; continue; }
                 }
             }
-            Err(e) => {
-                last_err = e;
-                continue;
-            }
+            Err(e) => { last_err = e; continue; }
         };
+
+        let actual_order: Vec<usize> = if coalesced == 0
+            && meta.used_order.len() == order.len()
+            && meta.used_order.iter().all(|&i| i < order.len())
+        {
+            meta.used_order.iter().map(|&i| order[i]).collect()
+        } else {
+            order
+        };
+        let actual_specs: Vec<DefectSpec> = actual_order.iter().map(|&i| cand.specs[i].clone()).collect();
 
         let charge = match classify_crystal_charge_with_cat(cat, &crystal) {
             Ok(q) => q,
-            Err(e) => {
-                last_err = e;
-                continue;
-            }
+            Err(e) => { last_err = e; continue; }
         };
+        if !charge_matches_specs(cat, &actual_specs, &charge) {
+            last_err = format!("built outer charge ({}) disagrees with algebraic total charge", charge.label);
+            continue;
+        }
         let wl_hash = wl_hash_labelled(&h_cfg);
         let delta_v = (charge.kind == "vacuum").then(|| vacuum_delta_v(lat_info, &crystal)).flatten();
         let entry = CombinationEntry {
-            label: cand.label.clone(),
-            defect_ids: cand.defect_ids.clone(),
-            separation: cand.separation,
-            displacements: cand.displacements.clone(),
-            specs: ordered_specs,
-            build_order: order,
-            delta_v,
+            label: cand.label.clone(), defect_ids: cand.defect_ids.clone(), separation: cand.separation,
+            displacements: cand.displacements.clone(), specs: actual_specs, build_order: actual_order, delta_v,
         };
         return Ok(BuiltRecord { entry, crystal, rim, charge, h_cfg, wl_hash });
     }
@@ -353,19 +393,12 @@ pub fn build_combinations_table_cached(
 
     let lat_info = LatticeCoreInfo::new(cell);
     let cat = catalogue_for_combinations(group, cell, frame, opts.bmax);
+    let symmetry_note = symmetry_note_for_mode(mode);
     if is_cancelled() {
         return Ok(CombinationsTable {
-            group: cat.group,
-            max_sep: opts.max_sep,
-            radius: opts.radius,
-            grid: opts.grid,
-            total_candidates: 0,
-            built_count: 0,
-            refused_count: 0,
-            cancelled: true,
-            elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
-            charge_groups: Vec::new(),
-            refused: Vec::new(),
+            group: cat.group, max_sep: opts.max_sep, bmax: opts.bmax, radius: opts.radius, grid: opts.grid,
+            symmetry_note, total_candidates: 0, built_count: 0, refused_count: 0, cancelled: true,
+            elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, charge_groups: Vec::new(), refused: Vec::new(),
         });
     }
 
@@ -387,6 +420,7 @@ pub fn build_combinations_table_cached(
                 defect_ids: cand.defect_ids.clone(),
                 separation: cand.separation,
                 displacements: cand.displacements.clone(),
+                algebraic_charge: algebraic_specs_charge(&cat, frame, &cand.specs),
                 specs: cand.specs.clone(),
                 reason,
             }),
@@ -452,28 +486,15 @@ pub fn build_combinations_table_cached(
 
             let (status, match_tier, single_matches, volterra_matches, completion_matches) =
                 if has_single_defect {
+                    // The representative's own charge: a group holds every orientation of a Burgers vector,
+                    // and the single-defect scan depends on the orientation.
                     match cache.match_core_against_single(
-                        &lat_info,
-                        &cat,
-                        cell,
-                        // The representative's own charge: a group holds every orientation of a Burgers vector,
-                        // and the single-defect scan depends on the orientation.
-                        &rep.charge,
-                        &rep.h_cfg,
-                        rep.wl_hash,
-                        opts.radius,
-                        opts.grid,
-                        opts.include_single_gallery,
-                        cancel,
+                        &lat_info, &cat, cell, &rep.charge, &rep.h_cfg, rep.wl_hash,
+                        opts.radius, opts.grid, opts.include_single_gallery, cancel,
                     )? {
-                        None => {
-                            cancelled = true;
-                            break;
-                        }
+                        None => { cancelled = true; break; }
                         Some(m) => {
-                            if single_scan.is_none() && m.scan.is_some() {
-                                single_scan = m.scan;
-                            }
+                            if single_scan.is_none() && m.scan.is_some() { single_scan = m.scan; }
                             if opts.include_single_gallery && single_gallery.is_empty() && !m.gallery.is_empty() {
                                 single_gallery = m.gallery;
                             }
@@ -489,23 +510,13 @@ pub fn build_combinations_table_cached(
                     (SingleMatchStatus::NoSingleDefect, "none".to_string(), Vec::new(), Vec::new(), Vec::new())
                 };
 
-            let thumbnail = if core_nodes == 0 {
-                None
-            } else {
-                config_core_entry(&rep.crystal, &rep.rim, &lat_info, opts.radius, opts.draw_thumbnails)
-            };
+            let thumbnail = (core_nodes > 0)
+                .then(|| config_core_entry(&rep.crystal, &rep.rim, &lat_info, opts.radius, opts.draw_thumbnails))
+                .flatten();
             let members: Vec<CombinationEntry> = bucket.into_iter().map(|r| r.entry).collect();
             core_groups.push(CoreGroup {
-                core_nodes,
-                core_edges,
-                status,
-                match_tier,
-                single_matches,
-                volterra_matches,
-                completion_matches,
-                delta_v,
-                thumbnail,
-                members,
+                core_nodes, core_edges, status, match_tier, single_matches,
+                volterra_matches, completion_matches, delta_v, thumbnail, members,
             });
         }
 
@@ -529,12 +540,7 @@ pub fn build_combinations_table_cached(
 
         let charge_label = canonical_charge_label(&charge);
         charge_groups.push(ChargeGroup {
-            charge,
-            charge_label,
-            has_single_defect,
-            single_scan,
-            single_gallery,
-            core_groups,
+            charge, charge_label, has_single_defect, single_scan, single_gallery, core_groups,
         });
     }
 
@@ -546,17 +552,9 @@ pub fn build_combinations_table_cached(
     });
 
     Ok(CombinationsTable {
-        group: cat.group,
-        max_sep: opts.max_sep,
-        radius: opts.radius,
-        grid: opts.grid,
-        total_candidates,
-        built_count,
-        refused_count,
-        cancelled,
-        elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
-        charge_groups,
-        refused,
+        group: cat.group, max_sep: opts.max_sep, bmax: opts.bmax, radius: opts.radius, grid: opts.grid,
+        symmetry_note, total_candidates, built_count, refused_count, cancelled,
+        elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, charge_groups, refused,
     })
 }
 
