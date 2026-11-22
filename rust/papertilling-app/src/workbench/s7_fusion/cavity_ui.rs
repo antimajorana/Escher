@@ -424,42 +424,47 @@ impl LoadedCavity {
                 );
             }
             ui.small(slide_reachability_note(en.slide_connected_to_regular));
-            egui::ScrollArea::vertical().id_salt("s7_live_cores_tbl").max_height(180.0).show(ui, |ui| {
-                egui::Grid::new("wb_s7_live_table").num_columns(5).striped(true).show(ui, |ui| {
-                    ui.strong("Core");
-                    ui.strong("Orbit");
-                    ui.strong("V/E/F (V_in)");
-                    ui.strong("Valences");
-                    ui.strong("Faces");
-                    ui.end_row();
-                    let rc = ext.reference_filled.census();
-                    let r_vals = fmt_sorted(rc.valences.iter().map(|&(_, k)| k).collect());
-                    let r_faces = fmt_sorted(rc.face_sides.clone());
-                    ui.label("0. Reference");
-                    ui.monospace("ref");
-                    ui.monospace(format!("{}/{}/{} ({})", rc.vertices, rc.edges, rc.faces, ext.orig_inner_verts));
-                    ui.monospace(format!("{{{r_vals}}}"));
-                    ui.monospace(format!("{{{r_faces}}}"));
-                    ui.end_row();
-                    for core in &en.cores {
-                        let c = &core.census;
-                        let vals = fmt_sorted(c.valences.iter().map(|&(_, k)| k).collect());
-                        let faces = fmt_sorted(c.face_sides.clone());
-                        let name = if core.is_regular_square {
-                            egui::RichText::new(format!("{}. {}", core.id + 1, core.title))
-                                .strong()
-                                .color(tokens.status_ok)
-                        } else {
-                            egui::RichText::new(format!("{}. {}", core.id + 1, core.title))
-                        };
-                        ui.label(name);
-                        ui.monospace(format!("orbit #{} (size {})", core.orbit_id + 1, core.orbit_size));
-                        ui.monospace(format!("{}/{}/{} ({})", c.vertices, c.edges, c.faces, core.inner_verts));
-                        ui.monospace(format!("{{{vals}}}"));
-                        ui.monospace(format!("{{{faces}}}"));
+            egui::ScrollArea::both().id_salt("s7_live_cores_tbl").max_height(180.0).show(ui, |ui| {
+                egui::Grid::new("wb_s7_live_table")
+                    .num_columns(5)
+                    .spacing([4.0, 3.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.strong("Core");
+                        ui.strong("Orb.");
+                        ui.strong("V/E/F(in)");
+                        ui.strong("Val.");
+                        ui.strong("Faces");
                         ui.end_row();
-                    }
-                });
+                        let rc = ext.reference_filled.census();
+                        let r_vals = fmt_sorted(rc.valences.iter().map(|&(_, k)| k).collect());
+                        let r_faces = fmt_sorted(rc.face_sides.clone());
+                        ui.label("0. Ref");
+                        ui.monospace("ref");
+                        ui.monospace(format!("{}/{}/{}({})", rc.vertices, rc.edges, rc.faces, ext.orig_inner_verts));
+                        ui.monospace(format!("{{{r_vals}}}"));
+                        ui.monospace(format!("{{{r_faces}}}"));
+                        ui.end_row();
+                        for core in &en.cores {
+                            let c = &core.census;
+                            let vals = fmt_sorted(c.valences.iter().map(|&(_, k)| k).collect());
+                            let faces = fmt_sorted(c.face_sides.clone());
+                            let short_title = core.title.replace(" (regular squares)", "");
+                            let name = if core.is_regular_square {
+                                egui::RichText::new(format!("{}. {short_title}", core.id + 1))
+                                    .strong()
+                                    .color(tokens.status_ok)
+                            } else {
+                                egui::RichText::new(format!("{}. {short_title}", core.id + 1))
+                            };
+                            ui.label(name).on_hover_text(&core.title);
+                            ui.monospace(format!("#{}({})", core.orbit_id + 1, core.orbit_size));
+                            ui.monospace(format!("{}/{}/{}({})", c.vertices, c.edges, c.faces, core.inner_verts));
+                            ui.monospace(format!("{{{vals}}}"));
+                            ui.monospace(format!("{{{faces}}}"));
+                            ui.end_row();
+                        }
+                    });
             });
             ui.separator();
             show_geometry_tables(ui, active_map, tokens, self.regular_valence, self.regular_sides, show_gate_labels);

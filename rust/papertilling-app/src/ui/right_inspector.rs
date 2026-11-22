@@ -15,6 +15,7 @@ impl PapertillingApp {
             .default_size(self.right_inspector_width)
             .size_range(260.0..=440.0)
             .show(ui, |ui| {
+                ui.set_clip_rect(ui.max_rect());
                 ui.horizontal(|ui| {
                     ui.strong("Inspector");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -24,7 +25,11 @@ impl PapertillingApp {
                     });
                 });
                 ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| match self.active_tab {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_max_width(ui.available_width());
+                        match self.active_tab {
                     NavTab::Gallery => {
                         self.gallery.show_inspector_panel(
                             ui,
@@ -85,7 +90,8 @@ impl PapertillingApp {
                     NavTab::Workbench => {
                         self.workbench_call(|wb, cx, _, _| wb.show_inspector_panel(ui, cx, &tokens));
                     }
-                });
+                }
+                    });
             });
         self.right_inspector_width = resp.response.rect.width().clamp(260.0, 440.0);
         #[cfg(test)]

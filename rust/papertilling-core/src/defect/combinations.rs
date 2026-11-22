@@ -7,7 +7,7 @@
 //! the cached single-defect gallery.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use petgraph::graph::UnGraph;
@@ -327,12 +327,14 @@ fn try_build_candidate(
 }
 
 fn match_tier_rank(tier: &str) -> u8 {
-    match tier {
-        "exact" => 0,
-        "volterra" => 1,
-        "completion" => 2,
-        _ => 3,
-    }
+    match tier { "exact" => 0, "volterra" => 1, "completion" => 2, _ => 3 }
+}
+
+fn core_group_sort_key(c: &CoreGroup) -> (SingleMatchStatus, u8, usize, usize, i64, &str) {
+    let sep = c.members.first().map_or(0.0, |m| round_dec(m.separation, 6));
+    let sc = (sep * 1e6).round_ties_even() as i64;
+    let lbl = c.members.first().map_or("", |m| m.label.as_str());
+    (c.status, match_tier_rank(&c.match_tier), c.core_nodes, c.core_edges, sc, lbl)
 }
 
 fn charge_sort_key(cg: &ChargeGroup) -> (u8, i64, i64, i64, String) {
@@ -356,6 +358,42 @@ fn charge_sort_key(cg: &ChargeGroup) -> (u8, i64, i64, i64, String) {
         "partial_dislocation" => (4, sc(q.length.unwrap_or(0.0)), 0, 0, cg.charge_label.clone()),
         _ => (5, 0, 0, 0, cg.charge_label.clone()),
     }
+}
+
+fn map_parallel<T: Sync, R: Send>(
+    items: &[T],
+    cancel: Option<&AtomicBool>,
+    f: impl Fn(&T) -> R + Sync,
+) -> Vec<Option<R>> {
+    let n = items.len();
+    let mut out: Vec<Option<R>> = (0..n).map(|_| None).collect();
+    let workers = if cfg!(test) {
+        1
+    } else {
+        std::thread::available_parallelism().map_or(1, |k| k.get().min(8)).min(n.max(1))
+    };
+    if n == 0 || workers <= 1 {
+        for (i, item) in items.iter().enumerate() {
+            if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) { break; }
+            out[i] = Some(f(item));
+        }
+        return out;
+    }
+    let next = AtomicUsize::new(0);
+    let slots = std::sync::Mutex::new(&mut out);
+    std::thread::scope(|s| {
+        for _ in 0..workers {
+            s.spawn(|| {
+                while !cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= n { break; }
+                    let r = f(&items[i]);
+                    slots.lock().expect("slots lock")[i] = Some(r);
+                }
+            });
+        }
+    });
+    out
 }
 
 /// Build the defect Combinations ("Equivalence") table using a fresh [`SingleDefectCache`].
@@ -408,21 +446,16 @@ pub fn build_combinations_table_cached(
     let mut refused: Vec<RefusedCombination> = Vec::new();
     let mut cancelled = false;
 
-    for cand in &candidates {
-        if is_cancelled() {
-            cancelled = true;
-            break;
-        }
-        match try_build_candidate(&lat_info, &cat, cand, opts.radius) {
+    let slot_results = map_parallel(&candidates, cancel, |cand| try_build_candidate(&lat_info, &cat, cand, opts.radius));
+    if is_cancelled() { cancelled = true; }
+    for (cand, slot) in candidates.iter().zip(slot_results) {
+        let Some(res) = slot else { cancelled = true; continue; };
+        match res {
             Ok(rec) => built_records.push(rec),
             Err(reason) => refused.push(RefusedCombination {
-                label: cand.label.clone(),
-                defect_ids: cand.defect_ids.clone(),
-                separation: cand.separation,
-                displacements: cand.displacements.clone(),
-                algebraic_charge: algebraic_specs_charge(&cat, frame, &cand.specs),
-                specs: cand.specs.clone(),
-                reason,
+                label: cand.label.clone(), defect_ids: cand.defect_ids.clone(), separation: cand.separation,
+                displacements: cand.displacements.clone(), algebraic_charge: algebraic_specs_charge(&cat, frame, &cand.specs),
+                specs: cand.specs.clone(), reason,
             }),
         }
     }
@@ -444,8 +477,9 @@ pub fn build_combinations_table_cached(
         }
     }
 
-    // 2. Inside each charge group, partition by distinct core graph, match once, and draw thumbnail once.
+    // 2. Inside each charge group, partition by distinct core graph, match once, and queue thumbnail jobs.
     let mut charge_groups: Vec<ChargeGroup> = Vec::with_capacity(raw_charge_groups.len());
+    let mut thumb_jobs: Vec<(usize, usize, BuiltCrystal, HashSet<usize>)> = Vec::new();
     for (charge, recs) in raw_charge_groups {
         if is_cancelled() {
             cancelled = true;
@@ -510,33 +544,16 @@ pub fn build_combinations_table_cached(
                     (SingleMatchStatus::NoSingleDefect, "none".to_string(), Vec::new(), Vec::new(), Vec::new())
                 };
 
-            let thumbnail = (core_nodes > 0)
-                .then(|| config_core_entry(&rep.crystal, &rep.rim, &lat_info, opts.radius, opts.draw_thumbnails))
-                .flatten();
+            let rep_crystal = (core_nodes > 0).then(|| (rep.crystal.clone(), rep.rim.clone()));
             let members: Vec<CombinationEntry> = bucket.into_iter().map(|r| r.entry).collect();
             core_groups.push(CoreGroup {
                 core_nodes, core_edges, status, match_tier, single_matches,
-                volterra_matches, completion_matches, delta_v, thumbnail, members,
+                volterra_matches, completion_matches, delta_v, thumbnail: None, members,
             });
+            if let Some((c_rep, r_rep)) = rep_crystal {
+                thumb_jobs.push((charge_groups.len(), core_groups.len() - 1, c_rep, r_rep));
+            }
         }
-
-        core_groups.sort_by(|a, b| {
-            a.status
-                .cmp(&b.status)
-                .then_with(|| match_tier_rank(&a.match_tier).cmp(&match_tier_rank(&b.match_tier)))
-                .then_with(|| a.core_nodes.cmp(&b.core_nodes))
-                .then_with(|| a.core_edges.cmp(&b.core_edges))
-                .then_with(|| {
-                    let as0 = a.members.first().map_or(0.0, |m| round_dec(m.separation, 6));
-                    let bs0 = b.members.first().map_or(0.0, |m| round_dec(m.separation, 6));
-                    as0.total_cmp(&bs0)
-                })
-                .then_with(|| {
-                    let al = a.members.first().map_or("", |m| m.label.as_str());
-                    let bl = b.members.first().map_or("", |m| m.label.as_str());
-                    al.cmp(bl)
-                })
-        });
 
         let charge_label = canonical_charge_label(&charge);
         charge_groups.push(ChargeGroup {
@@ -544,12 +561,23 @@ pub fn build_combinations_table_cached(
         });
     }
 
+    if !cancelled {
+        let thumbs = map_parallel(&thumb_jobs, cancel, |(_, _, c, r)| {
+            config_core_entry(c, r, &lat_info, opts.radius, opts.draw_thumbnails)
+        });
+        for (job, slot) in thumb_jobs.iter().zip(thumbs) {
+            match slot {
+                Some(th) => charge_groups[job.0].core_groups[job.1].thumbnail = th,
+                None => cancelled = true,
+            }
+        }
+    }
+    for cg in &mut charge_groups {
+        cg.core_groups.sort_by(|a, b| core_group_sort_key(a).cmp(&core_group_sort_key(b)));
+    }
+
     charge_groups.sort_by_key(charge_sort_key);
-    refused.sort_by(|a, b| {
-        round_dec(a.separation, 6)
-            .total_cmp(&round_dec(b.separation, 6))
-            .then_with(|| a.label.cmp(&b.label))
-    });
+    refused.sort_by(|a, b| round_dec(a.separation, 6).total_cmp(&round_dec(b.separation, 6)).then_with(|| a.label.cmp(&b.label)));
 
     Ok(CombinationsTable {
         group: cat.group, max_sep: opts.max_sep, bmax: opts.bmax, radius: opts.radius, grid: opts.grid,

@@ -194,29 +194,36 @@ impl Panel {
         ));
         ui.small(ORBIT_SUMMARY);
         ui.small(slide_reachability_note(self.enumeration.slide_connected_to_regular));
-        egui::Grid::new("wb_s7_cores_table").num_columns(5).striped(true).show(ui, |ui| {
-            ui.strong("Core");
-            ui.strong("Orbit");
-            ui.strong("V/E/F");
-            ui.strong("Valences");
-            ui.strong("Faces");
-            ui.end_row();
-            for core in &self.enumeration.cores {
-                let c = &core.census;
-                let vals = fmt_sorted(c.valences.iter().map(|&(_, k)| k).collect());
-                let faces = fmt_sorted(c.face_sides.clone());
-                let name = if core.is_regular_square {
-                    egui::RichText::new(format!("{}. {}", core.id + 1, core.title)).strong().color(tokens.status_ok)
-                } else {
-                    egui::RichText::new(format!("{}. {}", core.id + 1, core.title))
-                };
-                ui.label(name);
-                ui.monospace(format!("orbit #{} (size {})", core.orbit_id + 1, core.orbit_size));
-                ui.monospace(format!("{}/{}/{}", c.vertices, c.edges, c.faces));
-                ui.monospace(format!("{{{vals}}}"));
-                ui.monospace(format!("{{{faces}}}"));
-                ui.end_row();
-            }
+        egui::ScrollArea::horizontal().id_salt("wb_s7_cores_hscroll").show(ui, |ui| {
+            egui::Grid::new("wb_s7_cores_table")
+                .num_columns(5)
+                .spacing([4.0, 3.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.strong("Core");
+                    ui.strong("Orb.");
+                    ui.strong("V/E/F");
+                    ui.strong("Val.");
+                    ui.strong("Faces");
+                    ui.end_row();
+                    for core in &self.enumeration.cores {
+                        let c = &core.census;
+                        let vals = fmt_sorted(c.valences.iter().map(|&(_, k)| k).collect());
+                        let faces = fmt_sorted(c.face_sides.clone());
+                        let short_title = core.title.replace(" (regular squares)", "");
+                        let name = if core.is_regular_square {
+                            egui::RichText::new(format!("{}. {short_title}", core.id + 1)).strong().color(tokens.status_ok)
+                        } else {
+                            egui::RichText::new(format!("{}. {short_title}", core.id + 1))
+                        };
+                        ui.label(name).on_hover_text(&core.title);
+                        ui.monospace(format!("#{}({})", core.orbit_id + 1, core.orbit_size));
+                        ui.monospace(format!("{}/{}/{}", c.vertices, c.edges, c.faces));
+                        ui.monospace(format!("{{{vals}}}"));
+                        ui.monospace(format!("{{{faces}}}"));
+                        ui.end_row();
+                    }
+                });
         });
     }
 }

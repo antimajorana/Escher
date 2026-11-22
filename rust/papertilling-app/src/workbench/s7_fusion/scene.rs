@@ -193,9 +193,101 @@ pub(super) fn convex_partition(poly: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
     }
 }
 
-fn centroid(poly: &[[f64; 2]]) -> [f64; 2] {
-    let n = poly.len().max(1) as f64;
-    [poly.iter().map(|p| p[0]).sum::<f64>() / n, poly.iter().map(|p| p[1]).sum::<f64>() / n]
+fn point_in_poly_f64(pt: [f64; 2], poly: &[[f64; 2]]) -> bool {
+    if poly.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = poly.len() - 1;
+    for i in 0..poly.len() {
+        let (xi, yi) = (poly[i][0], poly[i][1]);
+        let (xj, yj) = (poly[j][0], poly[j][1]);
+        if (yi > pt[1]) != (yj > pt[1]) {
+            let x_int = (xj - xi) * (pt[1] - yi) / (yj - yi) + xi;
+            if pt[0] < x_int {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+fn dist_to_seg_f64(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dy * dy;
+    if l2 < 1e-18 {
+        return (p[0] - a[0]).hypot(p[1] - a[1]);
+    }
+    let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0);
+    (p[0] - (a[0] + t * dx)).hypot(p[1] - (a[1] + t * dy))
+}
+
+/// Interior label anchor maximizing clearance to face boundary segments and vertex discs.
+fn face_label_pos(poly: &[[f64; 2]], m: &PlanarMap, scale: f64) -> [f64; 2] {
+    let n = poly.len();
+    if n == 0 {
+        return [0.0, 0.0];
+    }
+    if n < 3 {
+        return [poly.iter().map(|p| p[0]).sum::<f64>() / n as f64, poly.iter().map(|p| p[1]).sum::<f64>() / n as f64];
+    }
+    let discs: Vec<([f64; 2], f64)> = m
+        .verts
+        .iter()
+        .filter(|v| v.kind != VertexKind::Removed)
+        .map(|v| {
+            let r = if v.kind == VertexKind::Complete { 0.17 * scale } else { 0.07 * scale };
+            (v.pos, r)
+        })
+        .collect();
+    let clearance = |pt: [f64; 2]| -> f64 {
+        let edge_d = (0..n)
+            .map(|i| dist_to_seg_f64(pt, poly[i], poly[(i + 1) % n]))
+            .fold(f64::INFINITY, f64::min);
+        let vert_d = discs
+            .iter()
+            .map(|&(vp, r)| (pt[0] - vp[0]).hypot(pt[1] - vp[1]) - r)
+            .fold(f64::INFINITY, f64::min);
+        edge_d.min(vert_d)
+    };
+
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for &p in poly {
+        x0 = x0.min(p[0]);
+        y0 = y0.min(p[1]);
+        x1 = x1.max(p[0]);
+        y1 = y1.max(p[1]);
+    }
+    let mut best_pt = triangulate(poly)
+        .first()
+        .map_or([0.5 * (x0 + x1), 0.5 * (y0 + y1)], |t| [(t[0][0] + t[1][0] + t[2][0]) / 3.0, (t[0][1] + t[1][1] + t[2][1]) / 3.0]);
+    let mut best_d = if point_in_poly_f64(best_pt, poly) { clearance(best_pt) } else { f64::NEG_INFINITY };
+
+    let grid = 20usize;
+    let (mut hx, mut hy) = (0.5 * (x1 - x0), 0.5 * (y1 - y0));
+    let mut center = [0.5 * (x0 + x1), 0.5 * (y0 + y1)];
+    for round in 0..3 {
+        let steps = if round == 0 { grid } else { 8 };
+        for ix in 0..=steps {
+            let fx = (ix as f64 / steps as f64) * 2.0 - 1.0;
+            for iy in 0..=steps {
+                let fy = (iy as f64 / steps as f64) * 2.0 - 1.0;
+                let cand = [center[0] + fx * hx, center[1] + fy * hy];
+                if point_in_poly_f64(cand, poly) {
+                    let d = clearance(cand);
+                    if d > best_d {
+                        best_d = d;
+                        best_pt = cand;
+                    }
+                }
+            }
+        }
+        center = best_pt;
+        hx *= 0.25;
+        hy *= 0.25;
+    }
+    best_pt
 }
 
 fn text(pos: [f64; 2], s: String, color: [u8; 4], size_px: f32) -> TextPrim {
@@ -286,7 +378,7 @@ fn build_map_scene(
             for poly in convex_partition(&outline) {
                 p.polygons.push(PolyPrim { points: poly.iter().map(|&q| f32p(q)).collect(), fill: tint, stroke: None });
             }
-            centroid(&outline)
+            face_label_pos(&outline, m, style.scale)
         };
         if style.regular_sides.is_none_or(|reg| sides != reg) {
             p.labels.push(text(centre, sides.to_string(), INK_RGBA, 15.0));

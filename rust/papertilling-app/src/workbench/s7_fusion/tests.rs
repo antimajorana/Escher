@@ -163,6 +163,12 @@ fn step_3_face_2_and_edge_11_labels_are_separated_and_high_contrast() {
         let contrast = (l_face.max(l_ink) + 0.05) / (l_face.min(l_ink) + 0.05);
         assert!(contrast >= 4.5, "{name} WCAG contrast {contrast:.2} against 2-gon tint < 4.5");
     }
+    // Step 3's 6-gon face label "6" must clear every Complete vertex disc (radius 0.13) with room to spare.
+    let face6 = primitives.labels.iter().find(|t| t.text == "6" && t.size_px > 14.0).expect("6-sided face label");
+    for v in steps[3].map.verts.iter().filter(|v| v.kind == papertilling_core::fusion::VertexKind::Complete) {
+        let dv = (f64::from(face6.pos[0]) - v.pos[0]).hypot(f64::from(face6.pos[1]) - v.pos[1]);
+        assert!(dv >= 0.25, "face '6' label at {:?} collides with vertex {} at {:?}: dist = {dv:.3}", face6.pos, v.name, v.pos);
+    }
 }
 
 #[test]
