@@ -147,7 +147,8 @@ def gauss_newton(S, z0, max_iter: int = 500, rtol: float = 1e-10, freeze: float 
         while True:
             if lu is None or not frozen:
                 M = A if mu == 0.0 else (A + sp.diags(mu * D)).tocsc()
-                lu = splu(M, permc_spec="MMD_AT_PLUS_A")
+                # Use the default COLAMD ordering to avoid a SuperLU crash in SciPy 1.10.
+                lu = splu(M)
                 nfact += 1
             dz = lu.solve(-g)
             r2 = residual(S, z + dz)
