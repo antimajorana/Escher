@@ -127,7 +127,7 @@ pub fn points_coverage(num: u16) -> Option<&'static PointsCoverage> {
 pub fn points_note() -> String {
     let partial = if POINTS.partial { " Partial sweep: some groups are missing." } else { "" };
     format!(
-        "[{}] Bonded by shells until connected and 3-periodic, with exact space group verified by spglib over 48 parameter samples (seed 0). Entries sharing space group, sites per primitive cell, and per-orbit coordination sequences to depth 12 are merged; coordination sequences to depth 12 are not an exact isomorphism key, so non-isomorphic nets with equal sequences may be merged.{partial}",
+        "[{}] Bonds are added in distance shells until connected in all three directions. The search uses 48 parameter samples (seed 0). Each stored representative recovers the selected group and primitive operation count in spglib at tolerance 1e-5. Entries sharing space group, sites per primitive cell, and per-orbit coordination sequences to depth 12 are merged; coordination sequences to depth 12 are not an exact isomorphism key, so non-isomorphic nets with equal sequences may be merged.{partial}",
         COVERAGE.status,
     )
 }

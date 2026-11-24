@@ -31,18 +31,20 @@ pub struct Space3dPanelState {
 
 impl Default for Space3dPanelState {
     fn default() -> Self {
-        Self {
+        let mut state = Self {
             pristine_only: false,
             filter: String::new(),
-            selected_sg: 136,
-            selected_net: CanonicalNet3d::Rutile136,
-            selected_defect: LineDefect3d::ScrewDispiration42_136,
+            selected_sg: 221,
+            selected_net: CanonicalNet3d::SimpleCubic,
+            selected_defect: LineDefect3d::None,
             screw_periods: 0,
-            summary: analyze_space_group_3d(136).ok(),
+            summary: analyze_space_group_3d(221).ok(),
             view: Space3dView::default(),
-            cached_sg: 136,
+            cached_sg: 221,
             charges: CrystalChargeUi::default(),
-        }
+        };
+        state.select_group(221);
+        state
     }
 }
 
@@ -60,13 +62,10 @@ impl Space3dPanelState {
     }
 
     pub(crate) fn select_group(&mut self, number: u16) {
-        self.selected_sg = number;
-        self.set_catalogue(None);
-        self.view.catalogue_error = None;
-        if let Some(net) = CanonicalNet3d::ALL.into_iter().find(|net| net.space_group_num() == number) {
-            self.selected_net = net;
-        } else {
-            self.choose_catalogue(CatalogueChoice { sg: number, idx: 0, seed: SeedKind::Cell, layers: 1 });
+        // Switch the group and its geometry together. A refused construction keeps the
+        // previous group, charge inspector and drawing in agreement.
+        if self.choose_catalogue(CatalogueChoice { sg: number, idx: 0, seed: SeedKind::Cell, layers: 1 }) {
+            self.selected_sg = number;
         }
     }
 
@@ -75,13 +74,10 @@ impl Space3dPanelState {
         self.ensure_cached();
         ui.horizontal_wrapped(|ui| {
             if ui.small_button("#123 P4/mmm").clicked() {
-                self.selected_sg = 123;
-                self.selected_net = CanonicalNet3d::Tetragonal123;
+                self.select_group(123);
                 if !self.pristine_only {
                     self.selected_defect = LineDefect3d::PureDisclination90_123;
                 }
-                self.set_catalogue(None);
-                self.view.catalogue_error = None;
                 dirty = true;
             }
             if ui.small_button("#136 P4_2/mnm (Rutile)").clicked() {
@@ -106,7 +102,7 @@ impl Space3dPanelState {
             });
         }
         ui.horizontal(|ui| {
-            ui.small("Filter (230 Space Groups):");
+            ui.label("Find space group");
             ui.add(egui::TextEdit::singleline(&mut self.filter).desired_width(120.0));
         });
         let q = self.filter.trim().to_lowercase();
@@ -119,9 +115,8 @@ impl Space3dPanelState {
                 {
                     continue;
                 }
-                let tag = if sg.is_split { "split" } else { "nonsym" };
-                let lbl = format!("#{:>3} {} [{}] ({tag}, {})", sg.number, sg.symbol, sg.schoenflies, sg.ab_full_label);
-                if ui.selectable_label(self.selected_sg == sg.number, lbl).clicked() && self.selected_sg != sg.number {
+                let lbl = format!("#{}  {}  ({})", sg.number, sg.symbol, sg.schoenflies);
+                if ui.selectable_label(self.selected_sg == sg.number, lbl).clicked() {
                     self.select_group(sg.number);
                     dirty = true;
                 }
@@ -129,9 +124,9 @@ impl Space3dPanelState {
         });
 
         ui.separator();
-        ui.strong("3D Crystal Net");
+        ui.strong("Named crystal examples");
         let selected_text = if self.view.catalogue.is_some() {
-            "Catalogue entry (pick canonical…)"
+            "Choose an example…"
         } else {
             self.selected_net.label()
         };
@@ -158,7 +153,11 @@ impl Space3dPanelState {
                 }
             });
             if self.screw_periods != 0 {
-                ui.small("A finite cut-and-reglued block of the sampled net. Orange bonds cross the seam.");
+                ui.small(if self.view.catalogue.is_some() {
+                    "Orange bonds cross the rejoined seam of this sampled lattice."
+                } else {
+                    "The screw uses this group’s first ranked lattice. Orange bonds cross its seam."
+                });
             }
         }
         self.show_view_controls(ui);
@@ -187,7 +186,7 @@ impl Space3dPanelState {
             ui.small(format!(
                 "H²(P, Λ) = {} | (G⁺)ᵃᵇ = {} | Gᵃᵇ = {}",
                 s.h2_label, s.ab_plus_label, s.ab_full_label
-            ));
+            )).on_hover_text("H² classifies ways to combine the point group with the translation lattice. Abelianization records charges that add independently of order, for the orientation-preserving group G⁺ and the full group G.");
             if !s.torus_counts.is_empty() {
                 let tor: Vec<String> = s.torus_counts.iter().map(|(n, c)| format!("N={n}: {c}")).collect();
                 ui.small(format!("#Conj(G / NΛ): {}", tor.join(", ")));

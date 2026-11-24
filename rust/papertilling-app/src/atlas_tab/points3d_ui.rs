@@ -36,7 +36,7 @@ pub struct CatalogueChoice {
 
 impl Default for CatalogueChoice {
     fn default() -> Self {
-        Self { sg: 1, idx: 0, seed: SeedKind::Vertex, layers: 2 }
+        Self { sg: 1, idx: 0, seed: SeedKind::Cell, layers: 1 }
     }
 }
 
@@ -104,7 +104,7 @@ impl Space3dPanelState {
                 true
             }
             Err(e) => {
-                self.view.catalogue_error = Some(format!("Refused: {e}"));
+                self.view.catalogue_error = Some(format!("Refused: group #{}, lattice {}. {e}", choice.sg, choice.idx + 1));
                 false
             }
         }
@@ -112,10 +112,13 @@ impl Space3dPanelState {
 
     /// The "Net:" line of the inspector: the catalogue entry when one is drawn.
     pub(crate) fn show_net_line(&self, ui: &mut egui::Ui) {
+        if let Some(name) = self.active_screw_name() {
+            ui.small(name);
+            return;
+        }
         match &self.view.catalogue {
             Some(c) => {
                 ui.small(format!("Net: {}", c.growth.patch.name));
-                ui.small(c.growth.patch.defect_label.as_str());
             }
             None => {
                 ui.small(format!("Net: {}", self.selected_net.label()));
@@ -133,7 +136,7 @@ pub(crate) fn show(ui: &mut egui::Ui, sp: &mut Space3dPanelState) -> bool {
         dirty = true;
     }
     ui.separator();
-    egui::CollapsingHeader::new(egui::RichText::new("Points catalogue (7 lattices per group)").strong())
+    egui::CollapsingHeader::new(egui::RichText::new("Ranked lattices").strong())
         .id_salt("atlas_points3d")
         .default_open(true)
         .show(ui, |ui| dirty |= show_body(ui, sp));
@@ -147,7 +150,9 @@ fn show_body(ui: &mut egui::Ui, sp: &mut Space3dPanelState) -> bool {
         ui.small(format!("No catalogue data for #{num}."));
         return false;
     };
-    ui.small(format!("#{num} {}: {}", group.symbol, coverage_line(num)));
+    ui.small("Fewest independent site orbits first, then fewest sites per primitive cell.")
+        .on_hover_text(format!("An orbit contains all sites related by this group's symmetries.\n{}", points_note()));
+    ui.small(format!("#{num} {} · {}", group.symbol, coverage_line(num)));
     let active = sp.view.catalogue.as_ref().map(|c| c.choice);
     let mut pick: Option<usize> = None;
     let shown = group.shown().len();
@@ -191,7 +196,7 @@ fn show_body(ui: &mut egui::Ui, sp: &mut Space3dPanelState) -> bool {
                 dirty |= sp.choose_catalogue(CatalogueChoice { seed, ..c });
             }
         });
-        if ui.small_button("Back to the canonical net").clicked() {
+        if ui.small_button(format!("Show {}", sp.selected_net.label())).clicked() {
             sp.selected_sg = sp.selected_net.space_group_num();
             sp.set_catalogue(None);
             sp.view.catalogue_error = None;
@@ -206,14 +211,13 @@ fn show_body(ui: &mut egui::Ui, sp: &mut Space3dPanelState) -> bool {
     if let Some(e) = &sp.view.catalogue_error {
         ui.colored_label(egui::Color32::from_rgb(200, 70, 40), e.as_str());
     }
-    ui.add(egui::Label::new(egui::RichText::new(points_note()).small().weak()).wrap());
     dirty
 }
 
 fn entry_hover(e: &PointsEntry) -> String {
     let also: Vec<String> = e.also.iter().map(|w| w.join(" + ")).collect();
     let also = if also.is_empty() { String::new() } else { format!("\nSame lattice from: {}", also.join("; ")) };
-    format!("Phase share {:.0}% of the 48 samples{also}", 100.0 * e.share)
+    format!("Wyckoff labels use the catalogue setting. Phase share {:.0}% of the 48 samples{also}", 100.0 * e.share)
 }
 
 fn show_readout(ui: &mut egui::Ui, g: &PointsGrowth) {

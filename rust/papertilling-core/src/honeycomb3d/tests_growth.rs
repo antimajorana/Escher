@@ -26,6 +26,18 @@ fn drawn_euler(cx: &CellComplex3d) -> i64 {
 }
 
 #[test]
+fn one_infinite_seed_cell_can_be_clipped_without_adding_neighbours() {
+    // A radius of zero about the centre of the seed square retains just that face.
+    let seed = super::paracompact_ball::single_cell_patch(4, 4, 3, 0.0).unwrap();
+    assert_eq!(seed.complex.counts(), (4, 4, 1, 1));
+    assert_eq!(seed.complex.cell_truncated, [true]);
+    let wider = super::paracompact_ball::single_cell_patch(4, 4, 3, 2.0).unwrap();
+    assert!(wider.faces > 1);
+    assert_eq!(wider.complex.cells.len(), 1);
+    assert_eq!(wider.complex.cells[0].len(), wider.faces);
+}
+
+#[test]
 fn e3_touching_rule_boxes() {
     // [hand] boxes of whole cubes (plan §2.4): cell (2n+1)³, vertex (2n+2)³.
     let cubic = HoneycombKind::Schlafli(4, 3, 4);

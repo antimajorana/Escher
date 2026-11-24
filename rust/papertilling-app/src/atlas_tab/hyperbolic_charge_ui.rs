@@ -51,8 +51,8 @@ impl HyperbolicChargeUi {
                 })
                 .clicked()
             {
-                self.a = "01".into();
-                self.b = "12".into();
+                self.a = "12".into();
+                self.b = "01".into();
                 self.candidate = "02".into();
                 self.probe = if h3 { "3".into() } else { "012".into() };
                 self.reverse_loop = false;

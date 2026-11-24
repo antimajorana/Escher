@@ -332,6 +332,25 @@ impl PapertillingApp {
     }
 
     fn hud_view_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Explore geometry", |ui| {
+            for (view, label) in [
+                (LatticesView::Plane2D, "Wallpaper groups"),
+                (LatticesView::ThreeDAndSubperiodic, "3D space groups"),
+                (LatticesView::NonEuclidean, "Hyperbolic tilings and honeycombs"),
+            ] {
+                if ui.button(label).clicked() {
+                    if !view.is_default() { self.set_advanced(true); }
+                    if view == LatticesView::ThreeDAndSubperiodic {
+                        self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::SpaceGroups3D;
+                        self.atlas.last_pristine_3d_subtab = self.atlas.sub_tab;
+                        self.atlas.dirty = true;
+                    }
+                    self.select_lattices_view(view);
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
         if ui.button("Reset camera").clicked() {
             self.canvas2d.reset();
             self.view3d.reset();

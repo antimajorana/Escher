@@ -261,6 +261,9 @@ impl AtlasTabState {
         split_ratio: &mut f32,
         tokens: &ThemeTokens,
     ) {
+        if self.sub_tab == AtlasSubTab::HyperbolicH3 && self.hyperbolic3d.poll(ui.ctx()) {
+            self.dirty = true;
+        }
         if self.dirty {
             self.sync_scenes(canvas, view3d);
         }
@@ -273,7 +276,7 @@ impl AtlasTabState {
         };
         let right_heading = match self.sub_tab {
             AtlasSubTab::HyperbolicH2 => "Hyperboloid preview",
-            AtlasSubTab::HyperbolicH3 => "Poincaré ball",
+            AtlasSubTab::HyperbolicH3 => "Klein ball",
             AtlasSubTab::SpaceGroups3D => "3D crystal net",
             AtlasSubTab::Layers80 => "3D Layer Group Slab",
             AtlasSubTab::Subperiodic => "3D Strip Quotient (Cylinder / Mobius) or Planar Net",

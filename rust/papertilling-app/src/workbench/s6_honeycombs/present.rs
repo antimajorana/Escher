@@ -45,7 +45,6 @@ impl CoreOut {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn complex(&self) -> Option<&CellComplex3d> {
         match self {
             Self::Growth(cx, _) => Some(cx),
@@ -184,8 +183,9 @@ pub(crate) fn show_built(ui: &mut egui::Ui, b: &Built, tokens: &ThemeTokens, gri
                 });
         });
     }
-    for n in &b.notes {
-        ui.add_space(4.0);
-        ui.add(egui::Label::new(egui::RichText::new(n).small()).wrap());
-    }
+    egui::CollapsingHeader::new("Geometry and numerical limits").show(ui, |ui| {
+        for note in &b.notes {
+            ui.add(egui::Label::new(egui::RichText::new(note).small()).wrap());
+        }
+    });
 }

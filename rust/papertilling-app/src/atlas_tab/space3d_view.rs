@@ -126,6 +126,10 @@ impl Space3dPanelState {
         (*current == key).then_some(patch.as_ref().ok()).flatten()
     }
 
+    pub(super) fn active_screw_name(&self) -> Option<&str> {
+        self.screw_patch().map(|patch| patch.net.name.as_str())
+    }
+
     pub(super) fn show_screw_readout(&self, ui: &mut egui::Ui) {
         if self.screw_key().is_none() {
             return;
@@ -186,7 +190,7 @@ impl Space3dPanelState {
 
     pub fn show_view_controls(&mut self, ui: &mut egui::Ui) {
         ui.separator();
-        ui.strong("View: Cell, Axes, Slab & Picking");
+        ui.strong("View");
         let v = &mut self.view;
         let mut changed = false;
         ui.horizontal_wrapped(|ui| {
@@ -194,7 +198,7 @@ impl Space3dPanelState {
             changed |= ui.checkbox(&mut v.show_axes, "Axes").changed();
             changed |= ui.checkbox(&mut v.depth_cue, "Depth cue").on_hover_text("Farther sites fainter").changed();
         });
-        ui.small("z-slice slab (fractional z of the drawn block):");
+        ui.small("Height range within the displayed block");
         if ui.add(egui::Slider::new(&mut v.z_slice_range[0], 0.0..=1.0).text("z min")).changed() {
             v.z_slice_range[1] = v.z_slice_range[1].max(v.z_slice_range[0]);
             changed = true;

@@ -66,7 +66,7 @@ fn hyperbolic_atlas_switches_between_word_comparison_and_h3_reference() {
     h.run_steps(3);
     assert_eq!(h.state().atlas.sub_tab, AtlasSubTab::HyperbolicH3);
     assert!(h.state().view3d.mesh_data().vertex_count >= 20);
-    assert!(h.query_by_label("Poincaré ball").is_some());
+    assert!(h.query_by_label("Klein ball").is_some());
 
     let app = h.state_mut();
     app.atlas.last_hyperbolic_subtab = AtlasSubTab::HyperbolicH3;

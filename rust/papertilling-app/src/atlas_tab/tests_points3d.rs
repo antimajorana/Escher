@@ -24,6 +24,8 @@ fn sp221() -> Space3dPanelState {
 #[test]
 fn without_a_choice_the_canonical_net_is_drawn_unchanged() {
     let mut sp = Space3dPanelState::default();
+    assert_eq!(sp.view.catalogue.as_ref().unwrap().choice, sc_choice(1));
+    sp.set_catalogue(None);
     let want = build_net_3d(sp.selected_net, LineDefect3d::None);
     assert!(sp.view.catalogue.is_none());
     assert_eq!(sp.ensure_net().positions, want.positions);
@@ -69,6 +71,7 @@ fn a_refused_choice_keeps_the_drawing_and_shows_the_reason() {
 fn another_group_drops_the_entry() {
     let mut sp = sp221();
     assert!(sp.choose_catalogue(sc_choice(1)));
+    sp.selected_net = CanonicalNet3d::Rutile136;
     sp.selected_sg = 136;
     let want = build_net_3d(sp.selected_net, LineDefect3d::None);
     assert_eq!(sp.ensure_net().positions, want.positions);
@@ -115,6 +118,7 @@ fn entry_labels_and_stop_text() {
 #[test]
 fn kittest_points3d_catalogue_no_plan_leaks_and_reselect_canonical_net() {
     let mut app = PapertillingApp::new(false, String::from("kittest"), String::from("kittest"));
+    app.atlas.space3d.select_group(136);
     app.atlas.sub_tab = AtlasSubTab::SpaceGroups3D;
     app.select_lattices_view(LatticesView::ThreeDAndSubperiodic);
     let mut h = Harness::builder()
@@ -136,8 +140,7 @@ fn kittest_points3d_catalogue_no_plan_leaks_and_reselect_canonical_net() {
     assert!(h.state().atlas.pristine_only);
     assert_eq!(h.state().atlas.sub_tab, AtlasSubTab::SpaceGroups3D);
     assert_eq!(h.state().atlas.space3d.selected_sg, 136);
-    assert_eq!(h.state().atlas.space3d.selected_net, CanonicalNet3d::Rutile136);
-    assert!(h.state().atlas.space3d.view.catalogue.is_none());
+    assert_eq!(h.state().atlas.space3d.view.catalogue.as_ref().unwrap().choice.idx, 0);
 
     for leaked in ["plan T4", "plan Q1", "plan Q10"] {
         assert!(
@@ -157,11 +160,11 @@ fn kittest_points3d_catalogue_no_plan_leaks_and_reselect_canonical_net() {
     h.get_by_label(&first_lbl).click();
     h.run_steps(3);
     assert!(h.state().atlas.space3d.view.catalogue.is_some());
-    assert_eq!(h.state().atlas.space3d.selected_net, CanonicalNet3d::Rutile136);
+    assert_eq!(h.state().atlas.space3d.selected_net, CanonicalNet3d::SimpleCubic);
 
-    // Re-selecting the already-stored canonical net from "3D Crystal Net" drops the catalogue entry.
+    // Choosing the named rutile example explicitly replaces the ranked catalogue entry.
     h.get_all_by_role(egui::accesskit::Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("Catalogue entry (pick canonical…)"))
+        .find(|n| n.value().as_deref() == Some("Choose an example…"))
         .expect("3D Crystal Net ComboBox shows catalogue placeholder")
         .click();
     h.run_steps(2);

@@ -76,6 +76,7 @@ pub const MAX_H2_LAYERS: usize = 64;
 pub(super) fn c_norm2(a: [f64; 2]) -> f64 { a[0] * a[0] + a[1] * a[1] }
 
 /// Orthogonal circle center & R^2 for Poincare geodesic through A, B (or None if diameter).
+#[cfg(test)]
 fn orthogonal_circle(a: [f64; 2], b: [f64; 2]) -> Option<([f64; 2], f64)> {
     let det = a[0] * b[1] - a[1] * b[0];
     if det.abs() < 1e-10 {
@@ -90,22 +91,20 @@ fn orthogonal_circle(a: [f64; 2], b: [f64; 2]) -> Option<([f64; 2], f64)> {
 }
 
 fn sample_geodesic_arc(a: [f64; 2], b: [f64; 2], segs: usize) -> Vec<[f64; 2]> {
-    let Some((c, r2)) = orthogonal_circle(a, b) else {
-        return vec![a, b];
-    };
-    let rad = r2.sqrt();
-    let th0 = (a[1] - c[1]).atan2(a[0] - c[0]);
-    let th1 = (b[1] - c[1]).atan2(b[0] - c[0]);
-    let mut dth = (th1 - th0 + PI).rem_euclid(2.0 * PI) - PI;
-    if dth.abs() < 1e-6 {
-        dth = 0.0;
+    // A straight Klein chord is the same geodesic. Sampling it avoids subtracting a
+    // distant circle centre on nearly radial arcs, and retains samples after a pan.
+    let (u, v) = (to_klein(a), to_klein(b));
+    let segments = segs.max(1);
+    let mut arc = Vec::with_capacity(segments + 1);
+    arc.push(a);
+    for k in 1..segments {
+        let t = k as f64 / segments as f64;
+        let xy = [0, 1].map(|i| (1.0 - t) * u[i] + t * v[i]);
+        let scale = 1.0 + (1.0 - c_norm2(xy)).max(0.0).sqrt();
+        arc.push(xy.map(|x| x / scale));
     }
-    (0..=segs)
-        .map(|k| {
-            let th = th0 + dth * (k as f64) / (segs as f64);
-            [c[0] + rad * th.cos(), c[1] + rad * th.sin()]
-        })
-        .collect()
+    arc.push(b);
+    arc
 }
 
 pub fn to_klein(z: [f64; 2]) -> [f64; 2] {
@@ -114,6 +113,10 @@ pub fn to_klein(z: [f64; 2]) -> [f64; 2] {
 }
 
 pub fn to_hyperboloid(z: [f64; 2]) -> [f64; 3] {
+    if let Ok(point) = crate::noneuclidean2d::poincare_to_hyperboloid_exact(z) {
+        return point;
+    }
+    // Preserve the rendering fallback for inputs on or beyond the ideal circle.
     let n2 = c_norm2(z).min(0.95 * 0.95);
     let scale = (n2 / c_norm2(z).max(1e-18)).sqrt().min(1.0);
     let x = z[0] * scale;
@@ -139,7 +142,7 @@ pub(crate) struct DrawCaps {
 /// grow too fast (S_2 alone > 1000 faces). 2000 / 0.998 gives 62 (7) at ~2x the time. At 0.998 the
 /// drawn vertices drift off the hyperboloid by |<x, x> + 1| <= 4.4e-3 (vs 6.5e-5 at 0.985; at t ~ 500 that is a
 /// relative error ~1e-8 in the Poincare point) with no dedup-band hit. Faces near radius 0.998 are
-/// about a pixel wide; the 3D bowl (`to_hyperboloid`) clamps at radius 0.95, so they sit on its rim.
+/// about a pixel wide; the exact hyperboloid image keeps these distinct radial positions.
 pub(crate) const DRAW_CAPS: DrawCaps = DrawCaps { max_faces: 1000, max_centre_radius: 0.998 };
 /// Wedge path: face centres (and vertices) closer than this hyperbolic distance are one.
 const WEDGE_MERGE_DIST: f64 = 1e-3;
@@ -333,7 +336,7 @@ fn build_with(
         HyperbolicStyle::DualQP => (q_in, p_in),
         _ => (p_in, q_in),
     };
-    if p < 3 || q < 3 || (p - 2) * (q - 2) <= 4 {
+    if !inflation::is_hyperbolic(p, q) {
         return Err(format!("{{{p}, {q}}} is not hyperbolic (requires (p-2)(q-2) > 4)"));
     }
     let lay = layers.min(MAX_H2_LAYERS);

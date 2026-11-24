@@ -33,6 +33,10 @@ fn every_group_shows_seven_entries_and_the_coverage_agrees() {
         assert_eq!(g.shown().len(), 7, "#{num}");
         let c = points_coverage(num).expect("coverage row");
         assert_eq!(c.entries, g.entries.len(), "#{num}: the coverage counts every entry found");
+        assert!(g.entries.windows(2).all(|w| (w[0].wyckoff.len(), w[0].sites) <= (w[1].wyckoff.len(), w[1].sites)), "#{num}");
+        // The fourteen Bravais types have these holohedral space groups in standard settings.
+        let bravais = [2,10,12,47,65,69,71,123,139,166,191,221,225,229].contains(&num);
+        assert_eq!(g.entries[0].sites == 1, bravais, "#{num}");
         for e in &g.entries {
             assert_eq!(e.frac.len(), e.sites, "#{num}");
             assert_eq!(e.labels.len(), e.sites, "#{num}");
@@ -44,7 +48,7 @@ fn every_group_shows_seven_entries_and_the_coverage_agrees() {
     assert!(grow_points3d(221, 99, SeedKind::Cell, 1, CAP).is_err());
     let note = points_note();
     assert!(note.contains("COMPUTATIONAL EVIDENCE") && note.contains("coordination sequences"), "{note}");
-    assert!(note.contains("shells until connected") && note.contains("spglib") && note.contains("not an exact"), "{note}");
+    assert!(note.contains("distance shells") && note.contains("spglib") && note.contains("not an exact"), "{note}");
     assert!(!note.contains("plan T4") && !note.contains("plan Q1") && !note.contains("plan Q10"), "{note}");
     assert!(crate::space3d::nets3d::build_layer_slab_patch(1).is_ok());
     assert!(crate::space3d::nets3d::build_layer_slab_patch(81).is_err());

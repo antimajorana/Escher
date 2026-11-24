@@ -65,33 +65,11 @@ pub fn fusion_channels_for_elements(
             let b0 = [-prod0.l_vec[0], -prod0.l_vec[1]];
             let i_minus_r1 =
                 [[1 - g1.r[0][0], -g1.r[0][1]], [-g1.r[1][0], 1 - g1.r[1][1]]];
-            let mut cands = Vec::new();
-            for lx in -5..=5 {
-                for ly in -5..=5 {
-                    let sh = imat2_vec(i_minus_r1, [lx, ly]);
-                    cands.push([b0[0] + sh[0], b0[1] + sh[1]]);
-                }
-            }
-            cands.sort_by_key(|&b| (b[0] * b[0] + b[1] * b[1], b[0], b[1]));
-            cands.dedup();
-            let has_zero = cands.first() == Some(&[0, 0]);
-            let nz_min = cands
-                .iter()
-                .copied()
-                .filter(|&b| b != [0, 0])
-                .min_by_key(|b| b[0] * b[0] + b[1] * b[1]);
-            let shortest_nz: Vec<[i32; 2]> = match nz_min {
-                Some(m) => {
-                    let m2 = m[0] * m[0] + m[1] * m[1];
-                    cands
-                        .iter()
-                        .copied()
-                        .filter(|&b| b != [0, 0] && b[0] * b[0] + b[1] * b[1] == m2)
-                        .collect()
-                }
-                None => Vec::new(),
-            };
-            let min_all = cands[0];
+            let coset = super::gauge::translation_coset(i_minus_r1, b0);
+            let has_zero = coset.contains([0,0]);
+            let shortest_nz: Vec<[i32;2]> = super::algebraic_fusion_snf::shortest_coset_vectors(&coset, ext.a)
+                .into_iter().map(|v| v.map(|x| x as i32)).collect();
+            let min_all = if has_zero { [0,0] } else { *shortest_nz.iter().min().expect("nonempty coset") };
             let orb: Vec<[i32; 2]> = p_plus_reps.iter().map(|h| imat2_vec(h.r, min_all)).collect();
             let rep_b = orb.into_iter().max_by_key(|&b| (b[0], b[1])).unwrap_or(min_all);
             let parity = Some((rep_b[0] + rep_b[1]).rem_euclid(2));
@@ -120,8 +98,6 @@ pub fn fusion_channels_for_elements(
         let det_f = imat2_det(prod0.r);
         let rc = ext.point_group_cart[prod0.r_idx];
         let ang = if det_f > 0 { round_dec(rc[1][0].atan2(rc[0][0]).to_degrees(), 6) } else { 0.0 };
-        let i_minus_rf =
-            [[1 - prod0.r[0][0], -prod0.r[0][1]], [-prod0.r[1][0], 1 - prod0.r[1][1]]];
         for l0 in -2..=2 {
             for l1 in -2..=2 {
                 let h = ext.element([l0, l1], h0.r).unwrap();
@@ -134,7 +110,7 @@ pub fn fusion_channels_for_elements(
                         let c = ext.conjugate(&prod, q);
                         c.r == ch.rep.r
                             && in_image_of_int_mat(
-                                i_minus_rf,
+                                [[1-c.r[0][0], -c.r[0][1]], [-c.r[1][0], 1-c.r[1][1]]],
                                 [ch.rep.l_vec[0] - c.l_vec[0], ch.rep.l_vec[1] - c.l_vec[1]],
                             )
                     })

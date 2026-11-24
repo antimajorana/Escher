@@ -54,6 +54,9 @@ pub struct CellComplex3d {
     pub points: Vec<[f64; 3]>,
     /// Klein-ball coordinates (H³ only; empty otherwise).
     pub klein: Vec<[f64; 3]>,
+    /// Selected finite Coxeter orbit in Klein coordinates when sites lie away from vertices.
+    #[serde(skip)]
+    pub orbit_centres: Vec<[f64; 3]>,
     /// Vertex lies on the ideal sphere at infinity (H³ with Euclidean vertex figure).
     pub is_ideal: Vec<bool>,
     pub edges: Vec<[usize; 2]>,
@@ -61,7 +64,7 @@ pub struct CellComplex3d {
     pub faces: Vec<Vec<usize>>,
     /// Cells as lists of face indices.
     pub cells: Vec<Vec<usize>>,
-    /// Face-adjacency distance of each cell from the central cell.
+    /// Layer in which each cell was reached under the chosen adjacency rule.
     pub cell_shell: Vec<u32>,
     /// Cells that are infinite (horospherical `{4,4}` / `{6,3}`) and were truncated to a patch.
     pub cell_truncated: Vec<bool>,

@@ -119,7 +119,7 @@ pub fn mesh_from_frieze3d(patch: &FriezePatch) -> GpuMeshData {
 }
 
 /// Convert a hyperbolic tiling on the upper-sheet Minkowski hyperboloid into a 3D GPU mesh.
-pub fn mesh_from_hyperboloid(hyp: &HyperbolicTiling) -> GpuMeshData {
+pub fn mesh_from_hyperboloid(hyp: &HyperbolicTiling, centres: Option<&[[f64; 3]]>) -> GpuMeshData {
     if hyp.hyperboloid_pts.is_empty() {
         return GpuMeshData { radius: 1.0, ..Default::default() };
     }
@@ -131,7 +131,11 @@ pub fn mesh_from_hyperboloid(hyp: &HyperbolicTiling) -> GpuMeshData {
         .collect();
     let mut face_vertices = Vec::new();
     let mut wire_vertices = Vec::new();
-    for (u, &p) in pts.iter().enumerate() {
+    let centre_positions = centres.map(|sites| sites.iter().map(|p| {
+        core::array::from_fn(|k| ((p[k] - center[k]) / radius) as f32)
+    }).collect::<Vec<[f32; 3]>>());
+    let sites = centre_positions.as_deref().unwrap_or(&pts);
+    for (u, &p) in sites.iter().enumerate() {
         let is_core = hyp.wedge_delta != 0 && hyp.faces.first().is_some_and(|f| f.contains(&u));
         if is_core {
             append_icosahedron(&mut face_vertices, p, 0.025, [0.95, 0.25, 0.16, 1.0]);

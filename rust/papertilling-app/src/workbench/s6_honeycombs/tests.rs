@@ -79,9 +79,8 @@ pub(super) fn complex_counts(job: S6Job) -> ((usize, usize, usize, usize), i64) 
 }
 
 #[test]
-fn default_view_is_cubic_vertex_touching_layer_one_with_hand_counts() {
-    // Hand count: {4,3,4} with default Vertex + Touching at layers = 1 is a 4×4×4 box of unit cubes:
-    // V = 5³ = 125, E = 3·4·5² = 300, F = 3·4²·5 = 240, C = 4³ = 64, χ = 125 − 300 + 240 − 64 = 1.
+fn default_view_is_cubic_cell_touching_layer_one_with_hand_counts() {
+    // A 3×3×3 block has 4³ vertices, 3·3·4² edges, 3·3²·4 faces and 3³ cubes.
     let ctx = egui::Context::default();
     let app = s6_app(&ctx);
     let p = &app.workbench.s6;
@@ -89,8 +88,8 @@ fn default_view_is_cubic_vertex_touching_layer_one_with_hand_counts() {
     let b = p.current().expect("default build stored");
     match &b.core {
         CoreOut::Growth(cx, meta) => {
-            assert_eq!((cx.counts(), meta.stats.last().unwrap().euler), ((125, 300, 240, 64), 1));
-            assert_eq!(meta.stats.iter().map(|s| s.cells).collect::<Vec<_>>(), vec![8, 64]);
+            assert_eq!((cx.counts(), meta.stats.last().unwrap().euler), ((64, 144, 108, 27), 1));
+            assert_eq!(meta.stats.iter().map(|s| s.cells).collect::<Vec<_>>(), vec![1, 27]);
         }
         _ => panic!("default is a growth cell complex"),
     }
@@ -148,11 +147,11 @@ fn schlafli_known_counts_and_regimes() {
     assert_eq!(st(5, 3, 3).classify().regime, HoneycombRegime::SphericalS3);
     assert_eq!(
         st(4, 3, 4).job(),
-        S6Job::SchlafliGrowth { p: 4, q: 3, r: 4, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 10 }
+        S6Job::SchlafliGrowth { p: 4, q: 3, r: 4, seed: SeedKind::Cell, rule: GrowthRule::Touching, layers: 10 }
     );
     assert_eq!(
         st(4, 4, 3).job(),
-        S6Job::ParacompactBall { p: 4, q: 4, r: 3, radius_centi: 300 },
+        S6Job::ParacompactBall { p: 4, q: 4, r: 3, radius_centi: 300, seed_only: true },
         "paracompact dispatches to ball with radius_centi clamped to 30..=300"
     );
 }
@@ -290,6 +289,7 @@ fn s6_panel_state_survives_json_roundtrip() {
         rule: GrowthRule::FaceShells,
         layers: 2,
         radius_centi: 150,
+        surrounding_cells: true,
     };
     p.euclid.kind = EuclideanKind::AlternatedCubic;
     p.euclid.seed = SeedKind::Face;
@@ -370,7 +370,7 @@ fn pilot_timing_heaviest_s6_jobs() {
         S6Job::SchlafliGrowth { p: 3, q: 3, r: 5, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 4 },
         S6Job::SchlafliGrowth { p: 5, q: 3, r: 5, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 1 },
         S6Job::SchlafliGrowth { p: 3, q: 5, r: 3, seed: SeedKind::Cell, rule: GrowthRule::FaceShells, layers: 2 },
-        S6Job::ParacompactBall { p: 4, q: 4, r: 4, radius_centi: 120 },
+        S6Job::ParacompactBall { p: 4, q: 4, r: 4, radius_centi: 120, seed_only: false },
         S6Job::Euclid { kind: EuclideanKind::BitruncatedCubic, seed: SeedKind::Vertex, rule: GrowthRule::Touching, layers: 3 },
         S6Job::Surface { kind: TpmsKind::G, mode: TpmsMode::Nodal, n: 32, reps: 1 },
         S6Job::Surface { kind: TpmsKind::G, mode: TpmsMode::Nodal, n: 16, reps: 2 },
@@ -430,7 +430,7 @@ fn stale_results_never_shown_under_current_inputs() {
     }
     assert_eq!(shown_counts(&p), Some((8, 12, 6, 1)), "still the {{4,3,5}} cube");
     assert_eq!(p.built[0].as_ref().map(|(k, _)| k.clone()), Some(format!("{:?}", p.job())));
-    let stale = S6Job::ParacompactBall { p: 4, q: 3, r: 6, radius_centi: 100 };
+    let stale = S6Job::ParacompactBall { p: 4, q: 3, r: 6, radius_centi: 100, seed_only: false };
     p.pending = Some((S6Sub::Schlafli, format!("{stale:?}")));
     p.accept(Ok(run_job(stale)));
     assert_eq!(p.built[0].as_ref().map(|(k, _)| k.clone()), Some(format!("{:?}", p.job())), "stale result dropped");
@@ -452,7 +452,7 @@ fn stale_results_never_shown_under_current_inputs() {
 
 #[test]
 fn paracompact_balls_carry_no_ball_euler_claim() {
-    let b = run_job(S6Job::ParacompactBall { p: 6, q: 3, r: 3, radius_centi: 80 }).unwrap();
+    let b = run_job(S6Job::ParacompactBall { p: 6, q: 3, r: 3, radius_centi: 80, seed_only: false }).unwrap();
     assert!(!b.notes.iter().any(|n| n.contains("χ(B³)")), "{:?}", b.notes);
     assert!(b.notes.iter().any(|n| n.starts_with("No 3-ball test")), "{:?}", b.notes);
     let cube = run_job(S6Job::SchlafliGrowth {

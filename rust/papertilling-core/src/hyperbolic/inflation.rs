@@ -70,7 +70,7 @@ fn max_or_nan(a: f64, b: f64) -> f64 { if a.is_nan() || b.is_nan() { f64::NAN } 
 pub fn hyperboloid_to_poincare(x: Vec3) -> [f64; 2] { [x[0] / (1.0 + x[2]), x[1] / (1.0 + x[2])] }
 
 /// `true` when `{p, q}` tiles the hyperbolic plane, i.e. `(p - 2)(q - 2) > 4`.
-pub fn is_hyperbolic(p: usize, q: usize) -> bool { p >= 3 && q >= 3 && (p - 2) * (q - 2) > 4 }
+pub fn is_hyperbolic(p: usize, q: usize) -> bool { p >= 3 && q >= 3 && (p - 2).saturating_mul(q - 2) > 4 }
 
 /// `gamma_{p,q} = ((p - 2)(q - 2) - 2) / 2`, BDF Eq. (11).
 pub fn gamma_pq(p: usize, q: usize) -> f64 {

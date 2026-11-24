@@ -29,37 +29,25 @@ fn round_i32_2(v: [f64; 2]) -> [i32; 2] {
     [round_even(v[0]) as i32, round_even(v[1]) as i32]
 }
 
+pub(crate) fn translation_coset(m: [[i32; 2]; 2], offset: [i32; 2]) -> super::algebraic_fusion_snf::LatticeCoset {
+    let cols = [0, 1].map(|j| [i64::from(m[0][j]), i64::from(m[1][j])]);
+    super::algebraic_fusion_snf::LatticeCoset::new(offset.map(i64::from), &cols)
+}
+
 pub(crate) fn in_image_of_int_mat(m: [[i32; 2]; 2], v: [i32; 2]) -> bool {
-    let det = imat2_det(m);
-    if det == 0 {
-        return v == [0, 0] || {
-            let (r0, r1) = (m[0], m[1]);
-            let d = r0[0] * v[1] - r0[1] * v[0];
-            d == 0 && (r1[0] * v[1] - r1[1] * v[0]) == 0
-        };
-    }
-    let ad = det.abs();
-    let a0 = m[1][1] * v[0] - m[0][1] * v[1];
-    let a1 = -m[1][0] * v[0] + m[0][0] * v[1];
-    a0.rem_euclid(ad) == 0 && a1.rem_euclid(ad) == 0
+    translation_coset(m, [0, 0]).contains(v.map(i64::from))
 }
 
 fn canonical_coset_rep(m: [[i32; 2]; 2], v: [i32; 2]) -> [i32; 2] {
-    let mut best = v;
-    let mut best_key = (v[0] * v[0] + v[1] * v[1], v[0].abs() + v[1].abs(), -v[0], -v[1]);
-    for a in -3..=3 {
-        for b in -3..=3 {
-            let cand = [a, b];
-            if in_image_of_int_mat(m, [cand[0] - v[0], cand[1] - v[1]]) {
-                let k = (a * a + b * b, a.abs() + b.abs(), -a, -b);
-                if k < best_key {
-                    best_key = k;
-                    best = cand;
-                }
-            }
-        }
+    let coset = translation_coset(m, v);
+    if coset.contains([0, 0]) {
+        return [0, 0];
     }
-    best
+    super::algebraic_fusion_snf::shortest_coset_vectors(&coset, [[1.0, 0.0], [0.0, 1.0]])
+        .into_iter()
+        .min_by_key(|w| (w[0].abs() + w[1].abs(), -w[0], -w[1]))
+        .expect("nonempty coset")
+        .map(|x| x as i32)
 }
 
 /// Element `(t_frac | R)` of a 2D space group `G` in primitive fractional coordinates.
@@ -331,4 +319,27 @@ pub use crate::defect::gauge_holonomy::{
     verify_d_r_squared,
 };
 
+#[cfg(test)]
+mod translation_tests {
+    use super::*;
+    use crate::defect::algebraic_fusion_snf::{LatticeCoset, shortest_coset_vectors};
 
+    #[test]
+    fn integer_images_include_divisibility_and_only_the_column_direction() {
+        assert!(!in_image_of_int_mat([[0, 0], [0, 0]], [1, 0]));
+        let mirror = [[0, 0], [2, 2]];
+        assert!(in_image_of_int_mat(mirror, [0, 12]));
+        assert!(!in_image_of_int_mat(mirror, [0, 1]));
+        assert!(!in_image_of_int_mat(mirror, [2, 2]));
+    }
+
+    #[test]
+    fn shortest_burgers_vectors_use_the_metric_and_arbitrary_periods() {
+        let full = LatticeCoset::new([0, 0], &[[1, 0], [0, 1]]);
+        // A maps (-30,1) to (0,0.25), whereas (1,0) has length 1.
+        assert_eq!(shortest_coset_vectors(&full, [[1.0, 30.0], [0.0, 0.25]]), [[30, -1], [-30, 1]]);
+        let line = LatticeCoset::new([700, 3], &[[2, 0]]);
+        assert_eq!(shortest_coset_vectors(&line, [[1.0, 0.0], [0.0, 1.0]]), [[0, 3]]);
+        assert_eq!(canonical_coset_rep([[0, 0], [0, 0]], [200, 1]), [200, 1]);
+    }
+}

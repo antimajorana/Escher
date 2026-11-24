@@ -3,12 +3,38 @@
 
 use std::f64::consts::PI;
 
-use papertilling_core::hyperbolic::HyperbolicTiling;
+use papertilling_core::hyperbolic::{HyperbolicTiling, HyperbolicStyle, to_klein, to_hyperboloid};
+use super::hyperbolic_view::lorentz_centroid;
 
 use super::hyperbolic_ui::{DiskProjection, HypPick};
 use crate::mesh3d::atlas_mesh::mesh_from_hyperboloid;
 use crate::mesh3d::{GpuMeshData, Vertex3d};
 use crate::scene2d::{CirclePrim, LinePrim, PolyPrim, Scene2D, ScenePrimitives, compute_bbox, ring_tint_rgba};
+
+/// Edges of the dual net cross the shared sides of the selected tiles.
+fn dual_bonds(faces: &[Vec<usize>]) -> Vec<[usize; 2]> {
+    let mut owner = std::collections::HashMap::new();
+    let mut bonds = Vec::new();
+    for (face, cycle) in faces.iter().enumerate() {
+        for (&a, &b) in cycle.iter().zip(cycle.iter().cycle().skip(1)) {
+            if let Some(other) = owner.insert([a.min(b), a.max(b)], face) {
+                bonds.push([other, face]);
+            }
+        }
+    }
+    bonds
+}
+
+/// For [p,q], the stabilizer orders at face, edge and vertex are 2p, 4 and 2q.
+/// Keep the chosen polygon as the growth cell even when its centre is the sparsest site.
+fn centre_sites(hyp: &HyperbolicTiling) -> Option<Vec<[f64; 2]>> {
+    (hyp.p > hyp.q && hyp.wedge_delta == 0 && hyp.style != HyperbolicStyle::RectifiedKagome).then(|| {
+        hyp.faces
+            .iter()
+            .map(|face| lorentz_centroid(&face.iter().map(|&v| hyp.poincare_pts[v]).collect::<Vec<_>>()))
+            .collect()
+    })
+}
 
 /// Highlight colour of the picked element (2D fill / ring and 3D faces / marker).
 pub const HYP_PICK_RGBA8: [u8; 4] = [255, 196, 0, 150];
@@ -55,6 +81,31 @@ pub fn disk_scene(hyp: &HyperbolicTiling, proj: DiskProjection, zoom: f64, picke
     .map(|&p| s(p))
     .collect();
     let face_pts = |f: &[usize]| -> Vec<[f32; 2]> {
+        if matches!(proj, DiskProjection::Poincare) {
+            let mut boundary = Vec::new();
+            for (&a, &b) in f.iter().zip(f.iter().cycle().skip(1)) {
+                let (u, v) = (a.min(b), a.max(b));
+                if let Ok(i) = hyp.edges.binary_search(&(u, v)) {
+                    let arc = &hyp.edge_arcs[i];
+                    let start = hyp.poincare_pts[a];
+                    let end = hyp.poincare_pts[b];
+                    let midpoint = arc[arc.len() / 2];
+                    let deviation = (midpoint[0] - (start[0] + end[0])/2.0)
+                        .hypot(midpoint[1] - (start[1] + end[1])/2.0);
+                    if deviation * zoom < 0.0005 {
+                        boundary.push(s(start).map(|x| x as f32));
+                        continue;
+                    }
+                    let count = arc.len().saturating_sub(1);
+                    if a == u {
+                        boundary.extend(arc.iter().take(count).map(|&z| s(z).map(|x| x as f32)));
+                    } else {
+                        boundary.extend(arc.iter().rev().take(count).map(|&z| s(z).map(|x| x as f32)));
+                    }
+                }
+            }
+            return boundary;
+        }
         f.iter().filter_map(|&u| pts_2d.get(u).map(|p| [p[0] as f32, p[1] as f32])).collect()
     };
     let mut polygons: Vec<PolyPrim> = hyp
@@ -84,7 +135,28 @@ pub fn disk_scene(hyp: &HyperbolicTiling, proj: DiskProjection, zoom: f64, picke
             }
         }
     }
-    let mut circles: Vec<CirclePrim> = pts_2d
+    let centres = centre_sites(hyp);
+    let mut bond_count = hyp.edges.len();
+    if let Some(centres) = &centres {
+        let bonds = dual_bonds(&hyp.faces);
+        bond_count = bonds.len();
+        for [u,v] in bonds {
+            let [a,b] = [u,v].map(|i| to_klein(centres[i]));
+            let steps = if proj == DiskProjection::Klein { 1 } else { 8 };
+            let project = |i| {
+                let t = f64::from(i) / f64::from(steps);
+                let pt = std::array::from_fn(|k| (1.0-t)*a[k] + t*b[k]);
+                s(if proj == DiskProjection::Klein { pt } else { super::hyperbolic_view::klein_to_poincare(pt) })
+            };
+            for i in 0..steps {
+                lines.push(line(project(i), project(i+1), [27,82,150,220], 1.4, false));
+            }
+        }
+    }
+    let site_pts: Vec<_> = centres.as_ref().map(|v| v.iter().map(|&z| s(match proj {
+        DiskProjection::Poincare => z, DiskProjection::Klein => to_klein(z),
+    })).collect()).unwrap_or_else(|| pts_2d.clone());
+    let mut circles: Vec<CirclePrim> = site_pts
         .iter()
         .map(|p| CirclePrim {
             center: [p[0] as f32, p[1] as f32],
@@ -132,8 +204,8 @@ pub fn disk_scene(hyp: &HyperbolicTiling, proj: DiskProjection, zoom: f64, picke
                 hyp.poincare_pts.len()
             ),
             bbox: compute_bbox([[-1.05, -1.05], [1.05, 1.05]].into_iter()),
-            site_count: hyp.poincare_pts.len(),
-            bond_count: hyp.edges.len(),
+            site_count: site_pts.len(),
+            bond_count,
         },
     }
 }
@@ -147,7 +219,11 @@ pub fn sheet_points(hyp: &HyperbolicTiling, center: [f32; 3], radius: f32) -> Ve
 /// The hyperboloid sheet of `hyp` (already panned) with the picked face (a fan of `p` triangles, `3 p` vertices in
 /// [`HYP_PICK_RGBA`], lifted slightly off the sheet towards its concave side) or vertex (a marker) highlighted.
 pub fn sheet_mesh(hyp: &HyperbolicTiling, picked: Option<HypPick>) -> GpuMeshData {
-    let mut mesh = mesh_from_hyperboloid(hyp);
+    let centres = centre_sites(hyp).map(|v| v.into_iter().map(to_hyperboloid).collect::<Vec<_>>());
+    let mut mesh = mesh_from_hyperboloid(hyp, centres.as_deref());
+    if let Some(sites) = &centres {
+        crate::mesh3d::wb_mesh::add_site_bonds(&mut mesh, sites, &dual_bonds(&hyp.faces));
+    }
     if hyp.hyperboloid_pts.is_empty() {
         return mesh;
     }
@@ -207,4 +283,21 @@ pub fn sheet_mesh(hyp: &HyperbolicTiling, picked: Option<HypPick>) -> GpuMeshDat
         _ => {}
     }
     mesh
+}
+
+#[cfg(test)]
+mod orbit_tests {
+    use super::*;
+    use papertilling_core::hyperbolic::build_hyperbolic_tiling;
+
+    #[test]
+    fn dual_site_bonds_around_the_seed_heptagon() {
+        let tiling = build_hyperbolic_tiling(7, 3, HyperbolicStyle::RegularPQ, 1, 0).unwrap();
+        let centres = centre_sites(&tiling).unwrap();
+        assert!(centres[0][0].hypot(centres[0][1]) < 1e-9);
+        let neighbours = dual_bonds(&tiling.faces);
+        assert_eq!(neighbours.iter().filter(|e| e.contains(&0)).count(), 7);
+        let dual = build_hyperbolic_tiling(7, 3, HyperbolicStyle::DualQP, 1, 0).unwrap();
+        assert!(centre_sites(&dual).is_none());
+    }
 }

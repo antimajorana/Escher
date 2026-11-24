@@ -141,6 +141,14 @@ impl View3dState {
         &self.overlay_caption
     }
 
+    fn look_from_axis(&mut self, axis: usize, positive: bool) {
+        self.apply_preset(preset_for_axis(axis));
+        // Front looks from -y. Side and Top look from +x and +z, respectively.
+        if positive == (axis == 1) {
+            self.yaw += core::f32::consts::PI;
+        }
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         let available = ui.available_size().max(egui::vec2(64.0, 64.0));
         let (rect, response) = ui.allocate_exact_size(available, egui::Sense::click_and_drag());
@@ -158,7 +166,7 @@ impl View3dState {
             let g_resp = ui.interact(g, response.id.with("axis_gizmo"), egui::Sense::click());
             let hit = g_resp.hover_pos().and_then(|p| gizmo_hit(&self.rotation(), g, p));
             if let Some(end) = g_resp.interact_pointer_pos().filter(|_| g_resp.clicked()).and_then(|p| gizmo_hit(&self.rotation(), g, p)) {
-                self.apply_preset(preset_for_axis(end.axis));
+                self.look_from_axis(end.axis, end.positive);
             }
             if hit.is_some() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

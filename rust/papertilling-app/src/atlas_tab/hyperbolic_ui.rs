@@ -244,7 +244,7 @@ impl HyperbolicPanelState {
 
     pub fn show_inspector(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
         ui.strong("Hyperbolic H² Metric & Status");
-        let is_hyperbolic = (self.p.saturating_sub(2)) * (self.q.saturating_sub(2)) > 4;
+        let is_hyperbolic = papertilling_core::hyperbolic::inflation::is_hyperbolic(self.p, self.q);
         if !self.status.is_empty() {
             let col = if is_hyperbolic { tokens.status_ok } else { tokens.status_err };
             ui.colored_label(col, egui::RichText::new(&self.status).small());
@@ -262,28 +262,32 @@ impl HyperbolicPanelState {
                 .strong(),
             );
         }
+        let (p, q) = if self.style == HyperbolicStyle::DualQP { (self.q, self.p) } else { (self.p, self.q) };
         if self.pristine_only {
             ui.small(format!(
                 "Schläfli {{{}, {}}} | Seed: {:?} | Layers: {}",
-                self.p,
-                self.q,
+                p,
+                q,
                 self.effective_seed(),
                 self.layers
             ));
         } else {
             ui.small(format!(
                 "Schläfli {{{}, {}}} | Seed: {:?} | Layers: {} | Wedge Δp: {:+}",
-                self.p,
-                self.q,
+                p,
+                q,
                 self.effective_seed(),
                 self.layers,
                 self.effective_wedge()
             ));
         }
-        ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
+
         if is_hyperbolic {
-            let (p, q) = if self.style == HyperbolicStyle::DualQP { (self.q, self.p) } else { (self.p, self.q) };
-            ui.small("Intrinsic curvature of the reference plane K = −1.");
+            if self.effective_wedge() == 0 && self.style != HyperbolicStyle::RectifiedKagome {
+                let orbit = if p > q { "face centres" } else { "vertices" };
+                ui.small(format!("Blue sites lie at {orbit}. One site is shared by {} reflection chambers.", 2 * p.max(q)));
+            }
+            ui.small("Intrinsic curvature K = −1.");
             if !self.pristine_only {
                 let delta = self.effective_wedge();
                 let core = (p as i32 + delta).clamp(3, 12) as usize;
