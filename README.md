@@ -2,7 +2,7 @@
 
 # Escher
 
-Escher lets you build lattices and explore how their defects combine and bend a sheet. The logo shows the central pentagon of a hyperbolic `{5,5}` tiling and its five edge-sharing neighbors.
+Escher lets you build lattices and explore how their defects combine and bend a sheet. The off-center logo shows a pentagon and its five edge-sharing neighbors from a hyperbolic `{5,5}` tiling.
 
 ## Install
 
