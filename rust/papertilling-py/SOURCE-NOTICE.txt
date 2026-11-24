@@ -1,0 +1,4 @@
+Escher is distributed under the GNU General Public License, version 3 only.
+The matching source for the desktop binaries and Python acceleration wheels
+is available in the Source code archives on the same release page:
+https://github.com/antimajorana/Escher/releases

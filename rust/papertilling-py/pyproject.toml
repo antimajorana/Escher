@@ -7,11 +7,13 @@ name = "papertilling-rs"
 version = "0.2.0"
 description = "Optional Rust acceleration module for papertilling"
 license = "GPL-3.0-only"
+license-files = ["LICENSE", "SOURCE-NOTICE.txt"]
 authors = [{ name = "antimajorana" }]
 requires-python = ">=3.10"
 
 [project.urls]
 Homepage = "https://github.com/antimajorana/Escher"
+Releases = "https://github.com/antimajorana/Escher/releases"
 
 [tool.maturin]
 module-name = "papertilling_rs"
