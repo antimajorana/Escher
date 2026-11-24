@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# User-local installer for Papertilling Desktop Explorer on Linux (no root required).
+# User-local installer for Escher Desktop Explorer on Linux (no root required).
 # Usage: ./install.sh          (install to ~/.local)
 #        ./install.sh --remove (uninstall)
 set -eu
@@ -12,7 +12,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 if [ "${1:-}" = "--remove" ] || [ "${1:-}" = "--uninstall" ]; then
     rm -f "$BIN_DIR/papertilling-app" "$APP_DIR/papertilling.desktop" "$ICON_DIR/papertilling.png"
-    echo "Removed Papertilling from $PREFIX"
+    echo "Removed Escher from $PREFIX"
     exit 0
 fi
 
@@ -27,5 +27,5 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
 fi
 
-echo "Installed Papertilling to $BIN_DIR/papertilling-app"
+echo "Installed Escher to $BIN_DIR/papertilling-app"
 echo "You can launch it from your desktop application menu or run: $BIN_DIR/papertilling-app"

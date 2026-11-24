@@ -44,11 +44,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           & $iscc "/DMyAppVersion=$ver" "rust\papertilling-app\installer\windows\papertilling.iss"
-          $portDir = "dist\papertilling-$ver-windows-x86_64"
+          $portDir = "dist\escher-$ver-windows-x86_64"
           New-Item -ItemType Directory -Force -Path $portDir | Out-Null
           Copy-Item "rust\target\release\papertilling-app.exe" "$portDir\papertilling-app.exe"
           Copy-Item "LICENSE" "$portDir\LICENSE"
-          Compress-Archive -Path "$portDir\*" -DestinationPath "dist\papertilling-$ver-windows-x86_64-portable.zip" -Force
+          Compress-Archive -Path "$portDir\*" -DestinationPath "dist\escher-$ver-windows-x86_64-portable.zip" -Force
           Remove-Item -Recurse -Force $portDir
       - name: Build papertilling-rs Python wheel (abi3-py310)
         run: |
@@ -92,7 +92,7 @@ jobs:
           cargo build --release --manifest-path rust/Cargo.toml -p papertilling-app --target aarch64-apple-darwin
           cargo build --release --manifest-path rust/Cargo.toml -p papertilling-app --target x86_64-apple-darwin
 
-          APP="stage_dmg/Papertilling.app"
+          APP="stage_dmg/Escher.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" dist
           lipo -create \
             rust/target/aarch64-apple-darwin/release/papertilling-app \
@@ -115,7 +115,7 @@ jobs:
 
           ln -s /Applications stage_dmg/Applications
           cp LICENSE stage_dmg/LICENSE.txt
-          hdiutil create -volname "Papertilling $VER" -srcfolder stage_dmg -ov -format UDZO "dist/papertilling-$VER-macos-universal.dmg"
+          hdiutil create -volname "Escher $VER" -srcfolder stage_dmg -ov -format UDZO "dist/escher-$VER-macos-universal.dmg"
       - name: Build papertilling-rs Universal2 Python wheel
         run: |
           python -m pip install --upgrade pip "maturin>=1.16"
@@ -157,7 +157,7 @@ jobs:
         run: |
           VER="${{ steps.ver.outputs.version }}"
           cargo build --release --manifest-path rust/Cargo.toml -p papertilling-app
-          STAGE="papertilling-$VER-linux-x86_64"
+          STAGE="escher-$VER-linux-x86_64"
           mkdir -p "$STAGE" dist
           cp rust/target/release/papertilling-app "$STAGE/papertilling-app"
           chmod +x "$STAGE/papertilling-app"
@@ -197,9 +197,9 @@ jobs:
           generate_release_notes: true
           body: |
             ### Desktop App Installers (no Rust or Python needed)
-            - **Windows (x86_64):** download and run `papertilling-*-windows-x86_64-setup.exe` (per-user installer with Start Menu & Desktop shortcuts; no Administrator prompt required), or unpack `*-portable.zip`.
-            - **macOS (Apple Silicon & Intel):** open `papertilling-*-macos-universal.dmg` and drag **Papertilling.app** to **Applications**.
-            - **Linux (x86_64):** unpack `papertilling-*-linux-x86_64.tar.gz` and run `./install.sh` (installs to `~/.local` with desktop launcher icon).
+            - **Windows (x86_64):** download and run `escher-*-windows-x86_64-setup.exe` (per-user installer with Start Menu & Desktop shortcuts; no Administrator prompt required), or unpack `*-portable.zip`.
+            - **macOS (Apple Silicon & Intel):** open `escher-*-macos-universal.dmg` and drag **Escher.app** to **Applications**.
+            - **Linux (x86_64):** unpack `escher-*-linux-x86_64.tar.gz` and run `./install.sh` (installs to `~/.local` with desktop launcher icon).
 
             ### Optional Python Acceleration Wheel (`papertilling-rs`)
             Download the `.whl` matching your OS (`cp310-abi3`, Python 3.10+) and run `pip install papertilling_rs-*.whl` alongside `pip install git+https://github.com/antimajorana/papertilling`.

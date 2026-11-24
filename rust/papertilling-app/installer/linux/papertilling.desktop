@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Papertilling
+Name=Escher
 GenericName=2D Lattice & Defect Explorer
 Comment=Explore planar lattices of the 17 wallpaper groups, crystalline defects, and surfaces
 Exec=papertilling-app

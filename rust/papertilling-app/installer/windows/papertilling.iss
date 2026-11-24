@@ -1,4 +1,4 @@
-; Inno Setup 6 installer script for Papertilling Desktop Explorer (Windows x86_64)
+; Inno Setup 6 installer script for Escher Desktop Explorer (Windows x86_64)
 ; Non-admin per-user install by default (PrivilegesRequired=lowest), with dialog override.
 
 #ifndef MyAppVersion
@@ -7,19 +7,19 @@
 
 [Setup]
 AppId={{8F64D4B1-7E29-4C8E-9A52-3E5B08C71942}
-AppName=Papertilling
+AppName=Escher
 AppVersion={#MyAppVersion}
 ; package author
-AppPublisher=Papertilling contributors
+AppPublisher=Escher contributors
 AppPublisherURL=https://github.com/antimajorana/papertilling
 AppSupportURL=https://github.com/antimajorana/papertilling/issues
 AppUpdatesURL=https://github.com/antimajorana/papertilling/releases
-DefaultDirName={autopf}\Papertilling
-DefaultGroupName=Papertilling
+DefaultDirName={autopf}\Escher
+DefaultGroupName=Escher
 DisableProgramGroupPage=yes
 LicenseFile=..\..\..\..\LICENSE
 OutputDir=..\..\..\..\dist
-OutputBaseFilename=papertilling-{#MyAppVersion}-windows-x86_64-setup
+OutputBaseFilename=escher-{#MyAppVersion}-windows-x86_64-setup
 SetupIconFile=..\..\assets\icon.ico
 UninstallDisplayIcon={app}\papertilling-app.exe
 Compression=lzma2/ultra64
@@ -40,9 +40,13 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\..\..\target\release\papertilling-app.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
+[InstallDelete]
+Type: files; Name: "{autoprograms}\Papertilling.lnk"
+Type: files; Name: "{autodesktop}\Papertilling.lnk"
+
 [Icons]
-Name: "{autoprograms}\Papertilling"; Filename: "{app}\papertilling-app.exe"; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
-Name: "{autodesktop}\Papertilling"; Filename: "{app}\papertilling-app.exe"; Tasks: desktopicon; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
+Name: "{autoprograms}\Escher"; Filename: "{app}\papertilling-app.exe"; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
+Name: "{autodesktop}\Escher"; Filename: "{app}\papertilling-app.exe"; Tasks: desktopicon; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
 
 [Run]
-Filename: "{app}\papertilling-app.exe"; Description: "{cm:LaunchProgram,Papertilling}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\papertilling-app.exe"; Description: "{cm:LaunchProgram,Escher}"; Flags: nowait postinstall skipifsilent

@@ -81,7 +81,7 @@ fn main() -> ExitCode {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("papertilling — Desktop Explorer")
+            .with_title("Escher — Desktop Explorer")
             .with_inner_size([1360.0, 840.0])
             // the narrow HUD keeps the Codex button and the rename controls whole down to this width
             .with_min_inner_size([game_menu::HUD_MIN_WINDOW_WIDTH, 480.0])

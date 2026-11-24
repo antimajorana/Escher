@@ -1,6 +1,6 @@
 # Scientific scope
 
-Papertilling builds periodic site-and-bond models. A Bravais lattice has one site per primitive cell and always has inversion symmetry. Groups that require a less symmetric site pattern need a motif. Here “Bravais-like” means ranking periodic models first by few kinds of site (Wyckoff orbits), then by criteria such as cell size and bond orbits.
+Escher builds periodic site-and-bond models. A Bravais lattice has one site per primitive cell and always has inversion symmetry. Groups that require a less symmetric site pattern need a motif. Here “Bravais-like” means ranking periodic models first by few kinds of site (Wyckoff orbits), then by criteria such as cell size and bond orbits.
 
 | Question | Current coverage |
 | --- | --- |

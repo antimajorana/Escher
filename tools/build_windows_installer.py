@@ -1,9 +1,9 @@
-"""Build a standalone single-file Windows installer for Papertilling Desktop Explorer.
+"""Build a standalone single-file Windows installer for Escher Desktop Explorer.
 
     python tools/build_windows_installer.py [VERSION]
 
 Uses Inno Setup 6 (`ISCC.exe`) when installed; otherwise compiles a native per-user
-Windows GUI installer (`dist/papertilling-<version>-windows-x86_64-setup.exe`) using the
+Windows GUI installer (`dist/escher-<version>-windows-x86_64-setup.exe`) using the
 built-in Windows .NET Framework C# compiler (`csc.exe`), requiring no external tools.
 """
 from __future__ import annotations
@@ -32,12 +32,12 @@ using System.Reflection;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("Papertilling Setup")]
-[assembly: AssemblyProduct("Papertilling")]
+[assembly: AssemblyTitle("Escher Setup")]
+[assembly: AssemblyProduct("Escher")]
 [assembly: AssemblyVersion("__VER4__")]
 
 static class SetupProgram {
-    const string AppName = "Papertilling";
+    const string AppName = "Escher";
     const string AppVer = "__VER__";
     const string UninstKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Papertilling";
 
@@ -45,7 +45,10 @@ static class SetupProgram {
     static int Main(string[] args) {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        string defDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Papertilling");
+        string previousDir = Registry.GetValue(@"HKEY_CURRENT_USER\" + UninstKey, "InstallLocation", null) as string;
+        string defDir = String.IsNullOrEmpty(previousDir)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", AppName)
+            : previousDir;
 
         foreach (string a in args) {
             if (a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)) {
@@ -58,7 +61,7 @@ static class SetupProgram {
         }
 
         using (Form f = new Form()) {
-            f.Text = "Papertilling " + AppVer + " Setup";
+            f.Text = AppName + " " + AppVer + " Setup";
             f.ClientSize = new Size(470, 255);
             f.FormBorderStyle = FormBorderStyle.FixedDialog;
             f.MaximizeBox = false;
@@ -69,7 +72,7 @@ static class SetupProgram {
             if (f.Icon != null) pic.Image = f.Icon.ToBitmap();
 
             Label title = new Label {
-                Text = "Install Papertilling " + AppVer,
+                Text = "Install " + AppName + " " + AppVer,
                 Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 12f, FontStyle.Bold),
                 Bounds = new Rectangle(80, 20, 370, 26)
             };
@@ -87,7 +90,7 @@ static class SetupProgram {
             };
 
             CheckBox cbDesk = new CheckBox { Text = "Create a Desktop shortcut", Checked = true, Bounds = new Rectangle(20, 144, 300, 22) };
-            CheckBox cbRun = new CheckBox { Text = "Launch Papertilling when setup finishes", Checked = true, Bounds = new Rectangle(20, 170, 340, 22) };
+            CheckBox cbRun = new CheckBox { Text = "Launch " + AppName + " when setup finishes", Checked = true, Bounds = new Rectangle(20, 170, 340, 22) };
 
             Button btnInstall = new Button { Text = "Install", Bounds = new Rectangle(284, 210, 80, 28) };
             Button btnCancel = new Button { Text = "Cancel", Bounds = new Rectangle(370, 210, 80, 28) };
@@ -101,12 +104,12 @@ static class SetupProgram {
                     f.Cursor = Cursors.WaitCursor;
                     PerformInstall(dirBox.Text.Trim(), cbDesk.Checked, cbRun.Checked);
                     f.Cursor = Cursors.Default;
-                    MessageBox.Show(f, "Papertilling has been installed successfully.", "Papertilling Setup", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(f, AppName + " has been installed successfully.", AppName + " Setup", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     f.Close();
                 } catch (Exception ex) {
                     f.Cursor = Cursors.Default;
                     btnInstall.Enabled = true;
-                    MessageBox.Show(f, "Installation failed:\n" + ex.Message, "Papertilling Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(f, "Installation failed:\n" + ex.Message, AppName + " Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             };
 
@@ -146,10 +149,10 @@ static class SetupProgram {
         ExtractGzipResource("license.txt.gz", licTxt);
         File.Copy(Application.ExecutablePath, uninsExe, true);
 
-        string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Papertilling.lnk");
+        string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), AppName + ".lnk");
         CreateShortcut(startMenu, appExe, "Explore 2D wallpaper lattices, defects, and surfaces");
         if (desktopShortcut) {
-            string desk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Papertilling.lnk");
+            string desk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), AppName + ".lnk");
             CreateShortcut(desk, appExe, "Explore 2D wallpaper lattices, defects, and surfaces");
         }
 
@@ -171,10 +174,10 @@ static class SetupProgram {
     }
 
     static int RunUninstall(string dir) {
-        if (MessageBox.Show("Uninstall Papertilling from your computer?", "Uninstall Papertilling",
+        if (MessageBox.Show("Uninstall " + AppName + " from your computer?", "Uninstall " + AppName,
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return 0;
-        string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Papertilling.lnk");
-        string desk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Papertilling.lnk");
+        string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), AppName + ".lnk");
+        string desk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), AppName + ".lnk");
         if (File.Exists(startMenu)) File.Delete(startMenu);
         if (File.Exists(desk)) File.Delete(desk);
         Registry.CurrentUser.DeleteSubKeyTree(UninstKey, false);
@@ -182,7 +185,7 @@ static class SetupProgram {
             string p = Path.Combine(dir, fn);
             if (File.Exists(p)) try { File.Delete(p); } catch { }
         }
-        MessageBox.Show("Papertilling has been uninstalled.", "Uninstall Papertilling", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show(AppName + " has been uninstalled.", "Uninstall " + AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
         return 0;
     }
 }
@@ -207,7 +210,7 @@ def main() -> int:
         raise SystemExit(f"Release binary not found at {APP_EXE}. Build it first with:\n"
                          "  cargo build --release --manifest-path rust/Cargo.toml -p papertilling-app")
     DIST_DIR.mkdir(parents=True, exist_ok=True)
-    out_exe = DIST_DIR / f"papertilling-{ver}-windows-x86_64-setup.exe"
+    out_exe = DIST_DIR / f"escher-{ver}-windows-x86_64-setup.exe"
 
     if iscc := find_iscc():
         subprocess.run([str(iscc), f"/DMyAppVersion={ver}", str(ISS_FILE)], check=True)
