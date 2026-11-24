@@ -1,8 +1,8 @@
-<img align="right" src="rust/papertilling-app/assets/icon.png" width="112" height="112" alt="Escher logo with four colored hyperbolic pentagons inside a heptagon">
+<img align="right" src="rust/papertilling-app/assets/icon.png" width="112" height="112" alt="Circular Escher logo with five central pentagons surrounded by three layers of smaller pentagons">
 
 # Escher
 
-Escher, formerly Papertilling, lets you build lattices and explore how their defects combine and bend a sheet. The logo shows four pentagons meeting at a vertex in the hyperbolic `{5,4}` tiling.
+Escher, formerly Papertilling, lets you build lattices and explore how their defects combine and bend a sheet. The circular logo shows the vertex-centered hyperbolic `{5,5}` tiling with three layers around the five central pentagons.
 
 ## Install
 
