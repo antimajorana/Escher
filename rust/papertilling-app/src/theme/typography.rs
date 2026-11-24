@@ -50,6 +50,12 @@ pub fn register_fonts(ctx: &egui::Context) {
     });
 }
 
+pub(crate) fn truncated_galley(painter: &egui::Painter, text: &str, font: egui::FontId, color: egui::Color32, w: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), egui::TextFormat::simple(font, color));
+    job.wrap = egui::text::TextWrapping::truncate_at_width(w);
+    painter.layout_job(job)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -289,7 +289,7 @@ fn paint_card(
     let x0 = rect.left() + 6.0;
     let w = rect.width() - 12.0;
     let mut y = thumb.bottom() + 4.0;
-    let name = truncated(&painter, &it.label, egui::FontId::proportional(12.5), t.text_primary, w);
+    let name = crate::theme::typography::truncated_galley(&painter, &it.label, egui::FontId::proportional(12.5), t.text_primary, w);
     painter.galley(egui::pos2(x0, y), name, t.text_primary);
     y += 17.0;
     // group pill, rule tag, chirality badge
@@ -316,11 +316,6 @@ fn paint_card(
     painter.text(egui::pos2(x0, y), egui::Align2::LEFT_TOP, counts, egui::FontId::proportional(10.5), t.text_muted);
 }
 
-fn truncated(painter: &egui::Painter, text: &str, font: egui::FontId, color: egui::Color32, w: f32) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), egui::TextFormat::simple(font, color));
-    job.wrap = egui::text::TextWrapping::truncate_at_width(w);
-    painter.layout_job(job)
-}
 
 fn table(ui: &mut egui::Ui, items: &[&CatalogueItemUi], selected: &CatalogueItemUi, named_mode: bool) -> Option<usize> {
     let mut picked = None;

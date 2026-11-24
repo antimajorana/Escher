@@ -28,6 +28,16 @@ mod tests;
 #[cfg(test)]
 mod tests_bc;
 
+/// Name the construction before its counts can be mistaken for the template's own faces.
+fn surface_description(name: &str) -> String {
+    for surface in ["sphere", "projective plane"] {
+        if let Some(template) = name.strip_suffix(&format!(" ({surface})")) {
+            return format!("{surface} · {template} gluing template");
+        }
+    }
+    name.to_owned()
+}
+
 /// What the two size controls mean for a target, and the values offered (every value is used as shown).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SizeControls {
@@ -267,7 +277,7 @@ impl SurfacesTabState {
         match built {
             Ok((mesh, report, notes)) => {
                 self.notes = notes;
-                let net_title = format!("{} ({}) — {} — 2D net", self.active_disp, group, mesh.name);
+                let net_title = format!("{} ({group}) · {}", self.active_disp, surface_description(&mesh.name));
                 canvas.set_scene_with_title(Scene2D::SurfaceNet { mesh: mesh.clone() }, Some(net_title), true);
                 if self.elastic.shape_mode == SurfaceShapeMode::ElasticFvK {
                     self.elastic.request_relax(mesh.clone(), None);
@@ -294,18 +304,13 @@ impl SurfacesTabState {
         let (gpu, fvk_note) = self.elastic.build_gpu_mesh(mesh, self.show_cover, None);
         let disp = if self.active_disp.is_empty() { mesh.name.as_str() } else { self.active_disp.as_str() };
         let caption = format!(
-            "{} on {}{} | V={} E={} F={} χ={} (R={:.2}, c=[{:.1},{:.1},{:.1}]){fvk_note}{}",
-            disp,
-            mesh.name,
+            "{disp}{} · V={} E={} F={} χ={} · {}{fvk_note}{}",
             if use_cov { " [S² double cover]" } else { "" },
             gpu.vertex_count,
             gpu.edge_count,
             gpu.face_count,
             if use_cov { 2 } else { mesh.chi },
-            gpu.radius,
-            gpu.center[0],
-            gpu.center[1],
-            gpu.center[2],
+            surface_description(&mesh.name),
             self.notes.picture_note.map(|n| format!(" | {n}")).unwrap_or_default(),
         );
         view3d.set_mesh(gpu, caption);

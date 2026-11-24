@@ -22,6 +22,7 @@ import numpy as np
 from .. import _rust
 from ..legacy import fusion_framework as ff
 from . import fast as _fast
+from . import _signed_scan
 from .build import (Configuration, build, graph_core, isomorphic_cores, lattice_data, patch_rim, same_charge,
                     _cell_geometry_key, _norm)
 
@@ -42,21 +43,21 @@ def _iso_cores(G1: nx.Graph, G2: nx.Graph, fast: bool | None = None) -> bool:
     return isomorphic_cores(G1, G2)
 
 _DISLOC_CACHE: dict = {}
-_DISLOC_BUILDS: dict = {}               # same keys: the legacy builds behind each core
+_DISLOC_BUILDS: dict = {}               # same keys: the signed patches behind each core
 
 
 def dislocation_core_list(lattice, b, radius: int = 2, grid: int = 3, max_candidates: int = 8,
                           fast: bool | None = None, R: float | None = None) -> tuple[list[dict], dict]:
-    """Every core of lab_defects.dislocation_cores for Burgers vector b (Volterra cut-and-reglue builds
+    """Distinct cores of a signed dislocation with Burgers vector b (Volterra cut-and-reglue builds
     over grid x grid cut ends and up to six cut directions, plus every non-crossing completion of the
     core ring), re-read with the graph-only core rule of build.py. Only builds whose measured Burgers
-    vector is in the P+ class of b are kept (dislocation_cores scans both cut senses, giving -b too,
-    which is another class on p3, p3m1, ...). Returns (cores, scan info). The scan is finite
+    vector is in the P+ class of b are kept. The two cut senses remove or insert a half-strip,
+    respectively, so the counterclockwise Burgers circuit has the same sign in both cases. Returns (cores, scan info). The scan is finite
     (grid, six cuts, at most max_candidates completion bonds): a core it misses is not excluded.
     If a core ball reaches the patch rim, the whole scan is redone once with a 1.4x larger patch;
     candidates still too close are counted in info["skipped_rim"], never silently dropped.
-    fast=None/True: fast.dislocation_cores (legacy code, faster primitives, identical output); False: legacy.
-    R: patch radius of the builds (default None: the radius above). The legacy builds behind each core
+    fast selects the accelerated or reference primitives for the same signed construction.
+    R: patch radius of the builds (default None: the radius above). The builds behind each core
     (Defect, completion bonds) are kept apart for cores.core_gallery (_disloc_builds), not in the output."""
     fast = _fast.enabled(fast)
     lat = lattice_data(lattice, fast)
@@ -70,7 +71,7 @@ def dislocation_core_list(lattice, b, radius: int = 2, grid: int = 3, max_candid
     for attempt in range(2):
         with warnings.catch_warnings():          # networkx 3.5 notice about unlabelled WL hashes (legacy code)
             warnings.simplefilter("ignore", UserWarning)
-            found, notes = _fast.dislocation_cores(lat.cell, b, fast=fast, grid=grid, R=R, ball=radius, complete=True,
+            found, notes = _signed_scan.scan(lat.cell, b, fast=fast, grid=grid, R=R, ball=radius, complete=True,
                                                    reconstruct=True, max_candidates=max_candidates)
         out, skipped, other_class = [], 0, 0
         builds, merged = [], []                  # aligned with out; (dropped lab record, index in out it equals)
@@ -121,7 +122,7 @@ def _disloc_key(lat, b, radius, grid, max_candidates, fast, R=None):
 
 def _disloc_builds(lattice, b, radius: int = 2, grid: int = 3, max_candidates: int = 8, fast: bool | None = None,
                    R: float | None = None) -> tuple[list[dict], dict, dict]:
-    """(cores, info, store) of dislocation_core_list; store: the legacy builds aligned with cores
+    """(cores, info, store) of dislocation_core_list; store: the signed builds aligned with cores
     (defect: the cut-and-reglue Defect, chords: its completion bonds), the scan records dropped as
     isomorphic to an earlier core ('merged'), the perfect ring sizes and the patch radius."""
     fast = _fast.enabled(fast)
@@ -133,7 +134,7 @@ def _disloc_builds(lattice, b, radius: int = 2, grid: int = 3, max_candidates: i
 def equivalent_single(config: Configuration, radius: int = 2, grid: int = 3, show: bool = False, fast: bool | None = None) -> dict:
     """The single defect with the same total charge, and which of its cores (if any) has a core graph
     isomorphic to the configuration's.
-    Dislocation charge: every core of lab_defects.dislocation_cores (Volterra + completions).
+    Dislocation charge: every core of dislocation_core_list (Volterra + completions).
     Disclination charge: the single disclination at the measured centre (its core does not depend on
     the seam direction, C05 step 3). fast: as in build.build (identical results, tests/test_config.py).
     res['gallery']: dislocation charge, cores.core_gallery of the charge (the same cores as the

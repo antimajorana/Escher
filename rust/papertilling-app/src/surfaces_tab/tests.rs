@@ -228,6 +228,9 @@ fn net_and_3d_follow_every_control_change_and_refusals_clear_both() {
             let mult = if st.show_cover && m.cover.is_some() { 2 } else { 1 };
             assert_eq!((gpu.vertex_count, gpu.face_count), (mult * m.sites.len(), mult * m.faces.len()), "{what}: 3D");
             assert!(view.caption().contains(&format!("V={}", mult * m.sites.len())), "{what}: caption");
+            if m.name.ends_with(" (sphere)") {
+                assert!(view.caption().contains("sphere · ") && view.caption().contains("gluing template"), "{what}: {}", view.caption());
+            }
         }
         None => {
             assert_eq!(canvas.counts(), (0, 0), "{what}: a refused surface left a stale net");

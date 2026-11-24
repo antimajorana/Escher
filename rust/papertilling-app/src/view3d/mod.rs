@@ -191,13 +191,15 @@ impl View3dState {
             },
         ));
         if !self.overlay_caption.is_empty() {
-            painter.text(
-                rect.left_top() + egui::vec2(8.0, 6.0),
-                egui::Align2::LEFT_TOP,
-                &self.overlay_caption,
-                egui::FontId::proportional(12.0),
-                tokens.text_primary,
+            let pos = rect.left_top() + egui::vec2(8.0, 6.0);
+            let caption = crate::theme::typography::truncated_galley(
+                &painter, &self.overlay_caption, egui::FontId::proportional(12.0),
+                tokens.text_primary, (rect.width() - 16.0).max(0.0),
             );
+            if caption.elided && ui.rect_contains_pointer(egui::Rect::from_min_size(pos, caption.size())) {
+                response.clone().on_hover_text(&self.overlay_caption);
+            }
+            painter.galley(pos, caption, tokens.text_primary);
         }
         let avail_hint_w = if has_hud {
             (hud_rect.left() - rect.left() - 14.0).max(0.0)

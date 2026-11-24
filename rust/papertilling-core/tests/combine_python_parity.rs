@@ -121,49 +121,18 @@ fn check_case(case: &Value) -> Vec<String> {
     match equivalent_single(&group, &cell, frame, &specs, &crystal, 2, grid, false) {
         Err(e) => bad.push(format!("{name}: equivalent_single failed: {e}")),
         Ok(rep) => {
-            let is_disloc = rep.kind == "dislocation";
-            let is_p4g_scan = is_disloc && group == "p4g";
-            let is_non_c2_scan = is_disloc && matches!(group.as_str(), "p3" | "p31m");
-            if is_p4g_scan || is_non_c2_scan {
-                // Legacy Python `fast.dislocation_fast` removes a strip for both cut senses, yielding -b when
-                // cross2(d, b) > 0 (rejected as `other_class` on p3/p31m and shifting grid=2 cores on p4g).
-                // Fixed Rust builds +b via 4-chart insertion for cross2(d, b) > 0 (`other_class == 0`).
-                let sc = rep.scan.as_ref().expect("dislocation scan info");
-                if sc.other_class != 0 {
-                    bad.push(format!("{name}: expected other_class == 0, got {}", sc.other_class));
-                }
-                if rep.candidates.is_empty() || rep.candidates.len() != sc.distinct {
-                    bad.push(format!("{name}: inconsistent scanned candidates {} vs distinct {}", rep.candidates.len(), sc.distinct));
-                }
-                if is_p4g_scan {
-                    if rep.equivalent != py["equivalent"].as_bool().unwrap() {
-                        bad.push(format!("{name}: equivalent {} vs Python {}", rep.equivalent, py["equivalent"]));
-                    }
-                    if rep.matches.iter().map(|s| norm_label(s)).collect::<Vec<_>>() != strs(&py["matches"]).iter().map(|s| norm_label(s)).collect::<Vec<_>>() {
-                        bad.push(format!("{name}: matches {:?} vs Python {}", rep.matches, py["matches"]));
-                    }
-                } else {
-                    // On p3/p31m, the two adjacent +120/-120 dipoles now match genuine +b completion cores
-                    // that legacy Python missed; the two next-cell dipoles remain non-equivalent.
-                    let want_eq = matches!(name, "p3 +120 1b / -120 1c" | "p31m +120 2b(i) / -120 2b(ii)");
-                    if rep.equivalent != want_eq {
-                        bad.push(format!("{name}: expected equivalent={want_eq}, got {}", rep.equivalent));
-                    }
-                }
-            } else {
-                if rep.equivalent != py["equivalent"].as_bool().unwrap() {
-                    bad.push(format!("{name}: equivalent {} vs Python {}", rep.equivalent, py["equivalent"]));
-                }
-                if rep.matches.iter().map(|s| norm_label(s)).collect::<Vec<_>>() != strs(&py["matches"]).iter().map(|s| norm_label(s)).collect::<Vec<_>>() {
-                    bad.push(format!("{name}: matches {:?} vs Python {}", rep.matches, py["matches"]));
-                }
-                if norm_label(&rep.verdict) != norm_label(py["verdict"].as_str().unwrap()) {
-                    bad.push(format!("{name}: verdict '{}' vs Python '{}'", rep.verdict, py["verdict"]));
-                }
-                let names: Vec<String> = rep.candidates.iter().map(|c| norm_label(&c.name)).collect();
-                if names != strs(&py["candidates"]).iter().map(|s| norm_label(s)).collect::<Vec<_>>() {
-                    bad.push(format!("{name}: candidates {names:?} vs Python {}", py["candidates"]));
-                }
+            if rep.equivalent != py["equivalent"].as_bool().unwrap() {
+                bad.push(format!("{name}: equivalent {} vs Python {}", rep.equivalent, py["equivalent"]));
+            }
+            if rep.matches.iter().map(|s| norm_label(s)).collect::<Vec<_>>() != strs(&py["matches"]).iter().map(|s| norm_label(s)).collect::<Vec<_>>() {
+                bad.push(format!("{name}: matches {:?} vs Python {}", rep.matches, py["matches"]));
+            }
+            if norm_label(&rep.verdict) != norm_label(py["verdict"].as_str().unwrap()) {
+                bad.push(format!("{name}: verdict '{}' vs Python '{}'", rep.verdict, py["verdict"]));
+            }
+            let names: Vec<String> = rep.candidates.iter().map(|c| norm_label(&c.name)).collect();
+            if names != strs(&py["candidates"]).iter().map(|s| norm_label(s)).collect::<Vec<_>>() {
+                bad.push(format!("{name}: candidates {names:?} vs Python {}", py["candidates"]));
             }
         }
     }

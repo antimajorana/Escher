@@ -25,17 +25,15 @@ pub(crate) fn draw_overlays(
     note: &str,
     tokens: &ThemeTokens,
 ) {
+    let mut top_y = 6.0;
     if !title.is_empty() {
-        painter.text(
-            rect.left_top() + egui::vec2(8.0, 6.0),
-            egui::Align2::LEFT_TOP,
-            title,
-            egui::FontId::proportional(12.5),
-            tokens.text_primary,
-        );
+        let title = painter.layout(title.to_owned(), egui::FontId::proportional(12.5),
+            tokens.text_primary, (rect.width() - 16.0).max(1.0));
+        let height = title.size().y;
+        painter.galley(rect.left_top() + egui::vec2(8.0, top_y), title, tokens.text_primary);
+        top_y += height + 3.0;
     }
     if !note.is_empty() {
-        let top_y = if title.is_empty() { 6.0 } else { 24.0 };
         let max_w = (rect.width() - 32.0).max(40.0);
         let galley = painter.layout(
             note.to_string(),

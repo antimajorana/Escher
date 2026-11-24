@@ -164,10 +164,11 @@ impl GalleryTabState {
         let rows: Vec<usize> = (0..groups.len()).filter(|&i| self.filter.group_visible(&groups[i])).collect();
         let mut picked_grp: Option<usize> = None;
         ui.push_id("gallery_groups_tbl", |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
             TableBuilder::new(ui)
                 .striped(true)
                 .max_scroll_height(135.0)
-                .column(Column::exact(84.0))
+                .column(Column::auto().at_least(84.0))
                 .column(Column::exact(26.0))
                 .column(Column::exact(76.0))
                 .column(Column::exact(28.0))

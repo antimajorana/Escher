@@ -16,6 +16,49 @@ def _norm(v) -> float:
     return math.hypot(float(v[0]), float(v[1]))
 
 
+def _insertion_rule(L, n_verts, ts, dup, Y, b):
+    """Bonds allowed by the four overlapping charts of an inserted half-strip."""
+    rule = {}
+    for chart in range(4):
+        here = {}
+        for i in n_verts:
+            t, s = ts[i]
+            if chart == 0:
+                if s <= 1e-9:
+                    here[L.locate(Y[i])] = (i, 0)
+            elif chart == 1:
+                if t < -1e-9 or (s > 1e-9 and t < 1.0 - 1e-9):
+                    here[L.locate(Y[i])] = (i, 0)
+            elif chart == 2:
+                if s <= 1e-9 and t >= -1e-9:
+                    here[L.locate(Y[i])] = (i, 0)
+                elif i in dup:
+                    here[L.locate(Y[i])] = (dup[i], 0)
+                elif s > 1e-9 and t >= 1.0 - 1e-9:
+                    here[L.locate(Y[i])] = (i, 0)
+            elif s > 1e-9:
+                if t < 1.0 - 1e-9:
+                    here[L.locate(Y[i])] = (i, 0)
+                if i in dup:
+                    k_sh = L.locate(Y[i] + b)
+                    if k_sh is not None:
+                        here[k_sh] = (dup[i], 1)
+                elif t >= 1.0 - 1e-9:
+                    k_sh = L.locate(Y[i] + b)
+                    if k_sh is not None:
+                        here[k_sh] = (i, 1)
+        for img, (u, su) in here.items():
+            if img is None:
+                continue
+            p_img = L.pos(img)
+            for k2, kind in L.nbrs(img):
+                hit = here.get(k2)
+                if hit is not None and hit[0] != u:
+                    v, sv = hit
+                    rule[(u, v)] = (L.pos(k2) - p_img, su - sv, kind)
+    return rule
+
+
 class _Builder(ff._ConeSafeBuilder):
     """Cone-safe builder with symmetric 360-deg dislocation insertion and disclination/core-spur fixes."""
 
@@ -62,7 +105,7 @@ class _Builder(ff._ConeSafeBuilder):
                 D[nv] = D[i]
         dup_left = set(dup)
         kept = list(n_verts) + [dup[i] for i in n_verts if i in dup]
-        rule = self._insertion_rule(n_verts, ts, dup, D, Y, b)
+        rule = _insertion_rule(self.L, n_verts, ts, dup, Y, b)
         Q = self.local_rotation(base)
         xb, yb = np.array(self.X[base], float), np.array(Y[base], float)
         self._apply(rule, kept, D, lambda j: (np.eye(2), j * b), fresh)
@@ -86,48 +129,6 @@ class _Builder(ff._ConeSafeBuilder):
                 frame_of=self.label[base], core_site=None, double_bonds=0, self_bonds=0,
             )
         )
-
-    def _insertion_rule(self, n_verts, ts, dup, _D, Y, b):
-        L = self.L
-        rule = {}
-        for chart in range(4):
-            here = {}
-            for i in n_verts:
-                t, s = ts[i]
-                if chart == 0:
-                    if s <= 1e-9:
-                        here[L.locate(Y[i])] = (i, 0)
-                elif chart == 1:
-                    if t < -1e-9 or (s > 1e-9 and t < 1.0 - 1e-9):
-                        here[L.locate(Y[i])] = (i, 0)
-                elif chart == 2:
-                    if s <= 1e-9 and t >= -1e-9:
-                        here[L.locate(Y[i])] = (i, 0)
-                    elif i in dup:
-                        here[L.locate(Y[i])] = (dup[i], 0)
-                    elif s > 1e-9 and t >= 1.0 - 1e-9:
-                        here[L.locate(Y[i])] = (i, 0)
-                elif s > 1e-9:
-                    if t < 1.0 - 1e-9:
-                        here[L.locate(Y[i])] = (i, 0)
-                    if i in dup:
-                        k_sh = L.locate(Y[i] + b)
-                        if k_sh is not None:
-                            here[k_sh] = (dup[i], 1)
-                    elif t >= 1.0 - 1e-9:
-                        k_sh = L.locate(Y[i] + b)
-                        if k_sh is not None:
-                            here[k_sh] = (i, 1)
-            for img, (u, su) in here.items():
-                if img is None:
-                    continue
-                p_img = L.pos(img)
-                for k2, kind in L.nbrs(img):
-                    hit = here.get(k2)
-                    if hit is not None and hit[0] != u:
-                        v, sv = hit
-                        rule[(u, v)] = (L.pos(k2) - p_img, su - sv, kind)
-        return rule
 
     def add_disclination(self, angle, p, cut=None):
         """FIX 1: enlarge disconnected seam-band neighbourhood round face-centred disclinations."""

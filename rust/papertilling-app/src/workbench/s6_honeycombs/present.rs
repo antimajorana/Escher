@@ -145,10 +145,11 @@ pub(crate) fn show_built(ui: &mut egui::Ui, b: &Built, tokens: &ThemeTokens, gri
         }
         _ => {}
     }
-    egui::Grid::new(grid_id).num_columns(2).striped(true).show(ui, |ui| {
+    let column_width = ((ui.available_width() - ui.spacing().item_spacing.x) * 0.5).max(1.0);
+    egui::Grid::new(grid_id).num_columns(2).max_col_width(column_width).striped(true).show(ui, |ui| {
         for (k, v) in &b.rows {
-            ui.label(k);
-            ui.label(v);
+            ui.add(egui::Label::new(k).wrap());
+            ui.add(egui::Label::new(v).wrap());
             ui.end_row();
         }
     });

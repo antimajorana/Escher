@@ -118,10 +118,9 @@ impl Space3dPanelState {
                 }
             });
         }
-        ui.horizontal(|ui| {
-            ui.label("Find space group");
-            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Number or symbol").desired_width(120.0));
-        });
+        let search_label = ui.label("Find space group");
+        ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Number or symbol").desired_width(f32::INFINITY))
+            .labelled_by(search_label.id);
         let q = symbol_key(&self.filter);
         egui::ScrollArea::vertical().id_salt("atlas_sg230_scroll").max_height(120.0).show(ui, |ui| {
             let mut matches = list_space_groups_3d().iter().filter(|sg| matches_group(sg, &q)).peekable();
