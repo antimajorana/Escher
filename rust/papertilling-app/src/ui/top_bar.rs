@@ -17,7 +17,14 @@ impl PapertillingApp {
                         .on_hover_text(format!("PNG export at {s}x pixel density (2D: {tip}; 3D: the viewport's on-screen pixels x {s}), same composition"));
                 }
             });
-            if (self.advanced || self.active_tab == NavTab::Surfaces)
+            let showing_3d = match self.active_tab {
+                NavTab::Surfaces => true,
+                NavTab::Defects => self.defects.sub_tab != crate::defects_tab::DefectSubTab::Combinations
+                    && self.defects.view_mode.uses_3d(),
+                NavTab::Combine => self.combine.view_mode.uses_3d(),
+                _ => false,
+            };
+            if (self.advanced || showing_3d)
                 && ui
                     .button("Save 3D image (PNG)...")
                     .on_hover_text("The 3D view as on screen (caption, legend), at the PNG scale")
@@ -27,11 +34,11 @@ impl PapertillingApp {
                 ui.close();
                 self.export_3d_png_action(&ui.ctx().clone());
             }
-            if self.advanced {
-                if ui.button("Export 3D mesh (.obj)...").clicked() && !self.smoke_test {
-                    ui.close();
-                    self.export_obj_action();
-                }
+            if self.advanced && ui.button("Export 3D mesh (.obj)...").clicked() && !self.smoke_test {
+                ui.close();
+                self.export_obj_action();
+            }
+            if self.advanced || self.active_tab == NavTab::Combine {
                 ui.separator();
                 if ui
                     .button("Save defect config (.json)...")

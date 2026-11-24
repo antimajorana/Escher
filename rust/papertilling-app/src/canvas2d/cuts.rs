@@ -2,6 +2,7 @@
 //! and live reaction arrows on `Canvas2D`.
 
 use crate::canvas2d::{Canvas2D, CanvasMarker, draw_dashed_egui};
+use crate::scene2d::{CirclePrim, LinePrim, ScenePrimitives, compute_bbox};
 use crate::theme::ThemeTokens;
 
 /// Pick radius in screen points for a branch-cut drag handle.
@@ -77,7 +78,53 @@ pub struct CanvasKinematicOverlay {
     pub reaction: Option<CanvasReactionArrow>,
 }
 
-/// Render Volterra branch-cut rays (`purple` for removal/disclination, `teal` for dislocation insertion).
+fn ray_color(ray: &CanvasCutRay, tokens: &ThemeTokens) -> egui::Color32 {
+    if ray.is_half_wall {
+        tokens.cut_half_wall
+    } else if ray.is_insertion {
+        tokens.cut_insertion
+    } else {
+        tokens.cut_ray_line
+    }
+}
+
+/// Vector layer for the visible cut geometry. The drag handles belong to the editor.
+pub(super) fn cut_export_layer(rays: &[CanvasCutRay]) -> ScenePrimitives {
+    let mut layer = ScenePrimitives::default();
+    let tokens = ThemeTokens::paper();
+    for ray in rays {
+        let color = ray_color(ray, &tokens).to_srgba_unmultiplied();
+        let line = |a: [f64; 2], b: [f64; 2], width, dashed, arrow_mid| LinePrim {
+            a: a.map(|x| x as f32),
+            b: b.map(|x| x as f32),
+            color,
+            width,
+            dashed,
+            arrow_mid,
+        };
+        let dot = |center: [f64; 2], radius| CirclePrim {
+            center: center.map(|x| x as f32),
+            radius_world: 0.0,
+            min_px: radius,
+            max_px: radius,
+            fill: color,
+            stroke: ([0; 4], 0.0),
+        };
+        let width = if ray.is_half_wall { 2.8 } else { 2.0 };
+        layer.lines.push(line(ray.origin, ray.end, width, !ray.is_half_wall, true));
+        if ray.is_half_wall {
+            layer.circles.push(dot(ray.origin, 4.5));
+        }
+        if let Some((a, b)) = ray.strip {
+            layer.lines.push(line(a, b, 3.0, false, false));
+            layer.circles.extend([dot(a, 2.8), dot(b, 2.8)]);
+        }
+    }
+    layer.bbox = compute_bbox(layer.lines.iter().flat_map(|line| [line.a, line.b]));
+    layer
+}
+
+/// Render Volterra branch cuts with purple removal rays, teal insertion rays, and amber half-walls.
 pub(crate) fn draw_cut_rays(
     painter: &egui::Painter,
     canvas: &Canvas2D,
@@ -86,13 +133,7 @@ pub(crate) fn draw_cut_rays(
     tokens: &ThemeTokens,
 ) {
     for ray in rays {
-        let col = if ray.is_half_wall {
-            tokens.cut_half_wall
-        } else if ray.is_insertion {
-            tokens.cut_insertion
-        } else {
-            tokens.cut_ray_line
-        };
+        let col = ray_color(ray, tokens);
         let p0 = canvas.world_to_screen_at(rect, [ray.origin[0] as f32, ray.origin[1] as f32]);
         let p1 = canvas.world_to_screen_at(rect, [ray.end[0] as f32, ray.end[1] as f32]);
         if ray.is_half_wall {

@@ -1,149 +1,35 @@
-# papertilling
+# Papertilling
 
-Planar periodic lattices of the 17 wallpaper (plane) groups, and the crystalline defects they carry.
+Explore lattices and defects in the Euclidean plane, 3D crystals, layers, and regular hyperbolic tilings and honeycombs.
 
-For each wallpaper group the package lists the "most Bravais-like" lattices: a Bravais lattice is one point copied by translations, so every site is equivalent; here the sites are copied by the whole group, with as few kinds of site and as few sites per cell as the group allows (three precise rules are given below). For one lattice it lists every class of defect that breaks its crystalline symmetry (dislocations, disclinations, domain walls, twin walls, Moebius seams, glide-breaking walls) and builds crystals that contain chosen defects.
+## Desktop
 
-![The named lattices](docs/img/gallery.png)
+Download a [Windows, macOS, or Linux release](https://github.com/antimajorana/papertilling/releases/latest), or build from this checkout with Rust 1.95+.
 
-The first lattice of each of the 17 groups (stored list, rule `points`):
+```sh
+cargo run --locked --release --manifest-path rust/Cargo.toml -p papertilling-app
+```
 
-![First lattice of each wallpaper group](docs/img/groups.png)
+Browse the 17 wallpaper groups and surfaces under **Lattice**. In **Defects**, use **Place & fuse** or **Fuse & compare** for planar defects. Open **Advanced → All Views → Forge** for space-group, layer-group, and hyperbolic charges.
 
-## Desktop app
+## Python
 
-Pre-built native installers (no Python or Rust needed) are on the [Releases](https://github.com/antimajorana/papertilling/releases/latest) page:
-
-- **Windows (`x86_64`):** run `papertilling-*-windows-x86_64-setup.exe` (installs per-user with Start Menu and Desktop shortcuts; no Administrator rights required), or unpack `*-portable.zip`.
-- **macOS (Apple Silicon & Intel):** open `papertilling-*-macos-universal.dmg` and drag **Papertilling.app** to **Applications**.
-- **Linux (`x86_64`):** unpack `papertilling-*-linux-x86_64.tar.gz` and run `./install.sh` (installs to `~/.local` with desktop launcher icon).
-
-The desktop app has four live views: **Gallery** (all 664 stored lattices across the 17 wallpaper groups, 21 named lattices, Wyckoff positions, and parameter sliders), **Surfaces** (torus, cylinder, Moebius band, Klein bottle, sphere, projective plane, and higher-genus handlebodies in rotatable 3D), **Defects** (dislocations, disclinations, and domain/twin/Moebius/glide walls), and **Combine** (live multi-defect placement and dragging, topological charge in $\tilde{G}^+$, Volterra vs completion core gallery, and `.json` config exchange with Notebook 3).
-
-Current source builds also provide:
-
-- Persistent custom lattice names, without changing catalogue identity or defect configurations. Names are
-  stored in the operating system's user configuration directory, outside the repository.
-- Cursor-anchored viewport zoom, zoom/fit controls, and click-to-enlarge core cards.
-- **2D / 3D Sheet / Split** views in Defects and Combine, with bending stiffness, height exaggeration,
-  strain/height/ring colouring, and a defect-free flat reference.
-
-The elastic sheet is an approximate visualization, not a new definition of defect charge or core equivalence.
-Check its convergence/topology diagnostics before interpreting numerical energies or heights. SVG and Notebook
-JSON preserve Unicode names; PNG text currently has a limited bitmap character set.
-
-To build and launch from source instead (requires Rust 1.95+):
-
-    cargo run --release --manifest-path rust/Cargo.toml -p papertilling-app
-
-## Python install
-
-Python 3.10 or newer. From GitHub:
-
-    pip install git+https://github.com/antimajorana/papertilling
-
-From a clone of the repository:
-
-    git clone https://github.com/antimajorana/papertilling
-    cd papertilling
-    pip install .
-
-Extras (add them in brackets, for example `pip install ".[fast,widgets]"`):
-
-| extra | adds | used for |
-|---|---|---|
-| `fast` | numba | faster lattice search (there is a slower pure-Python path without it) |
-| `widgets` | ipywidgets | `explore(L)`, the sliders for the free parameters of a lattice |
-| `notebooks` | jupyterlab, ipywidgets, numba | running the notebooks |
-| `test` | pytest | running the tests |
-| `all` | all of the above | |
-
-The required packages are numpy, scipy, networkx, matplotlib and spglib.
-
-## Quick start
+With Python 3.10+, run `python -m pip install .` from this checkout. Install `'.[notebooks]'` to run the [three notebooks](notebooks/).
 
 ```python
+import matplotlib.pyplot as plt
 import papertilling as pt
 
-cat = pt.load_catalogue()          # stored lists for all 17 groups (rule "points")
-cat["p4g"].show()                  # table and pictures of the lattices of group p4g
-
-L = pt.named("Kagomé")             # one of the 18 named lattices
-L.plot()                           # draw it
-L.group                            # 'p6m'
-
-dc = pt.DefectCatalogue(L)         # every defect class of this lattice
-dc.summary()                       # printed list: dislocations, disclinations, walls
-
-b = dc.dislocations[0]["b"]        # Burgers vector of the first dislocation class
-conf = pt.build(L, dict(kind="dislocation", b=b, at=(0.37, 0.41)))   # a crystal with that dislocation
-conf.plot()
+lattice = pt.named("Kagomé")
+b = pt.DefectCatalogue(lattice).dislocations[0]["b"]
+pt.build(lattice, dict(kind="dislocation", b=b, at=(0.37, 0.41))).plot()
+plt.show()
 ```
 
-`load_catalogue()` reads stored lists (about 1 s). To search instead: `pt.minimal_lattices("p6m", n=12)` (tens of seconds). In a script, call `matplotlib.pyplot.show()` to see the figures.
+## Scope
 
-## The three rules
+Planar core equivalence compares the measured topological charge and the local bond graph. Catalogue and core searches are bounded. **Not found** reports a failed construction within the attempted settings. Elastic sheets and curved 3D surface previews are models with numerical and geometric limits.
 
-A "lattice" here is a set of sites in the plane, repeated periodically, with bonds between them. `load_catalogue(rule=...)` and `minimal_lattices(group, n, rule=...)` rank the lattices of a wallpaper group in one of three ways:
+[Scientific scope and wall examples](docs/SCIENTIFIC_SCOPE.md) · [Development and tests](docs/DEVELOPMENT.md) · [Design and conventions](docs/RUST_PLAN.md) · [Changelog](CHANGELOG.md)
 
-- **`points`** (default). The points alone, with no bonds drawn, must have exactly the symmetry of the group, no more. Lattices with the fewest kinds of site come first, then the fewest sites per cell. The bonds are not chosen: two sites are joined when their Voronoi cells share an edge. Two lattices that give the same network (the same tiling when the symmetry is forgotten) count once.
-- **`sheet`**. The same condition on the points, but the bonds are chosen: the fewest kinds of bond that give a planar, connected lattice with at least 3 bonds at every site. Rank: kinds of site, kinds of bond, sites per cell, bonds per cell. This rule reproduces a hand-made sheet of well-known lattices (the named lattices below).
-- **`bonds`**. As `sheet`, without the condition on the points: the bonds may lower the symmetry below that of the points.
-
-For p1, pm, pg and cm no lattice with one kind of site exists under the first two rules: a single orbit of points of these groups always has an extra 2-fold rotation.
-
-A "kind" of site or bond is an orbit under the group.
-
-## Named lattices
-
-`pt.named_lattices()` lists 18 lattices taken from the hand-made sheet; `pt.named(name)` returns one, and `pt.gallery()` draws them all: Oblique, Elongated Triangular, Straight, Square, Triangular, Kagomé, Honeycomb, Rectangular, Fractal Triangular, Breathing Kagomé, Shastry's Ladder, Shastry-Sutherland, Brick, Zig Zag, Sutherland's Brick, Chiral Square, Chiral Kagomé, Chiral Triangular. Each entry records the group written on the sheet and the measured group of the drawing. Three drawings have more symmetry than their label (Straight is p2, Shastry's Ladder is pmg, Brick is cmm); the package also stores a deformed version of each that does have the labelled group (`straight_p1`, `shastrys_ladder_pm`, `brick_pg`).
-
-![A dislocation in the Kagome lattice](docs/img/defect.png)
-
-## Lattices on surfaces
-
-```python
-from papertilling.surfaces import torus, cylinder, mobius_band, klein_bottle, sphere, projective_plane, genus_surface
-S = sphere(pt.named("honeycomb"), size=(1, 1))   # C60: 60 sites, 12 pentagons (12 disclinations of +60 deg)
-S.checks(); S.show()
-```
-
-A periodic lattice fits without defects only on flat surfaces: the cylinder, the torus, the Moebius band and the Klein bottle (the last
-two need a mirror or glide line). Every other closed surface needs disclinations whose Frank angles add up to 360 deg x chi
-(Gauss-Bonnet): +720 deg on a sphere, +360 deg on a projective plane, -720 deg x (g - 1) on a surface of genus g. The sphere and the
-projective plane are built by folding the lattice onto a polyhedron whose corners are its own rotation centres; each gluing is tested to
-be a symmetry of the lattice, and the construction is refused otherwise. Higher genus uses two sheets of a torus joined along slits
-(each slit end is a -360 deg disclination) and works for every lattice. 3D pictures of the torus and the Klein bottle are necessarily
-distorted (a flat torus has no undistorted shape in 3D; a Klein bottle passes through itself); the flat pieces are exact.
-
-## Notebooks
-
-In `notebooks/` (they need the `notebooks` extra and a Jupyter kernel of the Python in which `papertilling` is installed):
-
-1. `1. Lattices of a wallpaper group.ipynb`: the lattices of one group under a chosen rule, ITA Wyckoff tables, sliders for the free parameters.
-2. `2. Defects of a lattice.ipynb`: every defect class of one lattice, with pictures.
-3. `3. Defect configurations.ipynb`: several defects close together, compared by total charge and core graph.
-
-## Tests and checks
-
-    pip install ".[test,fast,widgets]"
-    python -m pytest -q                      # default run: tests marked slow are skipped
-    python -m pytest -q -m slow              # the heavy cases
-
-Scripts to run by hand, from the repository root (see `docs/DEVELOPMENT.md`):
-
-    python tools/checks/archimedean_control.py   # the search finds all 11 Archimedean tilings
-    python tools/checks/catalogue_check.py       # every stored lattice is re-checked from its recipe
-    python tools/checks/symmetry_check.py        # symmetry group of every stored drawing, by three routes
-
-## What the results are, and are not
-
-The lattice lists and defect classes are computational evidence, not proofs. Searches run only up to stated bounds: free parameters are sampled at a finite number of random values (48 per choice of sites for the rule `points`, 256 for the others), and the rules `sheet` and `bonds` only try bonds at most one cell long and at most 6 kinds of bond. The `coverage` and `bounds` attributes of a result state which bounds applied, and `open` lists lattices from tiers that were not finished. A lattice missing from a list may lie outside the bounds. The Archimedean check compares the search with a known answer (the 11 tilings), and the tests compare the fast code with the earlier engines; neither is a proof of completeness.
-
-## More
-
-`docs/DEVELOPMENT.md` describes the layout, the check scripts, how the stored data and notebooks are rebuilt, and the speed switches. `CHANGELOG.md` lists the versions.
-
-## Licence
-
-GPL-3.0-only. See `LICENSE`. Copyright (C) 2026 antimajorana.
+[GPL-3.0-only](LICENSE) · Copyright © 2026 antimajorana

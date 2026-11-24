@@ -378,14 +378,14 @@ def config_entry(config, radius: int = 2, title: str = "this configuration") -> 
     faces of Configuration.cores()."""
     lat = config.lattice
     d = config.defect
-    K = config.core_sites()
+    K, _ = config._get_core(radius)
     D = 2 * lat.r_det + radius + 3
-    dist = _graph_ball(d.to_networkx(), K, D)
-    y, new = _crop(d, dist)
+    keep = _graph_ball(d.to_networkx(), K, D) if K else range(len(d.sites))
+    y, new = _crop(d, keep)
     cores = config.cores()
     faces = [[new[v] for v in c["sites"]] for c in cores if len(c["sites"]) > 2 and all(v in new for v in c["sites"])]
     rings = tuple(sorted(c["ring"] for c in cores if c.get("ring")))
-    words = ", ".join(c["label"] for c in cores)
+    words = ", ".join(c["label"] for c in cores) or ("no irregular sites" if not K else "no charged faces")
     return dict(name=title, kind="configuration", defect=y, core_sites=sorted(new[v] for v in K if v in new), chords=[],
                 rings=rings, faces=faces, description=words, drawing=None, lattice=lat,
                 perfect_rings=[], also=[])

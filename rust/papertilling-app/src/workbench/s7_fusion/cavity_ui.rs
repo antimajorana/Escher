@@ -10,7 +10,7 @@ use papertilling_core::fusion::{
 };
 use papertilling_core::types::{BuiltCrystal, Cell2D, Frame2D};
 
-use super::scene;
+use super::{cavity_drawing, scene};
 use crate::canvas2d::Scene2D;
 use crate::theme::ThemeTokens;
 use crate::workbench::scene_helpers::polyline_scene;
@@ -276,7 +276,7 @@ impl LoadedCavity {
         ui.strong(format!("Live cavity: {} ({})", self.request.lattice_name, self.request.group));
         if let Some(ext) = &self.extraction {
             ui.small(format!("Source: {}", ext.far_field_source));
-            ui.small(format!("Algebraic total charge: {}", ext.algebraic_charge));
+            ui.small(format!("Algebraic charge in input order: {}", ext.algebraic_charge));
             ui.small(format!(
                 "{}-gon cavity · original interior: {} vert(s), {} edge(s)",
                 ext.cavity_cycle.len(),
@@ -498,8 +498,10 @@ impl LoadedCavity {
                 core.orbit_id + 1,
                 core.title
             );
+            let schematic = cavity_drawing::schematic_if_needed(&core.map, &ext.cavity_cycle);
+            let title = if schematic.is_some() { format!("{title} (schematic)") } else { title };
             return scene::map_scene(
-                &core.map,
+                schematic.as_ref().unwrap_or(&core.map),
                 &hi,
                 title,
                 self.regular_sides,

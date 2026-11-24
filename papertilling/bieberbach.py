@@ -294,15 +294,41 @@ def _to_frac(v: Any) -> Fraction:
     return Fraction(float(v)).limit_denominator(24)
 
 
+def _spec_fraction(v: Any) -> Fraction:
+    if isinstance(v, (list, tuple)):
+        return Fraction(*v)
+    return _to_frac(v)
+
+
+_DEFAULT_TORUS_SCALES = (2, 3, 4, 6)
+
+
 class SpaceGroupAnalyzer:
     """Dimension-n Bieberbach cohomology, abelianization, and defect sector analyzer."""
 
     def __init__(self, dim: int, number: int, symbol: str, gens_conv: list[tuple[Any, Any]], tb_rows: list[list[Any]]):
+        self._initialize(dim, dim, number, symbol, gens_conv, tb_rows)
+
+    @classmethod
+    def _from_subperiodic(
+        cls, dim: int, ambient_dim: int, number: int, symbol: str,
+        gens_conv: list[tuple[Any, Any]], tb_rows: list[list[Any]],
+    ) -> SpaceGroupAnalyzer:
+        analyzer = cls.__new__(cls)
+        analyzer._initialize(dim, ambient_dim, number, symbol, gens_conv, tb_rows)
+        return analyzer
+
+    def _initialize(
+        self, dim: int, ambient_dim: int, number: int, symbol: str,
+        gens_conv: list[tuple[Any, Any]], tb_rows: list[list[Any]],
+    ) -> None:
         self.dim = dim
         self.number = number
         self.symbol = symbol
-        tb = [[_to_frac(x) for x in row] for row in tb_rows]
-        self.b_mat = [[tb[j][i] for j in range(dim)] for i in range(dim)]
+        self.b_mat = [
+            [_to_frac(tb_rows[j][i]) if i < dim and j < dim else Fraction(i == j) for j in range(ambient_dim)]
+            for i in range(ambient_dim)
+        ]
         self.b_inv = _rat_inv(self.b_mat)
         self.gens_prim = []
         for rc, tc in gens_conv:
@@ -311,34 +337,36 @@ class SpaceGroupAnalyzer:
             rp = [[int(x) for x in row] for row in rp_rat]
             if any(x.denominator != 1 for row in rp_rat for x in row) or abs(_det(rp)) != 1:
                 raise ValueError(f"{symbol}: invalid primitive rotation matrix")
-            tp = _mat_vec(self.b_inv, [_to_frac(x) for x in tc])
+            tp = _mat_vec(self.b_inv, [_to_frac(x) for x in tc])[:dim]
             self.gens_prim.append((rp, tp))
 
-        id_mat = _eye(dim)
-        self.p_ops: list[list[list[int]]] = [id_mat]
+        # Distinct ambient operations can have the same action on the translation lattice.
+        id_mat = _eye(ambient_dim)
+        point_ops = [id_mat]
         self.tau: list[list[Fraction]] = [[Fraction(0)] * dim]
         lookup = {tuple(tuple(r) for r in id_mat): 0}
         q = deque([0])
         while q:
             i1 = q.popleft()
-            r1, t1 = self.p_ops[i1], self.tau[i1]
+            r1, t1 = point_ops[i1], self.tau[i1]
             for rg, tg in self.gens_prim:
                 r2 = _mat_mul(r1, rg)
                 k2 = tuple(tuple(r) for r in r2)
                 t2 = [t1[c] + sum(r1[c][k] * tg[k] for k in range(dim)) for c in range(dim)]
                 t2_red = [x - math.floor(x) for x in t2]
                 if k2 not in lookup:
-                    lookup[k2] = len(self.p_ops)
-                    self.p_ops.append(r2)
+                    lookup[k2] = len(point_ops)
+                    point_ops.append(r2)
                     self.tau.append(t2_red)
                     q.append(lookup[k2])
                 elif self.tau[lookup[k2]] != t2_red:
                     raise ValueError(f"{symbol}: inconsistent translation remainder")
 
-        p_len = len(self.p_ops)
-        self.mul_table = [[lookup[tuple(tuple(r) for r in _mat_mul(self.p_ops[i], self.p_ops[j]))] for j in range(p_len)] for i in range(p_len)]
+        p_len = len(point_ops)
+        self.mul_table = [[lookup[tuple(tuple(r) for r in _mat_mul(r1, r2))] for r2 in point_ops] for r1 in point_ops]
         self.inv_idx = [next(j for j in range(p_len) if self.mul_table[i][j] == 0) for i in range(p_len)]
-        self.det_sign = [_det(r) for r in self.p_ops]
+        self.det_sign = [_det(r) for r in point_ops]
+        self.p_ops = [[row[:dim] for row in r[:dim]] for r in point_ops]
         self.nu = [
             [
                 [
@@ -472,12 +500,14 @@ class SpaceGroupAnalyzer:
                 total += 1
         return total
 
-    def summarize(self, torus_ns: tuple[int, ...] = (2, 3, 4, 6)) -> dict[str, Any]:
+    def _torus_counts(self, scales: tuple[int, ...]) -> list[tuple[int, int]]:
+        return [(n, self.count_torus_conjugacy_classes(n)) for n in scales]
+
+    def summarize(self, torus_ns: tuple[int, ...] = _DEFAULT_TORUS_SCALES) -> dict[str, Any]:
         h2_t, is_split = self.compute_cohomology_h2()
         p_plus = [i for i, d in enumerate(self.det_sign) if d == 1]
         ab_pt, ab_pf, _ = self.compute_abelianization(p_plus)
         ab_ft, ab_ff, _ = self.compute_abelianization(list(range(len(self.p_ops))))
-        tor = [(n, self.count_torus_conjugacy_classes(n)) for n in torus_ns]
         return {
             "dim": self.dim,
             "number": self.number,
@@ -492,7 +522,7 @@ class SpaceGroupAnalyzer:
             "ab_full_torsion": ab_ft,
             "ab_full_free": ab_ff,
             "ab_full_label": fmt_abelian(ab_ft, ab_ff),
-            "torus_counts": tor,
+            "torus_counts": self._torus_counts(torus_ns),
         }
 
 
@@ -519,15 +549,26 @@ def analyze_wallpaper_group(group: str) -> dict[str, Any]:
 
 
 def analyze_space_group(spec: dict[str, Any]) -> dict[str, Any]:
-    """Analyze a dimension-n space group specification dict `(dim, number, symbol, ops, tb_rows)`."""
+    """Analyze a space group from `dim`, `number`, `symbol`, `ops`, and `tb_rows`.
+
+    Translation components in `op["t"]` and `tb_rows` accept numbers or `[numerator, denominator]` pairs.
+    """
+    dim = int(spec["dim"])
+    number = int(spec.get("number", 0))
+    symbol = str(spec.get("symbol", "custom"))
+    ops = [([list(map(int, row)) for row in op["r"]], list(map(_spec_fraction, op["t"]))) for op in spec["ops"]]
+    tb = [list(map(_spec_fraction, row)) for row in spec["tb_rows"]]
+    sg = SpaceGroupAnalyzer(dim, number, symbol, ops, tb)
     rs = _rust.get()
     if rs is not None and hasattr(rs, "bieberbach_analyze_json"):
-        return json.loads(rs.bieberbach_analyze_json(json.dumps(spec)))
-    sg = SpaceGroupAnalyzer(
-        int(spec["dim"]),
-        int(spec.get("number", 0)),
-        str(spec.get("symbol", "custom")),
-        [(op["r"], op["t"]) for op in spec["ops"]],
-        spec["tb_rows"],
-    )
+        wire_spec = {
+            "dim": dim,
+            "number": number,
+            "symbol": symbol,
+            "ops": [{"r": r, "t": [[x.numerator, x.denominator] for x in t]} for r, t in ops],
+            "tb_rows": [[[x.numerator, x.denominator] for x in row] for row in tb],
+        }
+        summary = json.loads(rs.bieberbach_analyze_json(json.dumps(wire_spec)))
+        summary["torus_counts"] = [list(row) for row in sg._torus_counts(_DEFAULT_TORUS_SCALES)]
+        return summary
     return sg.summarize()

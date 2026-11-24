@@ -1,0 +1,46 @@
+# Scientific scope
+
+Papertilling builds periodic site-and-bond models. A Bravais lattice has one site per primitive cell and always has inversion symmetry. Groups that require a less symmetric site pattern need a motif. Here “Bravais-like” means ranking periodic models first by few kinds of site (Wyckoff orbits), then by criteria such as cell size and bond orbits.
+
+| Question | Current coverage |
+| --- | --- |
+| Which lattices realize a symmetry group? | The desktop catalogues cover all 17 wallpaper groups. The 3D atlas covers all 230 space groups with 2,498 stored samples. The layer atlas builds slabs for all 80 layer groups. The hyperbolic atlas builds regular H² tilings and all 15 regular H³ honeycombs. |
+| Which defects can be built and fused? | The 2D catalogue covers dislocations, disclinations, and four wall constructions. The desktop compares pairs and placed configurations with single-defect candidates. Python's `papertilling.defects.config.compare` and `classify` compare multiple configurations of the same lattice. The 3D atlas builds axial screw dislocations on sampled nets. The group defect atlas compares projected charges in the 230 space groups, 80 layer groups and supported regular H² and H³ reflection groups. General 3D defect catalogues and fusion of their cores remain open. |
+| How does a defect affect curvature? | In **Defects** or **Place & fuse**, choose **3D sheet** or **Split view**, then **Angle deficit**. It displays the interior-vertex quantity Ω = 2π − Σθ in radians. **Height** shows out-of-plane displacement in the model and **Bond strain** shows stretching. Read the solver diagnostics before interpreting the sheet. |
+| How does geometry change the result? | The app constructs lattices on flat quotients and selected curved surfaces, including sphere, projective plane and higher genus. The atlas and workbench also explore hyperbolic tilings and 3D honeycombs. Their examples have different construction rules and coverage. |
+
+A fusion match compares the outer-loop charge and a local bond graph at the chosen radius. Volterra matches and matches requiring healed bonds are reported separately. Finite core searches can leave candidates undiscovered. A claim about physical stability would require a specified material or interaction model and a convergence check.
+
+Python's `compare` reports charge equivalence in the proper symmetry group and charge equivalence up to a mirror separately. That distinction matters when a mirror maps a defect to a different proper-group class.
+
+The sheet overlay omits boundary vertices. On a closed polyhedral surface the sum of angle deficits is `2πχ` by Gauss–Bonnet. An open patch also has a boundary contribution.
+
+## Space groups, layers, and hyperbolic groups
+
+In the desktop app, turn on **Advanced** and open **All Views → Forge**. Choose **Space-group charges**, **Layer-group charges**, **H² Wedge Disclinations**, or **H³ Charges**. **Lattice → Non-Euclidean**, available through **All Views → Geometries**, gives the pristine H² and H³ references.
+
+- **Crystals and layers.** Pick an affine operation and add whole primitive translations. The lab composes `B ∘ A` exactly and compares the result with your candidate. It also tests conjugacy by proper ambient group operations, including arbitrary primitive periods. Layer groups have two periodic directions, and an operation can preserve orientation in the plane while reversing it in the ambient space.
+- **Screw previews.** Choose a space group and **+1 a₃** or **−1 a₃**. Orange bonds rejoin the cut with the indicated axial translation of the chosen sampled net. A counterclockwise circuit about the axis advances by that vector. The helical display is kinematic, and the outer surfaces truncate the block. The sampled net's primitive basis can differ from the group table basis.
+- **H² and H³.** Words in chamber mirrors are compared exactly in the Coxeter reflection representation. The controls cover regular `[p,q]` with `3 ≤ p,q ≤ 12` and the four compact and eleven paracompact regular `[p,q,r]` honeycombs. These are selected families of hyperbolic groups. The probe tests a chosen conjugator. An exact match is equality of the projected isometries, with lifted rotational charge and core geometry still to be checked.
+- **Curvature.** The hyperbolic references have curvature `K = −1` in curvature-radius units. An H² wedge sketch reports the angular mismatch `2π − qα` of an attempted join using the changed polygon's interior angle `α`. Positive values give a gap and negative values give overlap. H³ shows the regular reference dihedral angle `2π/r` and its zero closure deficit at interior edges. The atlas currently measures these geometric quantities. A glued disclination model and an elastic curvature solve for these families remain open.
+
+Try **P2₁ screw** or **Pc glide** in the space-group view. Two copies produce a full translation along the conventional `b` or `c` axis respectively. **p11a glide** in the layer view shifts half a period along `a` while reflecting through the layer. Two copies give one in-plane period. The **Alternate wall registry** replaces the selected glide by the corresponding pure reflection, or adds half a fixed primitive period to a pure mirror. The bulk-membership test checks the replacement operation. For example, in space group **#227 Fd-3m**, reflection across `x = z` and the glide obtained by adding the face-centering translation `(1/2, 0, 1/2)` both belong to the bulk group. Residual symmetry also depends on the sites, labelled bonds and join of the constructed wall.
+
+In H² **{7,3}**, `01` and `10` are inverse rotations and mirror `0` conjugates `01` to `10`. Use **Glide probe** to inspect `012`. In H³ **{5,3,5}**, five copies of `23` return the reference frame to the identity. The words `2323` and `232323` with candidate `e` demonstrate this.
+
+## Mirror and glide defects in the plane
+
+In coordinates along and normal to a line, a reflection sends `(u, v)` to `(u, −v)`. A glide adds a shift along the line. For a primitive mirror/glide line of period `T` in these catalogues, the two registries are zero shift and a half-period shift.
+
+| Family | How the domains or edges meet |
+| --- | --- |
+| **Wa · Domain wall** | Apply a normalizer operation outside the bulk group to make a distinct domain with the same bulk symmetry group. Some groups have continuous families, represented by samples. |
+| **Wb · Twin wall** | Reflect the lattice across the chosen line. The catalogue flags reflections that already belong to the bulk group and walls that are invisible in the bond graph. |
+| **Wc · Möbius seam** | Glue by an orientation-reversing symmetry. The result is non-orientable and the seam cannot end as an ordinary point defect of an orientable patch. |
+| **Wd · Registry change** | Use pure reflection on a glide line, or reflection with a half-period shift on a mirror line. Compare the join with the original symmetry. Some Wd joins also appear as Wb twins. |
+
+In **Defects → Mirror & glide walls**, try **Square Wd1** for a half-period shift on a mirror line. Select the **Brick** variant with group **pg** and compare **Wd1**, which uses pure reflection on a glide line, with the non-orientable **Wc1** seam. Brick Wd1 also appears as twin Wb13 and its orientable end is classified as a partial dislocation.
+
+In the rigid Square Wd1 patch, the site `(-3, 1)` reflects to `(-3, -1)`, where the nearest site is half a period away. In the rigid Brick pg Wd1 patch, the original glide also maps interior sites to missing positions. These checks isolate symmetry breaking from the patch boundary and from subsequent relaxation.
+
+To test whether a particular mirror or glide survives a defect, apply that operation to the modified configuration and check the sites, labelled bonds, and join rules together. Use a window preserved by the operation or treat the finite boundary separately so a clipped patch cannot produce a spurious symmetry break. The wall catalogue describes the joins. An automatic residual-symmetry test for arbitrary defect configurations remains open.

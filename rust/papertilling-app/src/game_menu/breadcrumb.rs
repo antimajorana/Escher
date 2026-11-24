@@ -38,6 +38,7 @@ fn atlas_geometry(sub: AtlasSubTab) -> &'static str {
         AtlasSubTab::Layers80 => "Layers (E³ slab)",
         AtlasSubTab::SpaceGroups3D => "E³ Space",
         AtlasSubTab::HyperbolicH2 => "H² Hyperbolic",
+        AtlasSubTab::HyperbolicH3 => "H³ Hyperbolic",
     }
 }
 
@@ -61,8 +62,7 @@ impl PapertillingApp {
         match self.active_mode {
             AppMode::Lattices => match self.lattices_view {
                 LatticesView::Plane2D => "E² Plane",
-                LatticesView::ThreeDAndSubperiodic => atlas_geometry(self.atlas.sub_tab),
-                LatticesView::NonEuclidean => "H² Hyperbolic",
+                LatticesView::ThreeDAndSubperiodic | LatticesView::NonEuclidean => atlas_geometry(self.atlas.sub_tab),
                 LatticesView::Manifolds => "Closed surfaces",
                 LatticesView::Flat3D => "E³ Flat 3D",
                 LatticesView::Curved2D => {

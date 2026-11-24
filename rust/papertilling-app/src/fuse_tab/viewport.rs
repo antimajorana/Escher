@@ -8,7 +8,7 @@ use crate::live_combine::{map_drawn_to_ref, map_ref_to_drawn, snap_disclination_
 use crate::theme::ThemeTokens;
 use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
 
-use super::{FuseDefectChoice, FuseTabState, choice_short_label};
+use super::{FuseDefectChoice, FuseTabState};
 
 impl FuseTabState {
     pub fn show_central(
@@ -20,23 +20,20 @@ impl FuseTabState {
         tokens: &ThemeTokens,
     ) {
         self.poll(ui.ctx(), item, left_canvas);
-        show_defect_viewport_header(ui, self.is_busy());
+        self.show_comparison_actions(ui, item, left_canvas);
+        let busy = self.is_busy();
+        show_defect_viewport_header(ui, busy);
+        if busy {
+            left_canvas.set_circuit_overlay(None);
+        }
 
         let left_cam_before = left_canvas.camera_tuple();
         let right_cam_before = self.single_canvas.camera_tuple();
 
         let markers = self.build_markers();
-        let a_lbl = self
-            .choices
-            .get(self.choice_a)
-            .map_or_else(|| String::from("A"), |c| choice_short_label(&self.info, c));
-        let b_lbl = self
-            .choices
-            .get(self.choice_b)
-            .map_or_else(|| String::from("B"), |c| choice_short_label(&self.info, c));
-
-        let mut cand_clicked: Option<usize> = None;
         let mut inter_out = None;
+        let mut target_sites = Vec::new();
+        let show_targets = self.show_target_sites && !self.last_combined.crystal.pos.is_empty();
 
         show_split_2d_3d(
             ui,
@@ -46,14 +43,17 @@ impl FuseTabState {
             |ui| {
                 ui.horizontal(|ui| {
                     ui.set_min_height(22.0);
-                    ui.strong(format!("Combined Crystal: {a_lbl} + {b_lbl}"));
+                    if busy && !self.last_combined.crystal.pos.is_empty() {
+                        ui.strong("Previous crystal drawing");
+                    } else if self.last_combined.refused.is_some() {
+                        ui.strong("Pristine reference (surgery refused)");
+                    } else {
+                        ui.strong("Combined pair");
+                    }
                 });
                 ui.add_space(2.0);
-                let inter = left_canvas.show_interactive(ui, &markers, false, None, tokens);
-                if self.show_target_sites
-                    && !self.last_combined.crystal.pos.is_empty()
-                    && left_canvas.last_rect.width() > 1.0
-                {
+                let inter = left_canvas.show_interactive(ui, &markers, show_targets, None, tokens);
+                if show_targets && left_canvas.last_rect.width() > 1.0 {
                     let painter = ui.painter_at(left_canvas.last_rect);
                     let ring_col = egui::Color32::from_rgba_unmultiplied(
                         tokens.accent_primary.r(),
@@ -71,6 +71,7 @@ impl FuseTabState {
                             && left_canvas.last_rect.contains(sp)
                         {
                             painter.circle_stroke(sp, 4.5, egui::Stroke::new(1.25, ring_col));
+                            target_sites.push((slot, sp));
                         }
                     }
                 }
@@ -79,46 +80,12 @@ impl FuseTabState {
             |ui| {
                 ui.horizontal(|ui| {
                     ui.set_min_height(22.0);
-                    ui.strong("Equivalent Single Defect");
-                    if let Some(Ok(bundle)) = &self.last_bundle
-                        && let Some(cur) = bundle.candidates.get(self.selected_candidate).or_else(|| bundle.candidates.first())
-                    {
-                        let star = if cur.is_match { " ★" } else { "" };
-                        let selected_lbl = format!("{}{star}", cur.name);
-                        if bundle.candidates.len() > 1 {
-                            let mut sel = self.selected_candidate;
-                            egui::ComboBox::from_id_salt("fuse_single_candidate_top")
-                                .width(185.0)
-                                .selected_text(selected_lbl)
-                                .show_ui(ui, |ui| {
-                                    for (idx, c) in bundle.candidates.iter().enumerate() {
-                                        let s = if c.is_match { " ★" } else { "" };
-                                        if ui
-                                            .selectable_value(&mut sel, idx, format!("{}{s}", c.name))
-                                            .on_hover_text(&c.description)
-                                            .changed()
-                                        {
-                                            cand_clicked = Some(idx);
-                                        }
-                                    }
-                                });
-                        } else {
-                            ui.small(selected_lbl);
-                        }
-                    }
+                    ui.strong("Single-defect candidate");
                 });
                 ui.add_space(2.0);
                 self.single_canvas.show(ui, tokens);
             },
         );
-
-        if let Some(new_idx) = cand_clicked {
-            self.selected_candidate = new_idx;
-            self.sync_single_canvas_only(item, false);
-            if self.sync_views {
-                self.single_canvas.copy_camera_from(left_canvas);
-            }
-        }
 
         // Bidirectional camera synchronization
         if self.sync_views {
@@ -126,14 +93,12 @@ impl FuseTabState {
             let right_cam_after = self.single_canvas.camera_tuple();
             let left_moved = left_cam_after != left_cam_before;
             let right_moved = right_cam_after != right_cam_before;
-            if left_moved {
-                self.single_canvas.copy_camera_from(left_canvas);
-            } else if right_moved {
-                left_canvas.copy_camera_from(&self.single_canvas);
-            } else if (left_canvas.zoom - self.single_canvas.zoom).abs() > 1e-3
+            if right_moved && (!left_moved || self.single_canvas.zoom < left_canvas.zoom) {
+                left_canvas.copy_pan_and_zoom_from(&self.single_canvas);
+            } else if left_moved || (left_canvas.zoom - self.single_canvas.zoom).abs() > 1e-3
                 || left_canvas.pan != self.single_canvas.pan
             {
-                self.single_canvas.copy_camera_from(left_canvas);
+                self.single_canvas.copy_pan_and_zoom_from(left_canvas);
             }
         }
 
@@ -168,19 +133,50 @@ impl FuseTabState {
                 self.dragging_pin = None;
             }
             if inter.clicked_empty
-                && let Some(drawn_click) = inter.clicked_world
-                && !self.last_combined.crystal.pos.is_empty()
+                && inter.clicked_world.is_some()
+                && let Some(click) = ui.input(|i| i.pointer.interact_pos())
+                && let Some((slot, _)) = target_sites.into_iter().min_by(|(_, a), (_, b)| {
+                    a.distance_sq(click).total_cmp(&b.distance_sq(click))
+                }).filter(|(_, point)| point.distance(click) <= 8.0)
             {
-                let ref_click = map_drawn_to_ref(&self.last_combined.crystal, drawn_click);
-                let tol = 0.45 * self.info.lat_info.scale.max(0.5);
-                if let Some(snapped) = self.nearest_slot_b(ref_click)
-                    && (snapped[0] - ref_click[0]).hypot(snapped[1] - ref_click[1]) <= tol
-                    && (snapped[0] - self.pos_b[0]).hypot(snapped[1] - self.pos_b[1]) > 1e-4
-                {
-                    self.pos_b = snapped;
-                    self.submit_build(item, false);
-                }
+                self.pos_b = slot;
+                self.submit_build(item, false);
             }
+        }
+    }
+
+    fn show_comparison_actions(&mut self, ui: &mut egui::Ui, item: &CatalogueItemUi, left_canvas: &mut Canvas2D) {
+        let mut selected = self.selected_candidate;
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Fit both views").clicked() {
+                left_canvas.reset();
+                self.single_canvas.reset();
+            }
+            if let Some(Ok(bundle)) = &self.last_bundle
+                && let Some(current) = bundle.candidates.get(selected)
+                && bundle.candidates.len() > 1
+            {
+                let label = |name: &str, matched| if matched { format!("{name} ★") } else { name.to_owned() };
+                egui::ComboBox::from_id_salt("fuse_single_candidate_top")
+                    .width(142.0)
+                    .selected_text(label(&current.name, current.is_match))
+                    .show_ui(ui, |ui| {
+                        for (idx, candidate) in bundle.candidates.iter().enumerate() {
+                            ui.selectable_value(&mut selected, idx, label(&candidate.name, candidate.is_match))
+                                .on_hover_text(&candidate.description);
+                        }
+                    });
+            }
+            if ui.add_enabled(!self.choices.is_empty(), egui::Button::new("Open pair in Place & fuse"))
+                .on_hover_text("Transfer this pair to the editor to add or move defects")
+                .clicked()
+            {
+                self.open_in_combine = Some(self.current_specs().to_vec());
+            }
+        });
+        if selected != self.selected_candidate {
+            self.selected_candidate = selected;
+            self.sync_single_canvas_only(item, false);
         }
     }
 

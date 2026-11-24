@@ -105,7 +105,9 @@ impl PapertillingApp {
         match parse_named(&AtlasSubTab::ALL, st.atlas_sub_view.as_deref()) {
             Some(sub) => {
                 self.atlas.sub_tab = sub;
-                if sub != AtlasSubTab::HyperbolicH2 {
+                if sub.is_hyperbolic() {
+                    self.atlas.last_hyperbolic_subtab = sub;
+                } else {
                     self.atlas.last_pristine_3d_subtab = sub;
                 }
                 if crate::atlas_tab::AtlasTabState::DEFECT_SUBTABS.contains(&sub) {
@@ -179,7 +181,7 @@ impl PapertillingApp {
                 // never written by a v1 app (the tab did not exist); listed because the match is exhaustive
                 Some(NavTab::Workbench) => self.select_lattices_view(LatticesView::Plane2D),
                 Some(NavTab::Atlas) => {
-                    if self.atlas.sub_tab == AtlasSubTab::HyperbolicH2 {
+                    if self.atlas.sub_tab.is_hyperbolic() {
                         self.select_lattices_view(LatticesView::NonEuclidean);
                     } else {
                         self.select_lattices_view(LatticesView::ThreeDAndSubperiodic);

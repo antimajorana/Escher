@@ -45,6 +45,16 @@ fn export_3d_png_is_refused_on_the_gallery_and_while_dirty_or_busy() {
     app.combine.dragging = true;
     let msg = app.export_3d_png_refusal(now).expect("pins moving");
     assert!(msg.contains("Finish moving pins"), "{msg}");
+
+    app.combine.dragging = false;
+    let item = app.gallery.active_item().clone();
+    app.combine.wait_idle(&item, Some(&mut app.canvas2d));
+    frame(&mut app, &ctx);
+    let now = ctx.cumulative_pass_nr();
+    assert_eq!(app.export_3d_png_state_refusal(now), None, "3D PNG is normally ready after the build");
+    app.combine.cut_dragging = true;
+    let msg = app.export_3d_png_state_refusal(now).expect("cut angle drag still active");
+    assert!(msg.contains("Finish moving pins"), "{msg}");
     eprintln!("# time guards {:?}", t0.elapsed());
 }
 

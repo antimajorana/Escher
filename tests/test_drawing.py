@@ -272,7 +272,7 @@ def test_show_titles_wrapped():
     plt.close(fig)
 
 
-def test_nonplanar_lattice_kept():
+def test_nonplanar_lattice_kept(capsys):
     """Negative control: the square lattice with both diagonals (bonds cross in the perfect lattice; graph not
     planar) keeps its given picture: there is no planar picture to draw."""
     import dataclasses
@@ -285,3 +285,6 @@ def test_nonplanar_lattice_kept():
     e, info = draw.embedded_copy(d)
     assert info["stage"] == "given" and info["three_connected"] == "no: not planar"
     assert np.array_equal(e.positions, d.positions)
+    c = pt.build(x, dict(kind="dislocation", b=(1, 0), at=(0.37, 0.41)), R=7, picture="raw")
+    assert c.inspect()["total_frank"] is None
+    assert "unavailable from planar faces" in capsys.readouterr().out

@@ -278,13 +278,15 @@ impl WarmSheetState {
 
 pub fn build_sheet_bundle_sync(
     info: &CombineLatticeInfo,
-    crystal: &BuiltCrystal,
-    applied_radius: f64,
+    out: &CombineBuildOutput,
     kappa_b: f64,
 ) -> CombineSheet3dBundle {
+    if out.refused.is_some() {
+        return CombineSheet3dBundle::empty();
+    }
     let opts = Sheet3DOptions { kappa_b, max_iters: 220, grad_tol: 1e-6 };
-    let sheet = relax_sheet_3d(crystal, &info.cell, &opts, None);
-    let flat_crystal = build_pristine_disk(&info.lat_info, applied_radius);
+    let sheet = relax_sheet_3d(&out.crystal, &info.cell, &opts, None);
+    let flat_crystal = build_pristine_disk(&info.lat_info, out.applied_radius);
     let flat_sheet = relax_sheet_3d(&flat_crystal, &info.cell, &opts, None);
     CombineSheet3dBundle { sheet, flat_crystal, flat_sheet }
 }

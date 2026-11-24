@@ -1,10 +1,11 @@
 //! Notebook 3 import/export. Kept separate from live worker state and interaction handling.
 use papertilling_core::defect::combine_types::{ConfigOptionsJson, ConfigSummaryJson, NotebookConfigJson};
+use papertilling_core::defect::surgery::DefectSpec;
 
 use super::{CombineTabState, MANUAL_R_MAX, MANUAL_R_MIN};
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
-use crate::live_combine::CombineDrawMode;
+use crate::live_combine::{CombineDrawMode, spec_world_pos};
 
 impl CombineTabState {
     pub fn to_notebook_json(&self, gallery_item: &CatalogueItemUi) -> NotebookConfigJson {
@@ -50,6 +51,14 @@ impl CombineTabState {
         self.grid = o.grid.clamp(1, 3);
         self.opts.core_radius = o.radius.clamp(1, 4);
         self.specs = cfg.defects.clone();
+        for (idx, spec) in self.specs.iter_mut().enumerate() {
+            // The file format's default depends on list index. Once placed, the position should
+            // survive deleting or merging earlier pins in the editor.
+            let resolved_at = spec_world_pos(&self.info, idx, spec);
+            if let DefectSpec::Dislocation { at, .. } = spec {
+                at.get_or_insert(resolved_at);
+            }
+        }
         self.clear_selection();
         let mut clamped = Vec::new();
         if o.r_patch.is_some_and(|r| (r - self.opts.manual_radius).abs() > 1e-9) {
@@ -72,6 +81,17 @@ impl CombineTabState {
         Ok(msg)
     }
 
+    pub(super) fn import_notebook_json(&mut self, raw: &str, backend: &AppBackend, canvas: &mut Canvas2D) -> Result<(), String> {
+        let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+        let has_custom_centre = !value["options"]["centre"].is_null();
+        let cfg: NotebookConfigJson = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        self.load_notebook_json(&cfg, backend, canvas)?;
+        if has_custom_centre {
+            self.json_status.push_str(". The saved patch centre was replaced with the desktop’s automatic centre.");
+        }
+        Ok(())
+    }
+
     pub fn export_json_dialog(&mut self, gallery_item: &CatalogueItemUi) {
         if self.specs.is_empty() || self.initializer.is_busy() {
             self.json_status = String::from("Place at least one defect before exporting a Notebook 3 configuration.");
@@ -89,7 +109,9 @@ impl CombineTabState {
     pub fn import_json_dialog(&mut self, backend: &AppBackend, canvas: &mut Canvas2D) {
         let dlg = rfd::FileDialog::new().set_title("Import Notebook 3 defect configuration (.json)").add_filter("JSON configuration", &["json"]);
         if let Some(path) = dlg.pick_file()
-            && let Err(err) = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|raw| NotebookConfigJson::from_json_str(&raw)).and_then(|cfg| self.load_notebook_json(&cfg, backend, canvas))
+            && let Err(err) = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|raw| self.import_notebook_json(&raw, backend, canvas))
         {
             self.json_status = format!("JSON import error: {err}");
         }

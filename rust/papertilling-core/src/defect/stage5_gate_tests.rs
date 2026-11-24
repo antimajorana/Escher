@@ -111,6 +111,17 @@ fn stage5_square_pair_gallery_and_descriptions_by_hand() {
 }
 
 #[test]
+fn stage5_scan_reports_last_attempt_when_cores_still_reach_rim() {
+    let scan = crate::defect::volterra_scan::scan_dislocation_cores(
+        &square_cell(), [1.0, 0.0], 2, 1, 8, Some(5.5),
+    )
+    .unwrap()
+    .info;
+    assert!(scan.skipped_rim > 0);
+    assert!((scan.r_patch - 5.5 * 1.4).abs() < 1e-12);
+}
+
+#[test]
 fn stage5_honeycomb_57_completion_control() {
     // Hand + C04: on honeycomb, +60 and -60 at neighbouring 6-fold hexagon centres separated by a1
     // give a shortest dislocation (|b| = sqrt(3)) with adjacent 5- and 7-rings (non-bipartite).

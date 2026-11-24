@@ -71,6 +71,8 @@ impl DefectsTabState {
                 }
                 if let Some(w) = self.catalogue.walls.get(self.selected_wall) {
                     ui.add_space(4.0);
+                    ui.strong(format!("{} · {}", w.id, w.kind.label()));
+                    ui.label(&w.description);
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Span:");
                         if ui.selectable_label(!self.wall_half || !w.can_end_orientable, "Full wall").clicked() && self.wall_half {

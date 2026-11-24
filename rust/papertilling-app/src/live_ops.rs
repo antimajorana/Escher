@@ -86,11 +86,16 @@ pub(crate) fn collect_walls_ui(cat: &DefectCatalogue) -> Vec<WallEntryUi> {
         });
     }
     for w in &cat.glide_breaking {
+        let action = if w.line_kind == "glide" {
+            "pure reflection in place of the glide"
+        } else {
+            "reflection with a half-period shift in place of the mirror"
+        };
         walls.push(WallEntryUi {
             id: w.id.clone(),
             kind: WallKindUi::GlideWd,
             direction_mn: line_direction_frac(cat, w.direction, &w.line),
-            description: format!("{} ({}), slip/T={:.2}", w.line, w.line_kind, w.slip_over_period),
+            description: format!("{} ({} line) · {action} · slip/T={:.2}", w.line, w.line_kind, w.slip_over_period),
             default_note: w.same_as_twin.as_deref().map_or_else(String::new, |tw| format!("same geometry as {tw}")),
             can_end_orientable: w.ending.can_end_orientable,
             ending_summary: w.ending.summary.clone(),
@@ -136,9 +141,9 @@ pub fn catalogue_for_lattice(item: &CatalogueItemUi) -> DefectCatalogueUi {
     DefectCatalogueUi { dislocations, centres, disclinations, walls }
 }
 
-pub(crate) fn summarize_rings_and_core(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo) -> String {
+pub(crate) fn summarize_rings(crystal: &BuiltCrystal) -> String {
     let faces = frame_faces(crystal);
-    let ring_str = if faces.len() <= 1 {
+    if faces.len() <= 1 {
         format!("V={}, E={}", crystal.pos.len(), crystal.edges.len())
     } else {
         let k_out = faces.iter().enumerate().max_by_key(|(_, f)| f.len()).map_or(0, |(i, _)| i);
@@ -147,7 +152,11 @@ pub(crate) fn summarize_rings_and_core(crystal: &BuiltCrystal, lat_info: &Lattic
             *hist.entry(f.len()).or_default() += 1;
         }
         hist.into_iter().map(|(sz, cnt)| format!("{sz}-gon×{cnt}")).collect::<Vec<_>>().join(", ")
-    };
+    }
+}
+
+pub(crate) fn summarize_rings_and_core(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo) -> String {
+    let ring_str = summarize_rings(crystal);
     let mut why = String::new();
     for r in [2_usize, 1_usize] {
         match core_graph(crystal, lat_info, r) {
@@ -158,8 +167,10 @@ pub(crate) fn summarize_rings_and_core(crystal: &BuiltCrystal, lat_info: &Lattic
     format!("core: none ({why}) | {ring_str}")
 }
 
+pub(crate) const PRISTINE_DISK_MIN_RADIUS: f64 = 2.5;
+
 pub(crate) fn build_pristine_disk(info: &LatticeCoreInfo, radius: f64) -> BuiltCrystal {
-    let keys = info.lat.sites_in_disk([0.0, 0.0], radius.max(2.5));
+    let keys = info.lat.sites_in_disk([0.0, 0.0], radius.max(PRISTINE_DISK_MIN_RADIUS));
     let n = keys.len();
     let idx_map: HashMap<_, usize> = keys.iter().copied().enumerate().map(|(i, k)| (k, i)).collect();
     let pos: Vec<[f64; 2]> = keys.iter().map(|&k| info.lat.pos(k)).collect();

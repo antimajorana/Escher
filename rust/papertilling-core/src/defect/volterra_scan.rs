@@ -123,7 +123,7 @@ pub(crate) fn scan_dislocation_cores(
     let (mut n_builds, mut anomalies, mut capped, mut lab_cores, mut other_class, mut skipped) =
         (0, 0, 0, 0, 0, 0);
 
-    for _attempt in 0..2 {
+    for attempt in 0..2 {
         n_builds = 0;
         anomalies = 0;
         capped = 0;
@@ -390,7 +390,7 @@ pub(crate) fn scan_dislocation_cores(
         final_cores = out_cores;
         final_builds = raw_builds;
         final_merged = merged;
-        if skipped == 0 {
+        if skipped == 0 || attempt == 1 {
             break;
         }
         r_patch *= 1.4;

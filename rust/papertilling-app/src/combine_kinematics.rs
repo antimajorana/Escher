@@ -10,7 +10,7 @@ use papertilling_core::defect::surgery::DefectSpec;
 use super::CombineTabState;
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::{Canvas2D, CanvasKinematicOverlay, CanvasReactionArrow};
-use crate::live_combine::{mn_from_burgers, spec_world_pos};
+use crate::live_combine::{map_ref_to_drawn, mn_from_burgers, spec_world_pos};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MotionMode {
@@ -32,6 +32,7 @@ impl CombineTabState {
         self.drag_anchor = None;
         self.pending_disc_step = None;
         self.pending_absorb = None;
+        self.dragging = false;
         self.cut_drag_anchor = None;
         self.cut_edit_anchor = None;
         self.cut_dragging = false;
@@ -46,13 +47,15 @@ impl CombineTabState {
         let mut ov = CanvasKinematicOverlay::default();
         let reach = self.last_build.applied_radius.max(3.5);
         let dragged_idx = self.drag_anchor.as_ref().map(|(i, _)| *i);
+        let markers = self.build_markers();
+        let drawn = |p| map_ref_to_drawn(&self.last_build.crystal, p);
 
         for (idx, sp) in self.specs.iter().enumerate() {
             match *sp {
                 DefectSpec::Dislocation { b, .. } if self.show_glide_lines => {
                     let lb = b[0].hypot(b[1]);
                     if lb > 1e-12 {
-                        let p = spec_world_pos(&self.info, idx, sp);
+                        let p = markers[idx].pos;
                         let u = [b[0] / lb, b[1] / lb];
                         let a0 = [p[0] - reach * u[0], p[1] - reach * u[1]];
                         let a1 = [p[0] + reach * u[0], p[1] + reach * u[1]];
@@ -70,19 +73,18 @@ impl CombineTabState {
             let b_lbl = mn_from_burgers(&self.info, step.b_prev)
                 .map_or_else(|| format!("({:.2},{:.2})", step.b_prev[0], step.b_prev[1]), |(m, n)| format!("T({m},{n})"));
             ov.reaction = Some(CanvasReactionArrow {
-                from: step.from,
-                to: step.to,
+                from: drawn(step.from),
+                to: drawn(step.to),
                 label: format!("emits {b_lbl}"),
                 valid: true,
             });
         } else if let Some(abs) = self.pending_absorb
             && let Some((idx, _)) = self.drag_anchor.as_ref()
-            && let Some(sp) = self.specs.get(*idx)
+            && let Some(marker) = markers.get(*idx)
         {
-            let pos = spec_world_pos(&self.info, *idx, sp);
             ov.reaction = Some(CanvasReactionArrow {
-                from: pos,
-                to: abs.new_at,
+                from: marker.pos,
+                to: drawn(abs.new_at),
                 label: format!("absorbs -> D#{} ({:+.2}, {:+.2})", abs.disc_idx + 1, abs.new_at[0], abs.new_at[1]),
                 valid: true,
             });

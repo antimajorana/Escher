@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from papertilling.defects.build import Configuration, build, classify_charge, lattice_data, same_charge
-from papertilling.defects.config import classify, compare, equivalent_single
+from papertilling.defects.config import classify, compare, config_to_dict, equivalent_single, load_config
 from papertilling.legacy.lab_defects import frame_faces
 
 
@@ -131,6 +131,28 @@ def test_classify_table(sq, pair):
     labels = classify([pair, d1, d2, s1, s2, f1], names=["+90 site & -90 face", "b=(1,0)", "b=(0,1)",
                                                         "+90 site", "+90 other site", "+90 face"])
     assert labels == [0, 0, 0, 1, 1, 2]
+
+
+def test_compare_across_build_engines():
+    spec = dict(kind="dislocation", b=(1, 0), at=(0.371, 0.413))
+    fast = build("square", spec, fast=True, picture="raw")
+    legacy = build("square", spec, fast=False, picture="raw")
+    result = compare(fast, legacy)
+    assert result["same_charge"] and result["same_core"]
+    assert classify([fast, legacy], show=False) == [0, 0]
+
+
+def test_config_roundtrip_keeps_patch_centre():
+    conf = build("square", dict(kind="dislocation", b=(1, 0), at=(0.371, 0.413)),
+                 centre=(1, 1), R=9, picture="raw")
+    doc = config_to_dict(conf, include_summary=False)
+    assert doc["options"]["centre"] == [1.0, 1.0]
+    loaded = load_config(doc)
+    np.testing.assert_array_equal(loaded.report["centre"], [1.0, 1.0])
+    assert loaded.defect.sites == conf.defect.sites and loaded.defect.edges == conf.defect.edges
+    doc["defects"] = [{"kind": "rotation", "angle_deg": 90, "at": [0, 0]}]
+    loaded = load_config(doc)
+    assert loaded.total_charge()["angle"] == 90 and loaded.total_charge()["centre_class"] == "1a"
 
 
 def test_negative_controls(sq, pair):

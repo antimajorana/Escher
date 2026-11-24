@@ -20,6 +20,7 @@ mod inflation_tests;
 #[cfg(test)]
 mod seed_tests;
 mod kagome;
+pub mod holonomy;
 mod wedge;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

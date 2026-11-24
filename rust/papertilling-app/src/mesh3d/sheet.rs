@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use papertilling_core::defect::sheet3d::{Sheet3DResult, validate_sheet_crystal};
 use papertilling_core::types::BuiltCrystal;
 
+use crate::scene2d::polygon::{cross, triangulate};
+
 use super::color_scales::SheetColorScales;
 use super::geom::{
     append_icosahedron, append_octahedron, blend_normal, compute_smooth_vertex_normals, cone_rgba,
@@ -143,31 +145,40 @@ pub fn mesh_from_sheet3d_with_spectral(
             }
         };
 
-        for m in 0..face.len() {
-            let u0 = face[m];
-            let u1 = face[(m + 1) % face.len()];
-            let fnrm = tri_normal(centroid, pts[u0], pts[u1]);
-            let n0 = blend_normal(fnrm, smooth_normals[u0], 0.28);
-            let n1 = blend_normal(fnrm, smooth_normals[u1], 0.28);
-            let (c0, c1) = match opts.color_mode {
-                Sheet3dColorMode::HeightZ => (
-                    height_rgba(sheet.xyz[u0][2], z_half_span, alpha),
-                    height_rgba(sheet.xyz[u1][2], z_half_span, alpha),
-                ),
-                Sheet3dColorMode::ElasticEnergyGsv if sheet.site_gsv_energy.is_empty() => (face_col, face_col),
+        let vertex = |u: usize, normal| {
+            let color = match opts.color_mode {
+                Sheet3dColorMode::HeightZ => height_rgba(sheet.xyz[u][2], z_half_span, alpha),
+                Sheet3dColorMode::ElasticEnergyGsv if sheet.site_gsv_energy.is_empty() => face_col,
                 Sheet3dColorMode::ElasticEnergyGsv
                 | Sheet3dColorMode::BondShearStrain
                 | Sheet3dColorMode::GaussianCurvature
                 | Sheet3dColorMode::SpectralLdos
-                | Sheet3dColorMode::SpectralCharge => (
-                    site_vis_rgba(u0, face_col),
-                    site_vis_rgba(u1, face_col),
-                ),
-                _ => (face_col, face_col),
+                | Sheet3dColorMode::SpectralCharge => site_vis_rgba(u, face_col),
+                _ => face_col,
             };
-            face_vertices.push(Vertex3d { position: centroid, normal: fnrm, color: face_col });
-            face_vertices.push(Vertex3d { position: pts[u0], normal: n0, color: c0 });
-            face_vertices.push(Vertex3d { position: pts[u1], normal: n1, color: c1 });
+            Vertex3d { position: pts[u], normal: blend_normal(normal, smooth_normals[u], 0.28), color }
+        };
+
+        match sheet_face_fill(&pts, face, centroid) {
+            SheetFaceFill::CentroidFan => {
+                for m in 0..face.len() {
+                    let u0 = face[m];
+                    let u1 = face[(m + 1) % face.len()];
+                    let normal = tri_normal(centroid, pts[u0], pts[u1]);
+                    face_vertices.extend([
+                        Vertex3d { position: centroid, normal, color: face_col },
+                        vertex(u0, normal),
+                        vertex(u1, normal),
+                    ]);
+                }
+            }
+            SheetFaceFill::Triangles(triangles) => {
+                for [u, v, w] in triangles {
+                    let normal = tri_normal(pts[u], pts[v], pts[w]);
+                    face_vertices.extend([vertex(u, normal), vertex(v, normal), vertex(w, normal)]);
+                }
+            }
+            SheetFaceFill::OutlineOnly => {}
         }
     }
 
@@ -201,6 +212,84 @@ pub fn mesh_from_sheet3d_with_spectral(
     }
 }
 
+enum SheetFaceFill {
+    CentroidFan,
+    Triangles(Vec<[usize; 3]>),
+    OutlineOnly,
+}
+
+fn sheet_face_fill(pts: &[[f32; 3]], face: &[usize], centroid: [f32; 3]) -> SheetFaceFill {
+    // Try the projection with the most area first, including for tilted and vertical faces.
+    let project = |p: [f32; 3], axis| [f64::from(p[(axis + 1) % 3]), f64::from(p[(axis + 2) % 3])];
+    let origin = pts[face[0]];
+    let mut area = [0.0_f64; 3];
+    for (&u, &v) in face.iter().zip(face.iter().cycle().skip(1)) {
+        for (axis, a) in area.iter_mut().enumerate() {
+            *a += cross(project(origin, axis), project(pts[u], axis), project(pts[v], axis));
+        }
+    }
+    let mut axes = [0, 1, 2];
+    axes.sort_by(|&a, &b| area[b].abs().total_cmp(&area[a].abs()));
+    let Some((axis, outline)) = axes.into_iter().filter(|&axis| area[axis].abs() > 1e-12).find_map(|axis| {
+        let outline: Vec<_> = face.iter().map(|&u| project(pts[u], axis)).collect();
+        is_simple_projection(&outline).then_some((axis, outline))
+    }) else {
+        return SheetFaceFill::OutlineOnly;
+    };
+    let p = project(centroid, axis);
+    let sense = area[axis].signum();
+    if outline.iter().zip(outline.iter().cycle().skip(1)).all(|(&a, &b)| cross(p, a, b) * sense >= 0.0) {
+        return SheetFaceFill::CentroidFan;
+    }
+
+    let triangles = triangulate(&outline);
+    let mut result = Vec::with_capacity(triangles.len());
+    for [a, b, c] in triangles {
+        // The shared triangulator may fall back to a fan for degenerate input.
+        // Reject reversed triangles and keep the original outline visible.
+        if cross(a, b, c) < 0.0 {
+            return SheetFaceFill::OutlineOnly;
+        }
+        let index = |p| outline.iter().position(|&q| q == p).map(|i| face[i]);
+        let (Some(u), Some(v), Some(w)) = (index(a), index(b), index(c)) else {
+            return SheetFaceFill::OutlineOnly;
+        };
+        result.push(if sense > 0.0 { [u, v, w] } else { [u, w, v] });
+    }
+    SheetFaceFill::Triangles(result)
+}
+
+fn is_simple_projection(outline: &[[f64; 2]]) -> bool {
+    let n = outline.len();
+    for i in 0..n {
+        let after_i = (i + 1) % n;
+        let (a, b) = (outline[i], outline[after_i]);
+        if a == b {
+            return false;
+        }
+        for j in i + 2..n {
+            let after_j = (j + 1) % n;
+            if after_j == i {
+                continue;
+            }
+            let (c, d) = (outline[j], outline[after_j]);
+            let (abc, abd, cda, cdb) = (cross(a, b, c), cross(a, b, d), cross(c, d, a), cross(c, d, b));
+            let on = |p: [f64; 2], u: [f64; 2], v: [f64; 2]| {
+                (0..2).all(|k| (u[k].min(v[k])..=u[k].max(v[k])).contains(&p[k]))
+            };
+            if (abc * abd < 0.0 && cda * cdb < 0.0)
+                || (abc == 0.0 && on(c, a, b))
+                || (abd == 0.0 && on(d, a, b))
+                || (cda == 0.0 && on(a, c, d))
+                || (cdb == 0.0 && on(b, c, d))
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 pub(super) fn renderable(crystal: &BuiltCrystal, sheet: &Sheet3DResult, opts: &Sheet3dViewOpts) -> bool {
     validate_sheet_crystal(crystal).is_ok()
         && sheet.has_finite_geometry()
@@ -224,6 +313,38 @@ mod tests {
         let crystal = build_point_defects(&cell, &[DefectSpec::disclination(90.0, [0.0, 0.0])], Some(3.5), None).unwrap();
         let sheet = relax_sheet_3d(&crystal, &cell, &Sheet3DOptions { max_iters: 2, ..Default::default() }, None);
         (crystal, sheet)
+    }
+
+    #[test]
+    fn concave_sheet_face_does_not_fill_its_notch() {
+        let (crystal, mut sheet) = square_sheet();
+        // The L consists of two 3 × 1 arms overlapping in one square. Tilt it far enough
+        // to make its best projection lie outside the horizontal plane.
+        let ring = [[0.0, 0.0], [3.0, 0.0], [3.0, 1.0], [1.0, 1.0], [1.0, 3.0], [0.0, 3.0]];
+        for (p, [x, y]) in sheet.xyz.iter_mut().zip(ring) {
+            *p = [x, y, 2.0 * x];
+        }
+        sheet.faces = vec![(0..ring.len()).collect()];
+        sheet.face_strain = vec![0.0];
+
+        for _ in 0..2 {
+            let mesh = mesh_from_sheet3d(&crystal, &sheet, &Sheet3dViewOpts::default());
+            let vertices = &mesh.faces[mesh.opaque_vertex_count..];
+            assert_eq!(vertices.len(), 12, "a six-sided face uses four triangles");
+            let mut area = 0.0;
+            for t in vertices.chunks_exact(3) {
+                let original_xy = |i: usize| {
+                    let v = t[i].position;
+                    [f64::from(v[0] * mesh.radius), f64::from(-v[2] * mesh.radius)]
+                };
+                let (a, b, c) = (original_xy(0), original_xy(1), original_xy(2));
+                let (x, y) = ((a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0);
+                assert!(x < 1.0 || y < 1.0, "triangle center {x}, {y} is in the notch");
+                area += cross(a, b, c).abs() / 2.0;
+            }
+            assert!((area - 5.0).abs() < 1e-5, "expected five unit squares, got {area}");
+            sheet.faces[0].reverse();
+        }
     }
 
     #[test]

@@ -12,6 +12,26 @@ from papertilling.defects.config import config_to_dict, equivalent_single, load_
 from papertilling.defects import fast as _fast
 
 
+@pytest.mark.parametrize(("lattice", "site", "original_image", "wall_image", "gap"), [
+    ("square", (-3.0, 1.0), (-3.0, -1.0), (-2.5, -1.0), 0.5),
+    ("brick_pg", (-4.0, 0.0), (3.0, 2.0), (3.0, 0.0), 1 / 3),
+])
+def test_wd1_changes_the_bulk_symmetry_at_an_interior_site(lattice, site, original_image, wall_image, gap):
+    cat = DefectCatalogue(lattice)
+    wall = next(entry for entry in cat.glide_breaking if entry["id"] == "Wd1")
+    line = next(entry for entry in cat.mirrors if entry["id"] == wall["line"])
+    positions = np.asarray(wall.build(R=12).positions)
+
+    # The square mirror flips y and its replacement adds x=1/2.
+    # The Brick line reflects x about -1/2 and its original glide adds y=2.
+    for entry, image in [(line, original_image), (wall, wall_image)]:
+        matrix, shift = entry["sigma"]
+        np.testing.assert_allclose(matrix @ site + shift, image, atol=1e-9)
+    assert np.linalg.norm(positions - site, axis=1).min() < 1e-9
+    assert np.linalg.norm(positions - wall_image, axis=1).min() < 1e-9
+    assert np.linalg.norm(positions - original_image, axis=1).min() == pytest.approx(gap)
+
+
 def test_brick_pg_wall_endings():
     """brick_pg (pg): Wd1/Wd2 end as fractional partial dislocations (|b| = 0.5 * period),
     Wc1/Wc2 cannot end orientably, and Wa4..Wa7 end as 180-deg partial disclinations."""
@@ -139,6 +159,10 @@ def test_partial_disclination_half_wall_and_obstruction_refusals():
 
     with pytest.raises(ValueError, match="Mobius|non-orientable"):
         build_half_wall("brick_pg", "Wc1")
+    wall = DefectCatalogue("brick_pg").mobius_seams[0]
+    with pytest.raises(ValueError, match="Mobius|non-orientable"):
+        build("brick_pg", dict(kind="half_wall", wall_id=wall["id"], sigma=wall["sigma"],
+                               at=(0.5, 0), direction=(1, 0)), picture="raw")
     with pytest.raises(ValueError, match="chiral"):
         build_half_wall("chiral_triangular", "Wa6")
     with pytest.raises(ValueError, match="chiral"):

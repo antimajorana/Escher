@@ -52,38 +52,42 @@ fn build_orders(n: usize) -> Vec<Vec<usize>> {
     }
 }
 
-fn specs_holonomy(specs: &[DefectSpec]) -> Option<(f64, Isometry2)> {
-    if specs.is_empty() {
-        return None;
-    }
+/// Ordered product `H0 * H1 * ...` in the point-defect convention used by Combine.
+pub(crate) fn specs_holonomy(specs: &[DefectSpec]) -> Result<(f64, Isometry2), String> {
     let (mut frank, mut h) = (0.0, Isometry2::IDENTITY);
-    for s in specs {
+    for (i, s) in specs.iter().enumerate() {
         let hi = match *s {
             DefectSpec::Disclination { angle_deg, at, .. } => {
                 if !angle_deg.is_finite() || !at[0].is_finite() || !at[1].is_finite() {
-                    return None;
+                    return Err(format!("spec {}: angle and centre must be finite", i + 1));
                 }
                 frank += angle_deg;
                 rotation_about(at, angle_deg.to_radians())
             }
-            DefectSpec::Dislocation { b, .. } => {
+            DefectSpec::Dislocation { b, at, .. } => {
                 if !b[0].is_finite() || !b[1].is_finite() {
-                    return None;
+                    return Err(format!("spec {}: Burgers vector must be finite", i + 1));
+                }
+                if at.is_some_and(|p| p.iter().any(|x| !x.is_finite())) {
+                    return Err(format!("spec {}: position must be finite", i + 1));
                 }
                 Isometry2 { m: [[1.0, 0.0], [0.0, 1.0]], t: [-b[0], -b[1]] }
             }
-            DefectSpec::HalfWall { .. } => return None,
+            DefectSpec::HalfWall { .. } => return Err("half-wall specs are not supported by point-defect charge composition".to_string()),
         };
         h = h.compose(&hi);
     }
-    Some((frank, h))
+    if !frank.is_finite() || h.t.iter().any(|x| !x.is_finite()) {
+        return Err("total holonomy must be finite".to_string());
+    }
+    Ok((frank, h))
 }
 
 /// Exact algebraic total charge in `G~+` from composing the holonomies of `specs` in order.
 pub(crate) fn algebraic_specs_classified(
     cat: &DefectCatalogue, frame: Frame2D, specs: &[DefectSpec],
 ) -> Option<ClassifiedCharge> {
-    let (frank, h) = specs_holonomy(specs)?;
+    let (frank, h) = specs_holonomy(specs).ok()?;
     classify_holonomy_charge(cat.group.as_str(), &cat.cell, frame, Some(frank), h, [0.0, 0.0]).ok()
 }
 
@@ -91,7 +95,8 @@ pub(crate) fn algebraic_specs_classified(
 pub fn algebraic_specs_charge_label(
     group: &str, cell: &Cell2D, frame: Frame2D, specs: &[DefectSpec],
 ) -> Option<String> {
-    let (frank, h) = specs_holonomy(specs)?;
+    if specs.is_empty() { return None; }
+    let (frank, h) = specs_holonomy(specs).ok()?;
     classify_holonomy_charge(group, cell, frame, Some(frank), h, [0.0, 0.0]).ok().map(|q| q.label)
 }
 
@@ -101,8 +106,8 @@ fn algebraic_specs_charge(cat: &DefectCatalogue, frame: Frame2D, specs: &[Defect
 
 fn charge_matches_specs(cat: &DefectCatalogue, specs: &[DefectSpec], built: &ClassifiedCharge) -> bool {
     let ok = |s: &[DefectSpec]| match specs_holonomy(s) {
-        None => true,
-        Some((f, h)) => (built.angle - f).abs() <= 1e-3
+        Err(_) => true,
+        Ok((f, h)) => (built.angle - f).abs() <= 1e-3
             && same_proper_holonomy(built.holonomy, h, &cat.grp.plus, cat.grp.a, cat.grp.ainv, 1e-4),
     };
     ok(specs) || (specs.len() == 3 && ok(&[specs[0].clone(), specs[2].clone(), specs[1].clone()]))

@@ -27,6 +27,22 @@ fn square_cell() -> Cell2D {
     }
 }
 
+#[test]
+fn applied_disclination_cuts_report_nudged_direction_and_wedge_insertion() {
+    let cell = square_cell();
+    for angle_deg in [90.0, -90.0] {
+        // The positive x-axis passes through square lattice sites; surgery has to nudge the cut.
+        let specs = [DefectSpec::Disclination { angle_deg, at: [0.0, 0.0], cut: Some([1.0, 0.0]) }];
+        let (crystal, cuts, _) = build_point_defects_with_cuts(&cell, &specs, None, None)
+            .expect("a slight nudge clears the lattice sites");
+        let cut = cuts[0];
+        assert!(cut.dir[0] > 0.999 && (1e-6..=1e-3).contains(&cut.dir[1].abs()), "{cut:?}");
+        assert_eq!(cut.is_insertion, angle_deg < 0.0);
+        let charge = classify_crystal_charge("p4m", &cell, Frame2D::default(), &crystal).unwrap();
+        assert_eq!(charge.angle, angle_deg);
+    }
+}
+
 /// Mean circular bulk bond-angle rotation (in degrees) of bonds whose both endpoints lie
 /// at distance >= `r_min` from the origin, compared against their reference lattice vector `e.vec`.
 fn mean_bulk_bond_rotation_deg(crystal: &BuiltCrystal, r_min: f64) -> f64 {

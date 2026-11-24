@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use super::{WbCtx, WbPanel, WbScenes};
 use crate::theme::ThemeTokens;
 
+mod cavity_drawing;
 mod cavity_ui;
 mod scene;
 #[cfg(test)]

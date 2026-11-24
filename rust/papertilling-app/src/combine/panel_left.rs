@@ -2,6 +2,7 @@ use super::{CombineTabState, MANUAL_R_MAX, MANUAL_R_MIN, MotionMode, ToolMode};
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::Canvas2D;
 use crate::live_combine::CombineDrawMode;
+use crate::mesh3d::DefectViewMode;
 use crate::theme::ThemeTokens;
 
 impl CombineTabState {
@@ -44,6 +45,7 @@ impl CombineTabState {
         });
         ui.separator();
         ui.strong("Place & Move");
+        let previous_tool = self.tool_mode;
         ui.radio_value(&mut self.tool_mode, ToolMode::PanAndDrag, "Select & drag defects");
         let has_centres = !self.info.centres.is_empty();
         ui.add_enabled_ui(has_centres, |ui| {
@@ -54,6 +56,13 @@ impl CombineTabState {
         ui.add_enabled_ui(has_half_walls, |ui| {
             ui.radio_value(&mut self.tool_mode, ToolMode::PlaceHalfWall, "Place terminated wall");
         });
+        if self.tool_mode != previous_tool
+            && self.tool_mode != ToolMode::PanAndDrag
+            && self.view_mode == DefectViewMode::Sheet3D
+        {
+            self.view_mode = DefectViewMode::Split2D3D;
+            self.view3d_dirty = true;
+        }
 
         if self.tool_mode == ToolMode::PlaceDisclination && has_centres {
             self.disclination_tool_ui(ui);
@@ -194,7 +203,7 @@ impl CombineTabState {
                     ui.small("Scan grid:");
                     for g in [1_usize, 2, 3] {
                         if ui.selectable_label(self.grid == g, g.to_string()).clicked() && self.grid != g {
-                            self.grid = g;
+                            self.set_compare_grid(g);
                             trigger_compare |= self.auto_compare;
                         }
                     }

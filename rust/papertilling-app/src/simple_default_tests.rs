@@ -13,8 +13,7 @@ use egui_kittest::kittest::Queryable;
 
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, equip_keys, harness, settled, wait_until};
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab, PapertillingApp};
-use crate::atlas_tab::AtlasSubTab;
-use crate::game_menu::{CardId, Realm};
+use crate::game_menu::Realm;
 use crate::game_menu::test_util::{open_deck, press};
 use crate::presets::PRESETS;
 use crate::session;
@@ -163,10 +162,6 @@ fn advanced_on_reaches_every_post_c1_panel_and_keeps_c1_and_group3_hidden_items_
             for hidden in ["3D slabs", "Platycosms", "3D Line Defects", "Elastic & Stroh", "Motion GIF", "Surfaces & nets"] {
                 assert_ne!(card.title, hidden, "hidden card '{hidden}' must not appear in {r:?}");
             }
-            assert!(
-                !matches!(card.id, CardId::AtlasDefects(AtlasSubTab::SpaceGroups3D)),
-                "C1 3D line defects card stayed hidden"
-            );
         }
     }
 
@@ -174,7 +169,7 @@ fn advanced_on_reaches_every_post_c1_panel_and_keeps_c1_and_group3_hidden_items_
     for (realm, title, expect_tab) in [
         (Realm::Groups, "230 3D Space Groups", NavTab::Atlas),
         (Realm::Groups, "80 Layer Groups", NavTab::Atlas),
-        (Realm::Geometries, "H² hyperbolic tiling (Atlas)", NavTab::Atlas),
+        (Realm::Geometries, "H² & H³ hyperbolic atlas", NavTab::Atlas),
         (Realm::Geometries, "Schläfli {p,q,r}", NavTab::Workbench),
         (Realm::Geometries, "Regular {p,q}", NavTab::Workbench),
         (Realm::Manifolds, "Orbifolds & TG cells", NavTab::Workbench),
@@ -313,8 +308,5 @@ fn default_path_walkthrough_pick_lattice_place_two_defects_read_fusion() {
     assert!((rep.charge.length.expect("Burgers length") - 1.0).abs() < 1e-9, "|b| = a = 1");
     assert_eq!(rep.charge.lattice_vector, Some(true));
     assert!(rep.equivalent, "adjacent +90°/-90° pair is core-equivalent to a single dislocation: {}", rep.verdict);
-    assert!(
-        h.query_all_by_label_contains("EQUIVALENT").next().is_some(),
-        "equivalence banner rendered in inspector"
-    );
+    assert!(h.query_by_label("Volterra core match").is_some(), "equivalence banner rendered in inspector");
 }

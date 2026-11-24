@@ -47,7 +47,7 @@ Issues = "https://github.com/antimajorana/papertilling/issues"
 include = ["papertilling*"]
 
 [tool.setuptools.package-data]
-papertilling = ["data/*.json", "legacy/data/*.json", "legacy/SOURCES.txt"]
+papertilling = ["data/*.json", "data/points3d/*.json", "legacy/data/*.json", "legacy/SOURCES.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

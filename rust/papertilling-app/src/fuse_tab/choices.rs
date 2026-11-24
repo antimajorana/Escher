@@ -29,9 +29,6 @@ pub(super) fn enumerate_choices(info: &CombineLatticeInfo) -> Vec<FuseDefectChoi
     for (disloc_idx, d) in info.dislocations.iter().enumerate() {
         for (member_idx, _) in d.members.iter().enumerate() {
             out.push(FuseDefectChoice::Dislocation { disloc_idx, member_idx, sign: 1 });
-            if d.members.len() == 1 {
-                out.push(FuseDefectChoice::Dislocation { disloc_idx, member_idx, sign: -1 });
-            }
         }
     }
     out
@@ -88,9 +85,13 @@ pub(super) fn compute_slots_for_b(info: &CombineLatticeInfo, ch_b: &FuseDefectCh
     match *ch_b {
         FuseDefectChoice::Disclination { class_idx, .. } => {
             let c = &info.centres[class_idx];
-            for n1 in -4..=4 {
-                for n2 in -4..=4 {
-                    let shift = [f64::from(n1) * a1[0] + f64::from(n2) * a2[0], f64::from(n1) * a1[1] + f64::from(n2) * a2[1]];
+            let [inv1, inv2] = info.lat_info.lat.a_inv;
+            let n1 = (inv1[0] * pos_a[0] + inv1[1] * pos_a[1] + 1e-7).floor();
+            let n2 = (inv2[0] * pos_a[0] + inv2[1] * pos_a[1] + 1e-7).floor();
+            for d1 in -4..=4 {
+                for d2 in -4..=4 {
+                    let (m1, m2) = (n1 + f64::from(d1), n2 + f64::from(d2));
+                    let shift = [m1 * a1[0] + m2 * a2[0], m1 * a1[1] + m2 * a2[1]];
                     for &seed in &c.unit_seeds {
                         let p = [seed[0] + shift[0], seed[1] + shift[1]];
                         if (p[0] - pos_a[0]).hypot(p[1] - pos_a[1]) <= max_d {
@@ -113,15 +114,7 @@ pub(super) fn compute_slots_for_b(info: &CombineLatticeInfo, ch_b: &FuseDefectCh
         }
     }
 
-    let q = |x: f64| (x * 1e4).round() as i64;
-    pts.sort_by(|u, v| {
-        let du = (u[0] - pos_a[0]).hypot(u[1] - pos_a[1]);
-        let dv = (v[0] - pos_a[0]).hypot(v[1] - pos_a[1]);
-        q(du)
-            .cmp(&q(dv))
-            .then_with(|| q(u[0] - pos_a[0]).cmp(&q(v[0] - pos_a[0])))
-            .then_with(|| q(u[1] - pos_a[1]).cmp(&q(v[1] - pos_a[1])))
-    });
+    sort_slots(&mut pts, pos_a);
     let mut dedup: Vec<[f64; 2]> = Vec::with_capacity(pts.len());
     for p in pts {
         if dedup.iter().all(|q_pt| (p[0] - q_pt[0]).hypot(p[1] - q_pt[1]) > 1e-4) {
@@ -129,6 +122,14 @@ pub(super) fn compute_slots_for_b(info: &CombineLatticeInfo, ch_b: &FuseDefectCh
         }
     }
     dedup
+}
+
+pub(super) fn sort_slots(slots: &mut [[f64; 2]], pos_a: [f64; 2]) {
+    let q = |x: f64| (x * 1e4).round() as i64;
+    slots.sort_by_key(|p| {
+        let (dx, dy) = (p[0] - pos_a[0], p[1] - pos_a[1]);
+        (q(dx.hypot(dy)), q(dx), q(dy))
+    });
 }
 
 pub(super) fn run_fuse_job(cache: &mut SingleDefectCache, job: FuseJob) -> FuseBuildResult {
@@ -208,10 +209,8 @@ impl FuseTabState {
                     self.choice_a = ia;
                     self.choice_b = ib;
                     self.pos_a = self.default_pos_for_choice(self.choice_a);
+                    self.pos_b = self.pos_a;
                     self.refresh_slots_b();
-                    if let Some(&p) = self.slots_b.iter().find(|p| (p[0] - self.pos_a[0]).hypot(p[1] - self.pos_a[1]) > 1e-3) {
-                        self.pos_b = p;
-                    }
                 }
             }
             FusePreset::DisclinationPlusDislocation => {

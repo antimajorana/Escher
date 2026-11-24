@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use papertilling_core::types::BuiltCrystal;
 
+use crate::scene2d::polygon::{cross, point_in_polygon, triangulate};
 use crate::scene2d::{
     CirclePrim, LinePrim, PolyPrim, ScenePrimitives, TextPrim, bond_palette, compute_bbox,
     ring_tint_rgba, site_palette,
@@ -40,12 +41,9 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
     let ghosts = ghost_bonds(crystal);
 
     for (ring_pts, is_core) in extract_crystal_faces(crystal, &ghosts) {
-        if is_core && !ring_pts.is_empty() {
-            let k = ring_pts.len() as f32;
-            let cx = ring_pts.iter().map(|p| p[0]).sum::<f32>() / k;
-            let cy = ring_pts.iter().map(|p| p[1]).sum::<f32>() / k;
+        if is_core && let Some(pos) = ring_label_position(&ring_pts) {
             labels.push(TextPrim {
-                pos: [cx, cy],
+                pos,
                 text: ring_pts.len().to_string(),
                 color: [42, 48, 58, 225],
                 size_px: 10.5,
@@ -173,6 +171,28 @@ pub(crate) fn compile_crystal_patch(crystal: &BuiltCrystal, title: &str, note: &
     }
 }
 
+fn ring_label_position(ring: &[[f32; 2]]) -> Option<[f32; 2]> {
+    let count = ring.len() as f32;
+    let mean = [
+        ring.iter().map(|p| p[0]).sum::<f32>() / count,
+        ring.iter().map(|p| p[1]).sum::<f32>() / count,
+    ];
+    if point_in_polygon(mean, ring) {
+        return Some(mean);
+    }
+
+    // A concave face can have its vertex mean outside its own outline.
+    let outline: Vec<_> = ring.iter().map(|p| p.map(f64::from)).collect();
+    triangulate(&outline)
+        .into_iter()
+        .filter_map(|[a, b, c]| {
+            let center = [((a[0] + b[0] + c[0]) / 3.0) as f32, ((a[1] + b[1] + c[1]) / 3.0) as f32];
+            point_in_polygon(center, ring).then_some((cross(a, b, c).abs(), center))
+        })
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, center)| center)
+}
+
 fn interior_anomalous_degrees(crystal: &BuiltCrystal) -> HashMap<usize, bool> {
     let n = crystal.pos.len();
     if n < 12 || crystal.wall_sigma.is_some() || crystal.is_non_orientable {
@@ -223,8 +243,30 @@ fn interior_anomalous_degrees(crystal: &BuiltCrystal) -> HashMap<usize, bool> {
     out
 }
 
-/// Faces of the drawn picture (ghost bonds are not drawn, so they bound no face), each flagged core or bulk
-/// by its distance from the centroid of the sites.
+/// Strip tree branches walked out and back on a face's perimeter, including at its starting vertex.
+fn prune_face_spurs(cycle: &[usize]) -> Vec<usize> {
+    let mut outline = Vec::with_capacity(cycle.len() + 1);
+    for &vertex in cycle.iter().chain(cycle.first()) {
+        let n = outline.len();
+        if n >= 2 && outline[n - 2] == vertex {
+            outline.pop();
+        } else {
+            outline.push(vertex);
+        }
+    }
+    outline.pop(); // repeated starting vertex
+    let (mut first, mut end) = (0, outline.len());
+    while end - first >= 3 && outline[first + 1] == outline[end - 1] {
+        first += 1;
+        end -= 1;
+    }
+    outline.truncate(end);
+    drop(outline.drain(..first));
+    outline
+}
+
+/// Faces of the drawn picture (ghost bonds bound no face), each flagged core or bulk by its distance
+/// from the centroid of the sites.
 fn extract_crystal_faces(crystal: &BuiltCrystal, ghosts: &HashSet<(usize, usize)>) -> Vec<(Vec<[f32; 2]>, bool)> {
     let n = crystal.pos.len();
     if n < 3 || crystal.edges.is_empty() {
@@ -270,17 +312,10 @@ fn extract_crystal_faces(crystal: &BuiltCrystal, ghosts: &HashSet<(usize, usize)
             }
             let mut cycle = Vec::new();
             let (mut a, mut b) = (u0, v0);
-            let mut valid = true;
-            for _ in 0..14 {
-                visited.insert((a, b));
+            while visited.insert((a, b)) {
                 cycle.push(a);
                 let list = &nbrs[b];
-                if list.len() < 2 {
-                    valid = false;
-                    break;
-                }
                 let Some(pos_in_b) = list.iter().position(|&(w, _)| w == a) else {
-                    valid = false;
                     break;
                 };
                 // Next clockwise incoming = previous angle in CCW order -> minimal interior left face
@@ -288,11 +323,12 @@ fn extract_crystal_faces(crystal: &BuiltCrystal, ghosts: &HashSet<(usize, usize)
                 let c = list[next_idx].0;
                 a = b;
                 b = c;
-                if (a, b) == (u0, v0) {
-                    break;
-                }
             }
-            if !valid || (a, b) != (u0, v0) || cycle.len() < 3 || cycle.len() > 12 {
+            if (a, b) != (u0, v0) {
+                continue;
+            }
+            let cycle = prune_face_spurs(&cycle);
+            if cycle.len() < 3 {
                 continue;
             }
             let mut area2 = 0.0_f64;
@@ -346,4 +382,38 @@ fn extract_crystal_faces(crystal: &BuiltCrystal, ghosts: &HashSet<(usize, usize)
             (pts, !is_bulk)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ring_label_position_avoids_the_concave_corner() {
+        let ring = [[0.0, 0.0], [3.0, 0.0], [3.0, 1.0], [1.0, 1.0], [1.0, 3.0], [0.0, 3.0]];
+        assert!(!point_in_polygon([4.0 / 3.0, 4.0 / 3.0], &ring));
+        let [x, y] = ring_label_position(&ring).expect("interior label anchor");
+        assert!(x > 0.0 && y > 0.0 && x < 3.0 && y < 3.0 && (x < 1.0 || y < 1.0));
+    }
+
+    #[test]
+    fn crystal_faces_keep_large_rings_and_skip_dangling_spurs() {
+        let mut crystal = crate::combine_worker::empty_crystal();
+        // A 14-sided polygon bounds one face.
+        crystal.pos = (0..14).map(|i| {
+            let angle = f64::from(i) * std::f64::consts::TAU / 14.0;
+            [angle.cos(), angle.sin()]
+        }).collect();
+        crystal.edges = (0..14).map(|i| (i, (i + 1) % 14)).collect();
+        let faces = extract_crystal_faces(&crystal, &HashSet::new());
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].0.len(), 14);
+
+        // The first two sites form a tree branch inside a square. They do not add sides to the face.
+        crystal.pos = vec![[1.0, 1.0], [0.6, 0.6], [0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]];
+        crystal.edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 2)];
+        let faces = extract_crystal_faces(&crystal, &HashSet::new());
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].0, [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]]);
+    }
 }

@@ -192,6 +192,7 @@ fn show_body(ui: &mut egui::Ui, sp: &mut Space3dPanelState) -> bool {
             }
         });
         if ui.small_button("Back to the canonical net").clicked() {
+            sp.selected_sg = sp.selected_net.space_group_num();
             sp.set_catalogue(None);
             sp.view.catalogue_error = None;
             dirty = true;

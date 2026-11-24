@@ -1,3 +1,4 @@
+use crate::scene2d::polygon::{point_in_polygon, triangulate};
 use crate::scene2d::{PolyPrim, Scene2D, TextPrim};
 use crate::theme::{ThemeTokens, contrast};
 
@@ -6,27 +7,6 @@ use super::{
     Canvas2D, CanvasMarker, circuit, cuts, draw_arrow_mid_egui, draw_dashed_egui, draw_overlays,
     gauge_overlay, marker_colors, to_color32,
 };
-
-pub(crate) fn point_in_polygon(pt: [f32; 2], poly: &[[f32; 2]]) -> bool {
-    if poly.len() < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = poly.len() - 1;
-    for i in 0..poly.len() {
-        let (xi, yi) = (poly[i][0], poly[i][1]);
-        let (xj, yj) = (poly[j][0], poly[j][1]);
-        let crosses = (yi > pt[1]) != (yj > pt[1]);
-        if crosses {
-            let x_int = (xj - xi) * (pt[1] - yi) / (yj - yi) + xi;
-            if pt[0] < x_int {
-                inside = !inside;
-            }
-        }
-        j = i;
-    }
-    inside
-}
 
 fn is_convex_screen_poly(pts: &[egui::Pos2]) -> bool {
     let n = pts.len();
@@ -47,6 +27,19 @@ fn is_convex_screen_poly(pts: &[egui::Pos2]) -> bool {
         }
     }
     true
+}
+
+pub(super) fn concave_fill_mesh(pts: &[egui::Pos2], fill: egui::Color32) -> egui::Mesh {
+    let outline: Vec<_> = pts.iter().map(|p| [f64::from(p.x), f64::from(p.y)]).collect();
+    let mut mesh = egui::Mesh::default();
+    for triangle in triangulate(&outline) {
+        let first = mesh.vertices.len() as u32;
+        for [x, y] in triangle {
+            mesh.colored_vertex(egui::pos2(x as f32, y as f32), fill);
+        }
+        mesh.add_triangle(first, first + 1, first + 2);
+    }
+    mesh
 }
 
 /// Label ink on the 2D canvas. In `Studio`, the ring numbers of a `CrystalPatch` take near-black or white ink,
@@ -110,18 +103,7 @@ impl Canvas2D {
                         egui::Stroke::NONE,
                     ));
                 } else {
-                    let mut c_pos = egui::Pos2::ZERO;
-                    for &pt in &pts {
-                        c_pos.x += pt.x / (pts.len() as f32);
-                        c_pos.y += pt.y / (pts.len() as f32);
-                    }
-                    for m in 0..pts.len() {
-                        painter.add(egui::Shape::convex_polygon(
-                            vec![c_pos, pts[m], pts[(m + 1) % pts.len()]],
-                            fill,
-                            egui::Stroke::NONE,
-                        ));
-                    }
+                    painter.add(egui::Shape::mesh(concave_fill_mesh(&pts, fill)));
                 }
                 if stroke != egui::Stroke::NONE {
                     painter.add(egui::Shape::closed_line(pts, stroke));

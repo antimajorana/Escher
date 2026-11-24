@@ -137,8 +137,7 @@ impl Canvas2D {
         self.compiled = compile_scene(&scene);
         self.scene = scene;
         if reset_view {
-            let (bmin, bmax) = self.compiled.bbox;
-            self.world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
+            self.center_on_scene();
             self.auto_fit_pending = true;
             self.active_drag_pin = None;
             self.active_drag_cut = None;
@@ -146,8 +145,7 @@ impl Canvas2D {
     }
 
     pub fn reset(&mut self) {
-        let (bmin, bmax) = self.compiled.bbox;
-        self.world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
+        self.center_on_scene();
         self.pan = egui::Vec2::ZERO;
         self.auto_fit_pending = true;
         self.active_drag_pin = None;
@@ -162,15 +160,19 @@ impl Canvas2D {
         (self.compiled.site_count, self.compiled.bond_count)
     }
 
-    pub(crate) fn camera_tuple(&self) -> (egui::Vec2, f32, [f32; 2], bool) {
-        (self.pan, self.zoom, self.world_center, self.auto_fit_pending)
+    pub(crate) fn center_on_scene(&mut self) {
+        let (bmin, bmax) = self.compiled.bbox;
+        self.world_center = [0.5 * (bmin[0] + bmax[0]), 0.5 * (bmin[1] + bmax[1])];
     }
 
-    pub(crate) fn copy_camera_from(&mut self, other: &Self) {
+    pub(crate) fn camera_tuple(&self) -> (egui::Vec2, f32, bool) {
+        (self.pan, self.zoom, self.auto_fit_pending)
+    }
+
+    pub(crate) fn copy_pan_and_zoom_from(&mut self, other: &Self) {
         self.pan = other.pan;
         self.zoom = other.zoom;
         self.fit_zoom = other.fit_zoom;
-        self.world_center = other.world_center;
         self.auto_fit_pending = false;
     }
 
@@ -188,10 +190,10 @@ impl Canvas2D {
         self.gauge_overlay.as_ref()
     }
 
-    /// Export the scene as shown (overlays, pins, legend) to `path` (`.svg` / `.png`); a PNG is drawn at the
+    /// Export the scene and its visible cuts, analysis overlays, pins and legend to `path` (`.svg` / `.png`); a PNG is drawn at the
     /// integer pixel scale `png_scale` (1, 2 or 4: 1024, 2048 or 4096 px a side), the SVG ignores it.
     pub fn export_to_path(&self, path: &Path, png_scale: u32) -> Result<String, String> {
-        if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() || self.gallery_overlay.is_some() {
+        if self.circuit_overlay.is_some() || self.gauge_overlay.is_some() || self.gallery_overlay.is_some() || !self.cut_rays.is_empty() {
             let mut prims = self.compiled.clone();
             if let Some(ov) = &self.gauge_overlay {
                 gauge_overlay::append_gauge_export_prims(&mut prims, ov);
@@ -202,11 +204,16 @@ impl Canvas2D {
             let title = self.export_title.as_deref();
             let legend = self.gauge_overlay.as_ref().and_then(ExportLegend::from_overlay);
             // over layer as two layers so the rotation symbols sit on the mirror / glide lines (as on the canvas)
-            let tops: Vec<crate::scene2d::ScenePrimitives> = self.gallery_overlay.as_ref().map_or_else(Vec::new, |g| {
+            let mut tops: Vec<crate::scene2d::ScenePrimitives> = self.gallery_overlay.as_ref().map_or_else(Vec::new, |g| {
                 let lines = crate::scene2d::ScenePrimitives { lines: g.over.lines.clone(), bbox: g.over.bbox, ..Default::default() };
                 let symbols = crate::scene2d::ScenePrimitives { polygons: g.over.polygons.clone(), bbox: g.over.bbox, ..Default::default() };
                 vec![lines, symbols]
             });
+            if !self.cut_rays.is_empty() {
+                let cuts = cuts::cut_export_layer(&self.cut_rays);
+                prims.bbox = crate::scene2d::compute_bbox([prims.bbox.0, prims.bbox.1, cuts.bbox.0, cuts.bbox.1].into_iter());
+                tops.push(cuts);
+            }
             export_scene_layers(&prims, &tops, &self.export_markers, title, legend.as_ref(), (path, png_scale))
         } else {
             export_scene_full(&self.scene, &self.export_markers, self.export_title.as_deref(), path, png_scale)

@@ -269,11 +269,11 @@ impl<'a> ConeBuilder<'a> {
         Ok(())
     }
 
-    pub(crate) fn add_disclination(&mut self, angle_deg: f64, p: [f64; 2], cut: Option<[f64; 2]>) -> Result<(), String> {
+    pub(crate) fn add_disclination(&mut self, angle_deg: f64, p: [f64; 2], cut: [f64; 2]) -> Result<[f64; 2], String> {
         let snap = self.snapshot();
-        self.disclination_nudged(angle_deg, p, cut)?;
+        let applied = self.disclination_nudged(angle_deg, p, cut)?;
         if self.records.last().copied().unwrap_or((0, 0)) != (0, 0) {
-            return Ok(());
+            return Ok(applied);
         }
         // FIX 1: face-centred disclination whose seam band misses nearest neighbours (e.g. chiral_square 4b).
         self.restore(snap);
@@ -287,26 +287,26 @@ impl<'a> ConeBuilder<'a> {
         self.pad = Some((p, near + 1.05 * self.lmax));
         let res = self.disclination_nudged(angle_deg, p, cut);
         self.pad = None;
-        res?;
+        let applied = res?;
         if self.records.last().copied().unwrap_or((0, 0)) == (0, 0) {
             return Err("the disclination step changed nothing; try another cut direction".to_string());
         }
-        Ok(())
+        Ok(applied)
     }
 
-    fn disclination_nudged(&mut self, angle_deg: f64, p: [f64; 2], cut: Option<[f64; 2]>) -> Result<(), String> {
+    fn disclination_nudged(&mut self, angle_deg: f64, p: [f64; 2], cut: [f64; 2]) -> Result<[f64; 2], String> {
         if self.clear(p) < 3.5 * self.lmax {
             return Err("disclination point is too close to patch rim; increase R".to_string());
         }
-        let c = cut.unwrap_or([0.123_f64.cos(), 0.123_f64.sin()]);
-        if norm2(c) < 1e-9 {
+        if norm2(cut) < 1e-9 {
             return Err("cut direction must be non-zero".to_string());
         }
-        let th_cut = c[1].atan2(c[0]);
+        let th_cut = cut[1].atan2(cut[0]);
         for nudge in [0.0, 1e-5, -1e-5, 3e-5, -3e-5, 1e-4] {
             let snap = self.snapshot();
-            match self.disclination_step(angle_deg, p, th_cut + nudge) {
-                Ok(()) => return Ok(()),
+            let th = th_cut + nudge;
+            match self.disclination_step(angle_deg, p, th) {
+                Ok(()) => return Ok([th.cos(), th.sin()]),
                 Err(StepErr::SeamHit) => self.restore(snap),
                 Err(StepErr::Config(msg)) => {
                     self.restore(snap);

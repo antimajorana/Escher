@@ -6,8 +6,10 @@
 //! `{p,q}` tiling), a view zoom of the 2D disk, and face / vertex picking with a readout (`hyperbolic_pick`).
 
 use papertilling_core::growth::{LayerStats, SeedKind};
+use papertilling_core::hyperbolic::holonomy::{ReflectionGroup, wedge_angle_mismatch};
 use papertilling_core::hyperbolic::{HyperbolicStyle, HyperbolicTiling, build_hyperbolic_tiling_seeded};
 
+use super::hyperbolic_charge_ui::HyperbolicChargeUi;
 use super::hyperbolic_scene::{disk_scene, empty_scene, sheet_mesh};
 use super::hyperbolic_shells::{SHELL_CACHE_MAX, ShellTable, drawn_patch_stats, shell_table_seeded};
 use super::hyperbolic_view::{DiskIsometry, vertex_generations, view_tiling};
@@ -77,6 +79,7 @@ pub struct HyperbolicPanelState {
     pub shell_cache: Vec<ShellCacheEntry>,
     /// Which shells the drawn patch contains (from the tiling's `growth_rule`).
     pub drawn_patch_note: String,
+    pub(super) charges: HyperbolicChargeUi,
 }
 
 pub type ShellCacheEntry = ((usize, usize, SeedKind), Result<ShellTable, String>);
@@ -103,6 +106,7 @@ impl Default for HyperbolicPanelState {
             shell_key: None,
             shell_cache: Vec::new(),
             drawn_patch_note: String::new(),
+            charges: HyperbolicChargeUi::default(),
         }
     }
 }
@@ -277,6 +281,20 @@ impl HyperbolicPanelState {
             ));
         }
         ui.small(format!("Projection: {:?} | Style: {:?}", self.disk_proj, self.style));
+        if is_hyperbolic {
+            let (p, q) = if self.style == HyperbolicStyle::DualQP { (self.q, self.p) } else { (self.p, self.q) };
+            ui.small("Intrinsic curvature of the reference plane K = −1.");
+            if !self.pristine_only {
+                let delta = self.effective_wedge();
+                let core = (p as i32 + delta).clamp(3, 12) as usize;
+                if delta != 0 && let Some(mismatch) = wedge_angle_mismatch(p, q, core) {
+                    ui.small(format!("Attempted {q}-fold join · angular mismatch {mismatch:+.4} rad"));
+                    ui.small("Positive means a gap. Negative means overlap. The wedge sketch shows unglued polygon copies.");
+                }
+                ui.separator();
+                self.charges.show(ui, ReflectionGroup::h2(p, q), false);
+            }
+        }
         self.show_pick_readout(ui, tokens);
         self.show_drawn_growth_table(ui, tokens);
         self.show_shell_table(ui);

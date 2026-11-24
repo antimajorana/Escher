@@ -10,12 +10,13 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::defect::charge::{corners_order, frame_faces, frank_angles, outer_face_index};
+use crate::defect::combinations::specs_holonomy;
 use crate::defect::cone_builder::ConeBuilder;
-use crate::defect::cone_geometry::{norm2, rotation_about, sub2};
+use crate::defect::cone_geometry::{norm2, sub2};
 use crate::defect::core_graph::LatticeCoreInfo;
-use crate::defect::equivalence::classify_holonomy_charge;
-use crate::defect::surgery::{DefectSpec, build_point_defects_with_info};
-use crate::types::{BuiltCrystal, Cell2D, Frame2D, Isometry2};
+use crate::defect::equivalence::{classify_crystal_charge, classify_holonomy_charge, same_charge};
+use crate::defect::surgery::{DefectSpec, build_point_defects_with_info, validate_extent};
+use crate::types::{BuiltCrystal, Cell2D, Frame2D};
 
 use super::enumerate::{CoreEnumeration, enumerate_cavity_cores, find_cavity_face};
 use super::map::{MapEdge, MapVertex, PlanarMap, VertexKind};
@@ -38,42 +39,15 @@ pub struct CavityExtraction {
     pub note: String,
 }
 
-fn algebraic_total_charge(specs: &[DefectSpec]) -> Result<(f64, Isometry2, [f64; 2]), String> {
-    let (mut total_frank, mut h_total) = (0.0, Isometry2::IDENTITY);
-    let (mut sx, mut sy, mut count) = (0.0, 0.0, 0usize);
-    for (idx, s) in specs.iter().enumerate() {
-        match *s {
-            DefectSpec::Dislocation { b, at, .. } => {
-                if !b[0].is_finite() || !b[1].is_finite() {
-                    return Err(format!("spec {}: Burgers vector must be finite", idx + 1));
-                }
-                let g = Isometry2 { m: [[1.0, 0.0], [0.0, 1.0]], t: [-b[0], -b[1]] };
-                h_total = g.compose(&h_total);
-                let p = at.unwrap_or([0.0, 0.0]);
-                if !p[0].is_finite() || !p[1].is_finite() {
-                    return Err(format!("spec {}: position must be finite", idx + 1));
-                }
-                sx += p[0];
-                sy += p[1];
-                count += 1;
-            }
-            DefectSpec::Disclination { angle_deg, at, .. } => {
-                if !angle_deg.is_finite() || !at[0].is_finite() || !at[1].is_finite() {
-                    return Err(format!("spec {}: angle and centre must be finite", idx + 1));
-                }
-                h_total = rotation_about(at, angle_deg.to_radians()).compose(&h_total);
-                total_frank += angle_deg;
-                sx += at[0];
-                sy += at[1];
-                count += 1;
-            }
-            DefectSpec::HalfWall { .. } => {
-                return Err(String::from("half-wall specs are not supported by point-defect cavity extraction"));
-            }
-        }
-    }
-    let centroid = if count > 0 { [sx / count as f64, sy / count as f64] } else { [0.0, 0.0] };
-    Ok((total_frank, h_total, centroid))
+fn defect_centroid(specs: &[DefectSpec]) -> [f64; 2] {
+    let n = specs.len() as f64;
+    specs.iter().fold([0.0, 0.0], |[sx, sy], spec| {
+        let [x, y] = match *spec {
+            DefectSpec::Dislocation { at, .. } => at.unwrap_or([0.0, 0.0]),
+            DefectSpec::Disclination { at, .. } | DefectSpec::HalfWall { at, .. } => at,
+        };
+        [sx + x / n, sy + y / n]
+    })
 }
 
 fn build_far_field_host(
@@ -85,6 +59,7 @@ fn build_far_field_host(
     match charge.kind.as_str() {
         "vacuum" => {
             let r_disk = (5.0 * lat_info.scale).max(5.0 * lat_info.lmax);
+            validate_extent(lat_info, centroid, r_disk)?;
             let crystal = ConeBuilder::new(lat_info, centroid, r_disk).finish()?;
             Ok((crystal, String::from("far-field perfect lattice (vacuum total charge)")))
         }
@@ -161,7 +136,10 @@ fn connect_dual_components(
         }
         if comp.len() == selected.len() { return; }
         let mut parent: HashMap<usize, usize> = comp.iter().map(|&fi| (fi, fi)).collect();
-        let mut bfs: VecDeque<usize> = comp.iter().copied().collect();
+        // Start equally short connections in face order so reopening the same cavity picks the same bridge.
+        let mut frontier: Vec<_> = comp.iter().copied().collect();
+        frontier.sort_unstable();
+        let mut bfs: VecDeque<_> = frontier.into();
         let mut hit = None;
         while let Some(fi) = bfs.pop_front() {
             for fj in dual_neighbors(faces, edge_to_face, fi) {
@@ -273,7 +251,11 @@ fn extract_boundary_cycle(selected: &HashSet<usize>, faces: &[Vec<usize>]) -> Re
     let (mut cycle, mut cur) = (Vec::with_capacity(total_b), start);
     for _ in 0..total_b {
         cycle.push(cur);
-        cur = next_map[&cur][0];
+        let Some(next) = next_map.get(&cur) else {
+            return Err(String::from("cavity boundary is open"));
+        };
+        cur = next[0];
+        if cur == start { break; }
     }
     if cur != start || cycle.len() != total_b {
         return Err(String::from("cavity boundary has multiple disconnected cycles"));
@@ -366,18 +348,21 @@ pub fn extract_defect_cavity(
     existing_crystal: Option<&BuiltCrystal>,
     extra_rings: usize,
 ) -> Result<CavityExtraction, String> {
-    let (total_frank, h_total, centroid) = algebraic_total_charge(specs)?;
+    let (total_frank, h_total) = specs_holonomy(specs)?;
+    let centroid = defect_centroid(specs);
     let charge = classify_holonomy_charge(group, cell, frame, Some(total_frank), h_total, [0.0, 0.0])?;
     let lat_info = LatticeCoreInfo::new(cell);
 
-    let (owned_crystal, far_field_source);
+    let (owned_crystal, far_field_source, measured_charge);
     let crystal: &BuiltCrystal = if let Some(c) = existing_crystal.filter(|c| !c.pos.is_empty()) {
         far_field_source = String::from("built configuration");
+        measured_charge = Some(classify_crystal_charge(group, cell, frame, c)?);
         c
     } else {
         let (built, src) = build_far_field_host(cell, &lat_info, &charge, centroid)?;
         owned_crystal = built;
         far_field_source = src;
+        measured_charge = None;
         &owned_crystal
     };
 
@@ -495,11 +480,15 @@ pub fn extract_defect_cavity(
     let reference_filled = build_verified_map(crystal, &ref_spec, selected.len(), None)?;
 
     let (orig_inner_verts, orig_inner_edges, orig_total_edges) = (inner_orig.len(), inner_edge_pairs.len(), reference_filled.edges.len());
-    let title = format!("{group} {} ({m}-gon cavity)", charge.label);
-    let note = format!(
+    let displayed_charge = measured_charge.as_ref().map_or(&charge.label, |q| &q.label);
+    let title = format!("{group} {displayed_charge} ({m}-gon cavity)");
+    let mut note = format!(
         "Extracted {m}-gon cavity from {far_field_source} ({} bounded face(s), {orig_inner_verts} interior vert(s), {orig_inner_edges} interior edge(s), {stub_idx} external stub(s), extra_rings={extra_rings}).",
         selected.len()
     );
+    if measured_charge.as_ref().is_some_and(|q| !same_charge(group, cell, q, &charge, false)) {
+        note.push_str(" The input-order algebraic product and measured boundary give different charges. The cavity uses the measured boundary.");
+    }
     Ok(CavityExtraction {
         title, algebraic_charge: charge.label, far_field_source, cavity_map, cavity_cycle,
         orig_inner_verts, orig_inner_edges, orig_total_edges, reference_filled, note,
@@ -527,4 +516,30 @@ pub fn enumerate_defect_cavity_reconnections(
     )?;
     en.surrounding_name = extraction.title.clone();
     Ok((extraction, en))
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn dual_paths_of_equal_length_choose_the_first_face() {
+        // Two rows of three squares. The left and right columns can be joined via either middle square.
+        let faces: Vec<_> = (0..3).flat_map(|x| [x, x + 4])
+            .map(|v| vec![v, v + 1, v + 5, v + 4]).collect();
+        let edge_to_face = faces.iter().enumerate()
+            .flat_map(|(i, f)| face_directed_edges(f).map(move |e| (e, i))).collect();
+        for _ in 0..32 {
+            let mut selected = HashSet::from([0, 1, 4, 5]);
+            connect_dual_components(&mut selected, &faces, &edge_to_face, faces.len());
+            assert_eq!(selected, HashSet::from([0, 1, 2, 4, 5]));
+        }
+    }
+
+    #[test]
+    fn disjoint_boundary_cycles_are_rejected_even_when_their_lengths_match() {
+        let faces = vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]];
+        let error = extract_boundary_cycle(&HashSet::from([0, 1]), &faces).unwrap_err();
+        assert!(error.contains("multiple disconnected cycles"), "{error}");
+    }
 }

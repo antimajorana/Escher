@@ -4,7 +4,8 @@
 use egui_kittest::kittest::Queryable;
 use papertilling_core::fusion::{gate_route, hamiltonian_route, wang_core_connections};
 
-use super::scene::{convex_partition, core_scene, face_outline, step_scene, triangulate};
+use super::scene::{convex_partition, core_scene, face_outline, step_scene};
+use crate::scene2d::polygon::triangulate;
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, harness, settled, wait_until};
 use crate::app::{AppMode, DefectsView, NavTab, PapertillingApp};
 use crate::canvas2d::Scene2D;

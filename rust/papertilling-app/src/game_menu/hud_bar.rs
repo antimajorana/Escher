@@ -10,6 +10,7 @@ use std::cell::RefCell;
 
 use super::breadcrumb::Segment;
 use crate::app::{AppMode, DefectsView, LatticesView, NavTab, PapertillingApp};
+use crate::ui::{CompactPanel, compact_layout};
 
 const UNDO_SCOPE: &str = "Undo and Redo apply to Place & fuse";
 /// Narrowest a breadcrumb segment gets before it is hidden (an ellipsis plus a glyph or two).
@@ -104,14 +105,27 @@ impl PapertillingApp {
                     }
                 }
                 AppMode::Defects => {
-                    for (v, label) in [
+                    let views = [
                         (DefectsView::Catalogue2D, "Allowed defects"),
                         (DefectsView::CombineAndFuse, "Place & fuse"),
                         (DefectsView::FuseAndCompare, "Fuse & compare"),
-                    ] {
-                        if ui.selectable_label(self.defects_view == v, label).clicked() && self.defects_view != v {
-                            self.select_defects_view(v);
+                    ];
+                    let current_label = views.iter().find_map(|&(view, label)| (view == self.defects_view).then_some(label));
+                    let mut selected = self.defects_view;
+                    let mut show_views = |ui: &mut egui::Ui| {
+                        for (view, label) in views {
+                            if ui.selectable_value(&mut selected, view, label).changed() && density == HudDensity::Narrow {
+                                ui.close();
+                            }
                         }
+                    };
+                    if density == HudDensity::Narrow {
+                        ui.menu_button(current_label.unwrap_or("Defect views"), show_views);
+                    } else {
+                        show_views(ui);
+                    }
+                    if selected != self.defects_view {
+                        self.select_defects_view(selected);
                     }
                 }
                 AppMode::Analysis => {}
@@ -321,9 +335,20 @@ impl PapertillingApp {
         if ui.button("Reset camera").clicked() {
             self.canvas2d.reset();
             self.view3d.reset();
+            if self.active_tab == NavTab::Fuse {
+                self.fuse.single_canvas.reset();
+            }
         }
-        ui.checkbox(&mut self.left_rail_open, "Left panel (Ctrl+B)");
-        ui.checkbox(&mut self.right_inspector_open, "Right panel (Ctrl+I)");
+        if compact_layout(ui.ctx()) {
+            for (panel, label) in [(CompactPanel::Controls, "Controls (Ctrl+B)"), (CompactPanel::Inspector, "Inspector (Ctrl+I)"), (CompactPanel::Canvas, "Canvas only")] {
+                if ui.selectable_value(&mut self.compact_panel, panel, label).changed() {
+                    ui.close();
+                }
+            }
+        } else {
+            ui.checkbox(&mut self.left_rail_open, "Left panel (Ctrl+B)");
+            ui.checkbox(&mut self.right_inspector_open, "Right panel (Ctrl+I)");
+        }
     }
 
     /// Undo / Redo for Place & fuse (`in_menu`: Undo first, as a menu reads top to bottom).

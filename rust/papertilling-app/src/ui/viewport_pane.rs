@@ -1,5 +1,6 @@
 use crate::app::{NavTab, PapertillingApp};
 use crate::gallery_tab::filter::group_with_orbifold;
+use crate::mesh3d::{DefectViewMode, Sheet3dColorMode};
 use crate::theme::ThemeTokens;
 
 impl PapertillingApp {
@@ -130,6 +131,42 @@ pub fn show_defect_viewport_header(ui: &mut egui::Ui, is_busy: bool) {
             ui.small("Building crystal…");
         });
     }
+}
+
+pub(crate) fn defect_display_mode_ui(
+    ui: &mut egui::Ui,
+    mode: &mut DefectViewMode,
+    color: &mut Sheet3dColorMode,
+) -> bool {
+    let before = (*mode, *color);
+    ui.horizontal_wrapped(|ui| {
+        ui.selectable_value(mode, DefectViewMode::Planar2D, "2D patch");
+        ui.selectable_value(mode, DefectViewMode::Sheet3D, "3D sheet")
+            .on_hover_text("Orbit the approximate elastic sheet and inspect its solver diagnostics");
+        ui.selectable_value(mode, DefectViewMode::Split2D3D, "Split view")
+            .on_hover_text("Show the 2D patch and approximate elastic sheet together");
+        if mode.uses_3d() {
+            let colors = [
+                (Sheet3dColorMode::FaceRingSize, "Ring size"),
+                (Sheet3dColorMode::HeightZ, "Height"),
+                (Sheet3dColorMode::GaussianCurvature, "Angle deficit"),
+                (Sheet3dColorMode::BondStrain, "Bond strain"),
+            ];
+            let selected = colors.iter().find_map(|&(value, label)| (value == *color).then_some(label));
+            egui::ComboBox::from_label("Sheet colour")
+                .width(140.0)
+                .selected_text(selected.unwrap_or("Sheet colour"))
+                .show_ui(ui, |ui| {
+                    for (value, label) in colors {
+                        let row = ui.selectable_value(color, value, label);
+                        if value == Sheet3dColorMode::GaussianCurvature {
+                            row.on_hover_text("Interior vertex curvature as 2π minus the angles of incident faces, in radians");
+                        }
+                    }
+                });
+        }
+    });
+    (*mode, *color) != before
 }
 
 pub fn show_split_2d_3d(

@@ -4,6 +4,7 @@ use crate::scene_crystal::compile_crystal_patch;
 
 pub(crate) mod overlays;
 pub(crate) mod periodic;
+pub(crate) mod polygon;
 mod surface_net;
 
 #[derive(Clone)]

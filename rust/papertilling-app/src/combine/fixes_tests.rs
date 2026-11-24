@@ -215,6 +215,10 @@ fn x_and_y_dislocation_markers_align_with_drawn_pentagon_centroids() {
 
     let markers = st.build_markers();
     assert_eq!(markers.len(), 2);
+    for (marker, (a, b, _)) in markers.iter().zip(st.current_kinematic_overlay().glide_lines) {
+        let midpoint = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+        assert!((midpoint[0] - marker.pos[0]).hypot(midpoint[1] - marker.pos[1]) < 1e-9);
+    }
     let y_pin = markers[1].pos;
     let dist_y = pentagon_centroids
         .iter()
@@ -251,6 +255,144 @@ fn x_and_y_dislocation_markers_align_with_drawn_pentagon_centroids() {
         (round[0] - probe[0]).hypot(round[1] - probe[1]) < 0.15,
         "IDW ref->drawn->ref roundtrip drifted: {probe:?} -> {round:?}"
     );
+}
+
+#[test]
+fn oversized_pristine_disk_and_surgical_retry_are_refused() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let info = combine_lattice_info(square);
+    let mut opts = super::default_build_opts(info.r_auto_base);
+    opts.auto_radius = false;
+    opts.manual_radius = 200.0;
+    let pristine = build_combined_crystal(square, &info, &[], &opts, false);
+    assert_eq!(pristine.charge_label, "Live view too large");
+    assert!(pristine.applied_radius < 200.0);
+
+    opts.manual_radius = 2.5;
+    let pins = [
+        DefectSpec::dislocation([1.0, 0.0], Some([-100.0, 0.0])),
+        DefectSpec::dislocation([1.0, 0.0], Some([100.0, 0.0])),
+    ];
+    let separated = build_combined_crystal(square, &info, &pins, &opts, false);
+    assert_eq!(separated.charge_label, "Live view too large");
+    assert!(separated.applied_cuts.is_empty());
+}
+
+#[test]
+fn cavity_inspector_waits_for_the_current_final_crystal() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut st = CombineTabState::new(square, &backend);
+    st.wait_idle(square, None);
+    assert!(st.build_cavity_request(square).is_some());
+
+    st.specs = vec![DefectSpec::dislocation([1.0, 0.0], Some([2.371, 1.413]))];
+    st.request_build(square, true, false, false);
+    assert!(st.build_cavity_request(square).is_none());
+    st.wait_idle(square, None);
+    assert!(st.last_build.preview);
+    assert!(st.build_cavity_request(square).is_none());
+
+    st.request_build(square, false, false, false);
+    st.wait_idle(square, None);
+    let request = st.build_cavity_request(square).expect("current final build");
+    assert_eq!(request.specs, st.specs);
+    assert_eq!(request.existing_crystal.unwrap().pos, st.last_build.crystal.pos);
+}
+
+#[test]
+fn changing_the_scan_grid_invalidates_the_exported_summary() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut st = CombineTabState::new(square, &backend);
+    st.run_compare(square);
+    st.wait_idle(square, None);
+    assert!(st.to_notebook_json(square).summary.is_some());
+
+    st.auto_compare = false;
+    st.set_compare_grid(2);
+    let cfg = st.to_notebook_json(square);
+    assert_eq!(cfg.options.grid, 2);
+    assert!(cfg.summary.is_none());
+}
+
+#[test]
+fn importing_an_implicit_pin_preserves_its_position_when_another_pin_is_deleted() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut st = CombineTabState::new(square, &backend);
+    let mut canvas = test_canvas();
+    let mut cfg = st.to_notebook_json(square);
+    cfg.defects = vec![
+        DefectSpec::disclination(-90.0, [0.0, 0.0]),
+        DefectSpec::dislocation([1.0, 0.0], None),
+    ];
+    st.auto_compare = false;
+    st.load_notebook_json(&cfg, &backend, &mut canvas).unwrap();
+    assert!(st.delete_pin(0, square, Some(&mut canvas)));
+    assert_eq!(
+        st.to_notebook_json(square).defects,
+        vec![DefectSpec::dislocation([1.0, 0.0], Some([3.371, 0.413]))],
+    );
+}
+
+#[test]
+fn desktop_import_reports_when_it_replaces_a_saved_patch_centre() {
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let mut st = CombineTabState::new(square, &backend);
+    let mut value = serde_json::to_value(st.to_notebook_json(square)).unwrap();
+    value["options"]["centre"] = serde_json::json!([0.0, 0.0]);
+    st.import_notebook_json(&value.to_string(), &backend, &mut test_canvas()).unwrap();
+    assert!(st.json_status.contains("saved patch centre was replaced"));
+}
+
+#[test]
+fn overlapping_pin_merge_keeps_terminated_walls_distinct_from_disclinations() {
+    use crate::live_combine::cuts::{has_coincident_same_kind_pins, merge_coincident_pins};
+
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let info = combine_lattice_info(square);
+    let apex = [0.0, 0.0];
+    let wall = DefectSpec::half_wall(Some("Wb"), apex, None, None);
+    let mut pins = vec![wall.clone(), DefectSpec::disclination(90.0, apex)];
+    assert!(!has_coincident_same_kind_pins(&info, &pins));
+    pins.push(DefectSpec::disclination(-90.0, apex));
+    assert!(has_coincident_same_kind_pins(&info, &pins));
+    merge_coincident_pins(&info, &mut pins);
+    assert_eq!(pins, vec![wall]);
+}
+
+#[test]
+fn combine_discloses_a_different_pin_order_and_measured_charge() {
+    use papertilling_core::defect::surgery::patch_centre_and_radius;
+
+    let backend = AppBackend::new();
+    let square = backend.find_named("square").unwrap();
+    let info = combine_lattice_info(square);
+    let pins = [
+        DefectSpec::disclination(90.0, [0.0, 0.0]),
+        DefectSpec::disclination(-90.0, [0.5, 0.5]),
+        DefectSpec::dislocation([1.0, 0.0], Some([0.371, 0.413])),
+    ];
+    let (_, radius) = patch_centre_and_radius(&info.lat_info, &pins, None, None).unwrap();
+    let opts = CombineBuildOptions {
+        auto_radius: false,
+        draw_mode: CombineDrawMode::Raw,
+        ..super::default_build_opts(radius)
+    };
+    let out = build_combined_crystal(square, &info, &pins, &opts, false);
+    assert!(out.refused.is_none(), "{:?}", out.refused);
+    assert!(out.charge_label.contains("|b| = 1.4142"), "{}", out.charge_label);
+    assert!(
+        out.charge_detail.contains("Pin-order algebraic charge: dislocation [b] = P+ orbit of [2.0, 0.0] (|b| = 2.0000)"),
+        "{}",
+        out.charge_detail
+    );
+    assert!(out.charge_detail.contains(&format!("Measured boundary charge: {}", out.charge_label)));
+    assert!(out.charge_detail.contains("Equivalence uses the measured charge and core graph."));
 }
 
 #[test]

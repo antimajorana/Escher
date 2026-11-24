@@ -85,8 +85,6 @@ pub struct CombineBuildOutput {
     pub applied_radius: f64,
     pub charge_label: String,
     pub charge_detail: String,
-    pub core_nodes: usize,
-    pub core_edges: usize,
     pub core_summary: String,
     pub local_cores: Vec<CoreFaceSummary>,
     pub patch_centre: [f64; 2],

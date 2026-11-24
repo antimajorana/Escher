@@ -85,11 +85,14 @@ impl CombineTabState {
                 }
                 if advanced
                     && ui
-                        .button("Inspect core reconnections")
+                        .add_enabled(
+                            build_preview.is_none() && self.can_inspect_current_crystal(),
+                            egui::Button::new("Inspect core reconnections"),
+                        )
                         .on_hover_text("Cut a fixed-boundary cavity around these defects and enumerate valid lattice core reconnections")
                         .clicked()
                 {
-                    self.open_cavity_in_fusion = Some(self.build_cavity_request(gallery_item));
+                    self.open_cavity_in_fusion = self.build_cavity_request(gallery_item);
                 }
             });
         }
@@ -121,8 +124,8 @@ impl CombineTabState {
             TableBuilder::new(ui)
                 .striped(true)
                 .max_scroll_height(108.0)
-                .column(Column::exact(28.0))
-                .column(Column::exact(62.0))
+                .column(Column::exact(36.0))
+                .column(Column::exact(66.0))
                 .column(Column::remainder())
                 .column(Column::exact(58.0))
                 .column(Column::exact(24.0))
@@ -143,15 +146,21 @@ impl CombineTabState {
                         body.row(18.0, |mut row| {
                             row.set_selected(is_selected);
                             row.col(|ui| {
-                                if ui.selectable_label(is_selected, format!("#{}", idx + 1)).clicked() {
+                                if ui.selectable_label(is_selected, format!("#{}", idx + 1))
+                                    .on_hover_text("Select this defect")
+                                    .clicked()
+                                {
                                     out.select_idx = Some(idx);
                                 }
                             });
                             row.col(|ui| {
-                                ui.label(kstr);
+                                ui.add(egui::Label::new(&kstr).truncate())
+                                    .on_hover_text(format!("{kstr} at ({:+.2}, {:+.2})", pos[0], pos[1]));
                             });
                             row.col(|ui| {
-                                ui.small(format!("({:+.2}, {:+.2})", pos[0], pos[1]));
+                                let coordinates = format!("({:+.2}, {:+.2})", pos[0], pos[1]);
+                                ui.add(egui::Label::new(egui::RichText::new(&coordinates).small()).truncate())
+                                    .on_hover_text(coordinates);
                             });
                             row.col(|ui| {
                                 if let Some(c) = cut_opt {
@@ -180,12 +189,12 @@ impl CombineTabState {
                                 }
                             });
                             row.col(|ui| {
-                                if ui.small_button("±").clicked() {
+                                if ui.small_button("±").on_hover_text("Flip this defect's charge").clicked() {
                                     out.flip_idx = Some(idx);
                                 }
                             });
                             row.col(|ui| {
-                                if ui.small_button("×").clicked() {
+                                if ui.small_button("×").on_hover_text("Remove this defect").clicked() {
                                     out.remove_idx = Some(idx);
                                 }
                             });
@@ -211,13 +220,13 @@ impl CombineTabState {
         ui.strong("Total Charge & Equivalence");
         ui.label(&self.last_build.charge_label);
         ui.small(&self.last_build.charge_detail);
+        if self.is_building() {
+            ui.small("Showing charge and core details from the previous build.");
+        }
         if self.last_build.preview {
             ui.small("Core: (read out when the drag ends)");
         } else {
-            ui.small(format!(
-                "Core: {} nodes, {} edges | {}",
-                self.last_build.core_nodes, self.last_build.core_edges, self.last_build.core_summary
-            ));
+            ui.small(&self.last_build.core_summary);
         }
         if !self.last_build.local_cores.is_empty() {
             let lc: Vec<&str> = self.last_build.local_cores.iter().map(|c| c.label.as_str()).collect();
@@ -236,21 +245,23 @@ impl CombineTabState {
         let stale = self.compare_stale || self.is_comparing() || self.dragging || self.cut_dragging;
         match &self.compare_result {
             Some(Ok(rep)) => {
-                let (bg, fg, tag) = match (rep.equivalent, rep.match_tier.as_str()) {
-                    (true, "volterra" | "exact") => (
+                let (bg, fg, tag) = match (rep.kind.as_str(), rep.equivalent, rep.match_tier.as_str()) {
+                    ("vacuum", true, _) => (tokens.bg_card_selected, tokens.status_ok, "Vacuum · regular core"),
+                    (_, true, "volterra" | "exact") => (
                         tokens.bg_card_selected,
                         tokens.status_ok,
-                        "EQUIVALENT (VOLTERRA CORE)",
+                        "Volterra core match",
                     ),
-                    (true, _) => (
+                    (_, true, "completion") => (
                         tokens.accent_soft,
                         tokens.accent_primary,
-                        "EQUIVALENT (COMPLETION / HEALED CORE)",
+                        "Healed core match",
                     ),
-                    (false, _) => (
+                    (_, true, _) => (tokens.bg_card_selected, tokens.status_ok, "Core match"),
+                    (_, false, _) => (
                         tokens.bg_card,
                         tokens.status_warn,
-                        "DISTINCT FROM SINGLE",
+                        "No core match in this scan",
                     ),
                 };
                 let (bg, fg, stroke_col) = if stale {

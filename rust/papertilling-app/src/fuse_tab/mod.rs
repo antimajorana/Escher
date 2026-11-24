@@ -13,11 +13,10 @@ mod viewport;
 mod tests;
 
 pub(crate) use choices::{choice_label, choice_short_label};
-use choices::{compute_slots_for_b, enumerate_choices, run_fuse_job, spec_from_choice};
+use choices::{compute_slots_for_b, enumerate_choices, run_fuse_job, sort_slots, spec_from_choice};
 use papertilling_core::defect::single_cache::SingleDefectCache;
 use papertilling_core::defect::single_crystal::{SingleEquivalenceBundle, SingleEquivalentCrystal};
 use papertilling_core::defect::surgery::DefectSpec;
-use papertilling_core::types::Cell2D;
 
 use crate::backend::{AppBackend, CatalogueItemUi};
 use crate::canvas2d::{Canvas2D, CanvasMarker, MarkerKind, Scene2D};
@@ -60,9 +59,9 @@ impl FusePreset {
 
     pub fn tooltip(self) -> &'static str {
         match self {
-            Self::DipoleToDislocation => "Opposite disclinations at adjacent Wyckoff centres fuse into an edge dislocation",
+            Self::DipoleToDislocation => "Compare an adjacent pair of opposite disclinations with single dislocation cores",
             Self::OppositeAnnihilate => "Opposite disclinations on the same Wyckoff class annihilate when brought together",
-            Self::DisclinationPlusDislocation => "Combining a disclination with a dislocation shifts its rotation centre class",
+            Self::DisclinationPlusDislocation => "Explore how a dislocation changes the combined rotation centre",
             Self::DislocationSum => "Two dislocations combine by adding their Burgers vectors",
         }
     }
@@ -106,7 +105,25 @@ pub struct FuseTabState {
     pub(crate) open_in_combine: Option<Vec<DefectSpec>>,
     pub(crate) needs_fit_both: bool,
     worker: LatestWorker<FuseJob, FuseBuildResult>,
-    in_flight: bool,
+}
+
+fn empty_combined(item: &CatalogueItemUi, info: &CombineLatticeInfo) -> CombineBuildOutput {
+    CombineBuildOutput {
+        lattice_key: (item.group.clone(), info.cell.clone()),
+        crystal: empty_crystal(),
+        elapsed_ms: 0.0,
+        applied_radius: info.r_auto_base,
+        charge_label: String::new(),
+        charge_detail: String::new(),
+        core_summary: String::new(),
+        local_cores: Vec::new(),
+        patch_centre: [0.0, 0.0],
+        applied_cuts: Vec::new(),
+        coalesced_count: 0,
+        note: String::new(),
+        preview: false,
+        refused: None,
+    }
 }
 
 impl FuseTabState {
@@ -115,7 +132,7 @@ impl FuseTabState {
         let choices = enumerate_choices(&info);
         let placeholder = Scene2D::CrystalPatch {
             crystal: empty_crystal(),
-            title: String::from("Equivalent single defect"),
+            title: String::from("Computing equivalence…"),
             note: String::new(),
         };
         let mut combined_inspectors = DefectInspectors::new();
@@ -123,27 +140,9 @@ impl FuseTabState {
         combined_inspectors.circuit.enabled = true;
         single_inspectors.circuit.enabled = true;
 
-        let empty_out = CombineBuildOutput {
-            lattice_key: (item.group.clone(), Cell2D { a1: [1.0, 0.0], a2: [0.0, 1.0], basis: vec![[0.0, 0.0]], bonds: Vec::new() }),
-            crystal: empty_crystal(),
-            elapsed_ms: 0.0,
-            applied_radius: info.r_auto_base,
-            charge_label: String::new(),
-            charge_detail: String::new(),
-            core_nodes: 0,
-            core_edges: 0,
-            core_summary: String::new(),
-            local_cores: Vec::new(),
-            patch_centre: [0.0, 0.0],
-            applied_cuts: Vec::new(),
-            coalesced_count: 0,
-            note: String::new(),
-            preview: false,
-            refused: None,
-        };
-
         let mut state = Self {
             manual_radius: info.r_auto_base.max(5.5),
+            last_combined: empty_combined(item, &info),
             info,
             choices,
             choice_a: 0,
@@ -161,19 +160,17 @@ impl FuseTabState {
             single_canvas: Canvas2D::new(placeholder),
             combined_inspectors,
             single_inspectors,
-            last_combined: empty_out,
             last_bundle: None,
             open_in_combine: None,
             needs_fit_both: true,
             worker: LatestWorker::spawn("fuse-compare", SingleDefectCache::default(), run_fuse_job),
-            in_flight: false,
         };
         state.select_default_preset_quiet();
         state
     }
 
     pub fn is_busy(&self) -> bool {
-        self.in_flight || self.worker.is_busy()
+        self.worker.is_busy()
     }
 
     pub(crate) fn current_specs(&self) -> [DefectSpec; 2] {
@@ -196,21 +193,19 @@ impl FuseTabState {
         self.manual_radius = self.info.r_auto_base.max(5.5);
         self.selected_candidate = 0;
         self.dragging_pin = None;
-        self.last_bundle = None;
+        self.last_combined = empty_combined(item, &self.info);
         self.combined_inspectors.clear_for_switch();
         self.single_inspectors.clear_for_switch();
         self.select_default_preset_quiet();
-        self.needs_fit_both = true;
         self.submit_build(item, true);
-        let _ = left_canvas;
+        self.sync_canvases(item, left_canvas, true);
     }
 
     pub fn activate_and_sync(&mut self, item: &CatalogueItemUi, left_canvas: &mut Canvas2D) {
         if self.last_bundle.is_none() && !self.is_busy() {
             self.submit_build(item, true);
-        } else {
-            self.sync_canvases(item, left_canvas, false);
         }
+        self.sync_canvases(item, left_canvas, false);
     }
 
     pub(crate) fn available_presets(&self) -> Vec<FusePreset> {
@@ -245,8 +240,30 @@ impl FuseTabState {
     pub(crate) fn default_pos_for_choice(&self, idx: usize) -> [f64; 2] {
         match self.choices.get(idx) {
             Some(FuseDefectChoice::Disclination { class_idx, .. }) => self.info.centres[*class_idx].point,
-            Some(FuseDefectChoice::Dislocation { disloc_idx, .. }) => self.info.dislocations[*disloc_idx].at,
+            Some(FuseDefectChoice::Dislocation { disloc_idx, member_idx, sign }) => {
+                let option = &self.info.dislocations[*disloc_idx];
+                let (m, n) = option.members[*member_idx];
+                let sign = i32::from(*sign);
+                let [bx, by] = crate::live_combine::burgers_from_mn(&self.info, m * sign, n * sign);
+                [option.at[0] + 0.5 * bx, option.at[1] + 0.5 * by]
+            }
             None => [0.0, 0.0],
+        }
+    }
+
+    fn swap_defects(&mut self) {
+        std::mem::swap(&mut self.choice_a, &mut self.choice_b);
+        std::mem::swap(&mut self.pos_a, &mut self.pos_b);
+        let old_anchor = self.pos_b;
+        self.refresh_slots_b();
+        if matches!(self.choices[self.choice_b], FuseDefectChoice::Dislocation { .. })
+            && (self.pos_b[0] - old_anchor[0]).hypot(self.pos_b[1] - old_anchor[1]) > 1e-4
+        {
+            // Dislocation positions are continuous, so preserve the swapped position even
+            // when it is between the preset half-cell steps.
+            self.pos_b = old_anchor;
+            self.slots_b.push(old_anchor);
+            sort_slots(&mut self.slots_b, self.pos_a);
         }
     }
 
@@ -283,7 +300,9 @@ impl FuseTabState {
         if reset_fit {
             self.needs_fit_both = true;
         }
-        self.in_flight = true;
+        if self.last_bundle.take().is_some() {
+            self.sync_single_canvas_only(item, false);
+        }
         self.worker.submit(FuseJob {
             item: item.clone(),
             info: self.info.clone(),
@@ -298,7 +317,6 @@ impl FuseTabState {
         self.worker.set_repaint_ctx(ctx);
         match self.worker.poll() {
             Some(Ok(res)) => {
-                self.in_flight = self.worker.is_busy();
                 self.last_combined = res.combined;
                 if let Ok(ref b) = res.bundle {
                     self.selected_candidate = b.default_index;
@@ -311,8 +329,10 @@ impl FuseTabState {
                 self.sync_canvases(item, left_canvas, fit);
             }
             Some(Err(err)) => {
-                self.in_flight = self.worker.is_busy();
+                self.last_combined = empty_combined(item, &self.info);
+                self.last_combined.charge_label = String::from("Charge unavailable");
                 self.last_bundle = Some(Err(err));
+                self.sync_canvases(item, left_canvas, false);
             }
             None => {}
         }
@@ -352,8 +372,7 @@ impl FuseTabState {
     }
 
     pub(crate) fn sync_canvases(&mut self, item: &CatalogueItemUi, left_canvas: &mut Canvas2D, reset_view: bool) {
-        self.combined_inspectors.circuit.enabled = self.show_burgers_loop && self.last_combined.refused.is_none();
-        self.single_inspectors.circuit.enabled = self.show_burgers_loop;
+        self.combined_inspectors.circuit.enabled = !self.is_busy() && self.last_combined.refused.is_none();
 
         let a_short = self
             .choices
@@ -363,8 +382,12 @@ impl FuseTabState {
             .choices
             .get(self.choice_b)
             .map_or_else(|| String::from("B"), |c| choice_short_label(&self.info, c));
-        let left_title = if self.last_combined.refused.is_some() {
-            format!("{} ({}) — {a_short} + {b_short} (refused)", item.label, item.group)
+        let left_title = if self.is_busy() {
+            String::from("Building crystal…")
+        } else if self.last_combined.refused.is_some() {
+            format!("{} ({}) — pristine reference", item.label, item.group)
+        } else if self.last_combined.crystal.pos.is_empty() {
+            String::from("Combined crystal unavailable")
         } else {
             format!("{} ({}) — {a_short} + {b_short}", item.label, item.group)
         };
@@ -381,14 +404,24 @@ impl FuseTabState {
         left_canvas.set_export_markers(&markers);
         self.combined_inspectors.refresh_circuit(&item.group, &self.info.cell, item.frame, &self.last_combined.crystal, &[]);
         self.combined_inspectors.sync_to_canvas(left_canvas, &self.last_combined.crystal, None);
+        if !self.show_burgers_loop {
+            left_canvas.set_circuit_overlay(None);
+        }
 
         self.sync_single_canvas_only(item, reset_view);
     }
 
     pub(crate) fn sync_single_canvas_only(&mut self, item: &CatalogueItemUi, reset_view: bool) {
-        self.single_inspectors.circuit.enabled = self.show_burgers_loop;
+        // Retain the circuit measurements for the inspector when the drawing is hidden.
+        self.single_inspectors.circuit.enabled = true;
         if let Some(cand) = self.active_single_candidate().cloned() {
-            let match_tag = if cand.is_match { " (★ matches combined core)" } else { " (core differs)" };
+            let match_tag = if cand.is_match {
+                " (★ matches combined core)"
+            } else if cand.kind == "vacuum" {
+                " (reference)"
+            } else {
+                " (core differs)"
+            };
             let right_title = format!("{}{match_tag}", cand.name);
             self.single_canvas.set_scene_with_title(
                 Scene2D::CrystalPatch {
@@ -399,16 +432,23 @@ impl FuseTabState {
                 Some(right_title),
                 reset_view,
             );
+            self.single_canvas.center_on_scene();
             self.single_inspectors.refresh_circuit(&item.group, &self.info.cell, item.frame, &cand.crystal, &[]);
             self.single_inspectors.sync_to_canvas(&mut self.single_canvas, &cand.crystal, None);
+            if !self.show_burgers_loop {
+                self.single_canvas.set_circuit_overlay(None);
+            }
         } else {
             let (title, note) = match &self.last_bundle {
-                Some(Ok(b)) => (format!("No single elementary defect for {}", b.report.charge.label), b.report.verdict.clone()),
+                Some(Ok(b)) if b.report.single.is_none() && b.report.kind != "vacuum" => {
+                    (format!("No single elementary defect for {}", b.report.charge.label), b.report.verdict.clone())
+                }
+                Some(Ok(b)) => (String::from("Candidate drawing unavailable"), b.report.verdict.clone()),
                 Some(Err(e)) => (String::from("Single-defect comparison unavailable"), e.clone()),
                 None => (String::from("Computing equivalence…"), String::new()),
             };
             self.single_canvas.set_scene(Scene2D::CrystalPatch { crystal: empty_crystal(), title, note }, reset_view);
-            self.single_canvas.set_circuit_overlay(None);
+            self.single_inspectors.clear_for_switch();
         }
     }
 }

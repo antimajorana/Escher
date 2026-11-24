@@ -53,7 +53,12 @@ impl PapertillingApp {
             NavTab::Surfaces if self.surfaces.is_building() => {
                 return refuse("Wait for the surface build before exporting the 3D PNG.");
             }
-            NavTab::Combine if self.combine.is_building() || self.combine.dragging || self.combine.view3d_dirty => {
+            NavTab::Combine
+                if self.combine.is_building()
+                    || self.combine.dragging
+                    || self.combine.cut_dragging
+                    || self.combine.view3d_dirty =>
+            {
                 return refuse("Finish moving pins and wait for the crystal build before exporting the 3D PNG.");
             }
             NavTab::Atlas if self.atlas.dirty => return refuse("Wait for the Atlas 3D scene to update before exporting the 3D PNG."),

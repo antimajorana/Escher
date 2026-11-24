@@ -20,7 +20,7 @@ import pytest  # noqa: E402
 import papertilling  # noqa: E402
 from papertilling.defects.build import build, graph_core, isomorphic_cores, lattice_data  # noqa: E402
 from papertilling.defects.config import dislocation_core_list, equivalent_single  # noqa: E402
-from papertilling.defects.cores import core_gallery, describe, plot_core_gallery  # noqa: E402
+from papertilling.defects.cores import config_entry, core_gallery, describe, plot_core_gallery  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "checks"))
 from drawing_check import crossings  # noqa: E402
@@ -42,6 +42,35 @@ def honeycomb_gallery():
     g = core_gallery(lat, lat.cell.a1, grid=2)
     print(f"# time honeycomb gallery {time.time() - t0:.1f} s")
     return lat, g
+
+
+def test_equivalence_gallery_uses_requested_radius():
+    conf = build("square", dict(kind="dislocation", b=(1, 0), at=(0.371, 0.413)), R=6, picture="raw")
+    with pytest.raises(ValueError, match="patch rim"):
+        conf.core_graph(2)
+    res = equivalent_single(conf, radius=0, grid=1, show=True)
+    fig = res["figure"]
+    assert "this configuration" in fig.axes[0].get_title()
+    assert any("Volterra core" in ax.get_title() for ax in fig.axes[1:])
+    plt.close(fig)
+
+
+def test_scan_reports_last_attempt_when_a_larger_patch_is_still_too_small():
+    _, scan = dislocation_core_list("square", (1, 0), R=5.5, radius=2, grid=1)
+    assert scan["skipped_rim"] > 0
+    assert scan["R"] == pytest.approx(5.5 * 1.4)
+
+
+def test_gallery_can_draw_a_cancelled_pair_without_core_sites():
+    at = (0.371, 0.413)
+    conf = build("square", dict(kind="dislocation", b=(1, 0), at=at),
+                 dict(kind="dislocation", b=(-1, 0), at=at), R=7, picture="raw")
+    entry = config_entry(conf)
+    assert not entry["core_sites"] and not entry["faces"]
+    fig = plot_core_gallery([], extra=[entry])
+    assert "no irregular sites" in fig.axes[0].get_title()
+    assert len(fig.axes[0].collections[0].get_segments()) > 0
+    plt.close(fig)
 
 
 def _degs(H):

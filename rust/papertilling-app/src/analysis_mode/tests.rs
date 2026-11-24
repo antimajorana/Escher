@@ -185,7 +185,7 @@ fn lattices_card(a: &PapertillingApp, v: LatticesView) -> (Realm, String) {
     match v {
         LatticesView::Plane2D => (Realm::Geometries, String::from("E² Euclidean plane")),
         LatticesView::ThreeDAndSubperiodic => (Realm::Groups, a.atlas.last_pristine_3d_subtab.label().to_string()),
-        LatticesView::NonEuclidean => (Realm::Geometries, String::from("H² hyperbolic tiling (Atlas)")),
+        LatticesView::NonEuclidean => (Realm::Geometries, String::from("H² & H³ hyperbolic atlas")),
         LatticesView::Manifolds => (Realm::Manifolds, capitalised(a.surfaces.target.label())),
         LatticesView::Flat3D | LatticesView::Curved2D | LatticesView::Honeycombs3D => {
             wb_card(a, v.workbench_view().expect("stage panel view"))

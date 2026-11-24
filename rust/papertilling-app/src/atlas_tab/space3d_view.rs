@@ -3,6 +3,7 @@
 //! the site readout for the Right Inspector.
 
 use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d, Net3dPatch, build_net_3d};
+use papertilling_core::space3d::screw::{ScrewPatch, build_screw_patch};
 
 use super::points3d_ui::CatalogueView;
 use super::space3d_geom::{NetFrame, coordination, net_frame, slab_mask, z_fractions};
@@ -15,6 +16,7 @@ use crate::theme::ThemeTokens;
 use crate::view3d::{View3dState, pick_nearest};
 
 type Mat4 = [[f32; 4]; 4];
+type ScrewKey = (u16, usize, i32);
 
 /// Pick radius in screen pixels (2D and 3D).
 pub const PICK_RADIUS_PX: f32 = 9.0;
@@ -31,6 +33,7 @@ pub struct Space3dView {
     /// A view option or the pick changed: the scenes need a refresh (without resetting the 2D view).
     pub changed: bool,
     net: Option<((CanonicalNet3d, LineDefect3d), Net3dPatch)>,
+    screw: Option<(ScrewKey, Result<ScrewPatch, String>)>,
     /// The grown points-catalogue entry drawn instead of the canonical net (C1 WP-U4; `points3d_ui`).
     pub(crate) catalogue: Option<CatalogueView>,
     /// The last catalogue refusal, shown under the entries.
@@ -50,6 +53,7 @@ impl Default for Space3dView {
             hovered: None,
             changed: false,
             net: None,
+            screw: None,
             catalogue: None,
             catalogue_error: None,
             depth_rot_used: None,
@@ -95,11 +99,58 @@ impl Space3dPanelState {
         (self.selected_net, self.effective_defect())
     }
 
+    fn screw_key(&self) -> Option<ScrewKey> {
+        if self.pristine_only || self.screw_periods == 0 {
+            return None;
+        }
+        let index = self.view.catalogue.as_ref().filter(|c| c.choice.sg == self.selected_sg)
+            .map_or(0, |c| c.choice.idx);
+        Some((self.selected_sg, index, self.screw_periods))
+    }
+
+    fn update_screw(&mut self) {
+        let wanted = self.screw_key();
+        if self.view.screw.as_ref().map(|(key, _)| *key) == wanted {
+            return;
+        }
+        self.view.screw = wanted.map(|(group, entry, periods)| {
+            ((group, entry, periods), build_screw_patch(group, entry, periods))
+        });
+        self.view.picked = None;
+        self.view.hovered = None;
+    }
+
+    fn screw_patch(&self) -> Option<&ScrewPatch> {
+        let key = self.screw_key()?;
+        let (current, patch) = self.view.screw.as_ref()?;
+        (*current == key).then_some(patch.as_ref().ok()).flatten()
+    }
+
+    pub(super) fn show_screw_readout(&self, ui: &mut egui::Ui) {
+        if self.screw_key().is_none() {
+            return;
+        }
+        if let Some(patch) = self.screw_patch() {
+            let [x, y, z] = patch.advance;
+            ui.strong("Screw dislocation");
+            ui.small(patch.net.name.as_str());
+            ui.small(format!("Counterclockwise chart advance ({x:+.4}, {y:+.4}, {z:+.4}) in Cartesian coordinates."));
+            ui.small(format!("{} rejoined seam bonds. Helical drawing without elastic relaxation.", patch.seam_bonds));
+        } else if let Some((_, Err(error))) = &self.view.screw {
+            ui.small(format!("Screw preview unavailable. {error}"));
+        }
+        ui.separator();
+    }
+
     /// The drawn net: the chosen catalogue entry of the selected group, else the current (net, defect) choice,
     /// rebuilt (and the pick cleared) when the choice changed.
     pub fn ensure_net(&mut self) -> &Net3dPatch {
         if self.view.catalogue.as_ref().is_some_and(|c| c.choice.sg != self.selected_sg) {
             self.set_catalogue(None);
+        }
+        self.update_screw();
+        if let Some((_, Ok(screw))) = &self.view.screw {
+            return &screw.net;
         }
         if let Some(c) = &self.view.catalogue {
             return &c.growth.patch;
@@ -114,6 +165,9 @@ impl Space3dPanelState {
     }
 
     pub fn frame(&self) -> NetFrame {
+        if let Some(screw) = self.screw_patch() {
+            return NetFrame { lat: screw.lattice, origin: [0.0; 3] };
+        }
         if let Some(c) = &self.view.catalogue {
             return NetFrame { lat: c.growth.lattice, origin: c.growth.origin };
         }
@@ -229,19 +283,21 @@ impl Space3dPanelState {
         let zf = z_fractions(&self.ensure_net().positions);
         let frame = self.frame();
         let (net_kind, defect) = self.net_key();
+        let screw_key = self.screw_key().filter(|_| self.screw_patch().is_some());
         let net = self.ensure_net();
         let Some(&p) = net.positions.get(i) else { return };
         let kind = net.site_kinds.get(i).copied().unwrap_or(0);
         let coord = coordination(net.positions.len(), &net.bonds)[i];
         let f = frame.fractional(p);
         let tag = if picked == Some(i) { "picked" } else { "hover" };
-        let species = match &self.view.catalogue {
-            Some(c) => c.orbit_label(kind),
-            None => species_label(net_kind, kind).to_string(),
+        let species = match (&self.view.catalogue, screw_key) {
+            (Some(c), _) => c.orbit_label(kind),
+            (None, Some(_)) => format!("orbit {}", usize::from(kind) + 1),
+            (None, None) => species_label(net_kind, kind).to_string(),
         };
         ui.colored_label(tokens.status_ok, format!("Site #{i} ({tag}) | species {kind}: {species}"));
         ui.small(format!("Cartesian: ({:+.4}, {:+.4}, {:+.4})", p[0], p[1], p[2]));
-        let nominal = if defect == LineDefect3d::None { "" } else { " (nominal: defect-warped)" };
+        let nominal = if defect != LineDefect3d::None || screw_key.is_some() { " (helical drawing)" } else { "" };
         ui.small(format!("Fractional: ({:.4}, {:.4}, {:.4}){nominal}", f[0], f[1], f[2]));
         ui.small(format!("Coordination: {coord} bonds | slab z = {:.3}", zf.get(i).copied().unwrap_or(0.0)));
         if let (Some(h), Some(pk)) = (hovered, picked)

@@ -157,6 +157,26 @@ fn combine_setup_is_kept_only_for_its_own_lattice() {
 }
 
 #[test]
+fn combine_session_preserves_an_explicitly_cleared_patch() {
+    let mut original = app();
+    original.switch_tab(NavTab::Combine);
+    let item = original.gallery.active_item().clone();
+    assert!(!original.combine.specs.is_empty(), "a new patch starts with a pair");
+    original.combine.clear_defects(&item, &original.backend, &mut original.canvas2d);
+
+    let json = original.capture_session().to_json_pretty().unwrap();
+    let saved = session_from(&json);
+    assert!(saved.combine.as_ref().unwrap().defects.is_empty());
+
+    let mut restored = app();
+    assert!(restored.apply_session(&saved, None).is_empty());
+    assert_eq!(restored.active_tab, NavTab::Combine);
+    assert!(restored.combine.specs.is_empty(), "restoring must keep the user's cleared patch");
+    restored.combine.wait_idle(&item, Some(&mut restored.canvas2d));
+    assert!(!restored.combine.last_build.crystal.edges.is_empty());
+}
+
+#[test]
 fn files_corrupt_empty_foreign_or_missing_restore_nothing_and_exit_save_respects_them() {
     let dir = crate::session::tests::TempDir::new();
     let path = dir.0.join(session::SESSION_FILENAME);

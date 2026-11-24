@@ -10,6 +10,7 @@ use crate::defect::combine_types::{CoreCandidateInfo, CoreGalleryEntry, Equivale
 use crate::defect::cone_builder::ConeBuilder;
 use crate::defect::core_gallery::add_chords;
 use crate::defect::core_graph::{LatticeCoreInfo, core_graph};
+use crate::defect::equivalence::inspect_crystal_cores;
 use crate::defect::single_cache::{SingleDefectCache, equivalent_single_cached};
 use crate::defect::surgery::{DefectSpec, build_point_defects_with_info_detailed};
 use crate::defect::volterra_patch::{build_volterra_dislocation, drawn_charged_faces};
@@ -54,6 +55,28 @@ fn measure_core(crystal: &BuiltCrystal, lat_info: &LatticeCoreInfo, radius: usiz
         .map_or((0, 0), |g| (g.node_count(), g.edge_count()))
 }
 
+fn restore_completion_chords(
+    full: &mut BuiltCrystal,
+    entry: &CoreGalleryEntry,
+    lat_info: &LatticeCoreInfo,
+) -> Option<()> {
+    if entry.chords.is_empty() {
+        return None;
+    }
+    let (ring, chords) = drawn_charged_faces(full).into_iter().find_map(|(ring, _)| {
+        let find_vertex = |index: usize| -> Option<usize> {
+            let &[x, y] = entry.crystal.pos.get(index)?;
+            ring.iter().copied().find(|&i| (full.pos[i][0] - x).hypot(full.pos[i][1] - y) < 1e-4)
+        };
+        let chords = entry.chords.iter().map(|&(u, v)| {
+            let (u, v) = (find_vertex(u)?, find_vertex(v)?);
+            (u != v).then_some((u, v))
+        }).collect::<Option<Vec<_>>>()?;
+        Some((ring, chords))
+    })?;
+    add_chords(full, &ring, &chords, lat_info).0.then_some(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_full_dislocation_candidate(
     lat_info: &LatticeCoreInfo,
@@ -68,41 +91,14 @@ fn build_full_dislocation_candidate(
     let core_pt = cand.core_point?;
     let r_eff = r_patch.max(4.5 * lat_info.scale + b[0].hypot(b[1]));
     let mut full = build_volterra_dislocation(lat_info, b, core_pt, cand.cut, r_eff).ok()?;
-
-    if let Some(entry) = gal
-        && !entry.chords.is_empty()
-    {
-        let charged = drawn_charged_faces(&full);
-        if let Some((ring, _)) = charged.first() {
-            let mut full_chords = Vec::with_capacity(entry.chords.len());
-            for &(u_c, v_c) in &entry.chords {
-                let pu = *entry.crystal.pos.get(u_c)?;
-                let pv = *entry.crystal.pos.get(v_c)?;
-                let find_v = |target: [f64; 2]| -> Option<usize> {
-                    ring.iter()
-                        .copied()
-                        .min_by(|&a, &b_idx| {
-                            let da = (full.pos[a][0] - target[0]).hypot(full.pos[a][1] - target[1]);
-                            let db = (full.pos[b_idx][0] - target[0]).hypot(full.pos[b_idx][1] - target[1]);
-                            da.total_cmp(&db)
-                        })
-                        .filter(|&idx| (full.pos[idx][0] - target[0]).hypot(full.pos[idx][1] - target[1]) < 1e-4)
-                };
-                if let (Some(uf), Some(vf)) = (find_v(pu), find_v(pv))
-                    && uf != vf
-                {
-                    full_chords.push((uf, vf));
-                }
-            }
-            if full_chords.len() == entry.chords.len() {
-                let _ = add_chords(&mut full, ring, &full_chords, lat_info);
-            }
-        }
+    let is_volterra = cand.volterra == Some(true);
+    if !is_volterra {
+        restore_completion_chords(&mut full, gal?, lat_info)?;
     }
 
     relax_if(&mut full, relaxed);
     let (core_nodes, core_edges) = measure_core(&full, lat_info, radius);
-    let kind = if cand.volterra.unwrap_or(false) {
+    let kind = if is_volterra {
         String::from("Volterra")
     } else {
         String::from("completion")
@@ -163,7 +159,7 @@ pub fn build_single_equivalence_bundle(
             candidates.push(SingleEquivalentCrystal {
                 name: String::from("Perfect lattice (vacuum)"),
                 kind: String::from("vacuum"),
-                is_match: report.equivalent && delta_v.unwrap_or(0) == 0,
+                is_match: report.equivalent && delta_v == Some(0),
                 crystal: disk,
                 core_nodes: 0,
                 core_edges: 0,
@@ -182,6 +178,8 @@ pub fn build_single_equivalence_bundle(
                 {
                     relax_if(&mut cone, relaxed);
                     let (cn, ce) = measure_core(&cone, &lat_info, eff_radius);
+                    let mut rings: Vec<usize> = inspect_crystal_cores(&cone).into_iter().filter_map(|c| c.ring).collect();
+                    rings.sort_unstable();
                     let cls = report.charge.centre_class.as_deref().unwrap_or("?");
                     candidates.push(SingleEquivalentCrystal {
                         name: format!("Single D({cls}, {angle_deg:+.0}°)"),
@@ -190,7 +188,7 @@ pub fn build_single_equivalence_bundle(
                         crystal: cone,
                         core_nodes: cn,
                         core_edges: ce,
-                        rings: Vec::new(),
+                        rings,
                         under_count: 0,
                         added_bonds: 0,
                         description: format!("Elementary disclination {angle_deg:+.0}° at Wyckoff {cls}"),
@@ -228,6 +226,7 @@ pub fn build_single_equivalence_bundle(
 mod tests {
     use super::*;
     use crate::defect::surgery::build_point_defects;
+    use crate::defect::volterra_patch::drawn_faces;
     use crate::types::Bond2D;
 
     fn square_cell() -> Cell2D {
@@ -298,6 +297,15 @@ mod tests {
         assert!(best.is_match);
         assert_eq!(best.kind, "completion");
         assert!(best.rings.contains(&5) && best.rings.contains(&7), "rings={:?}", best.rings);
+        for candidate in &bundle.candidates {
+            let charge = crate::defect::charge::total_charge(&candidate.crystal).unwrap();
+            assert_eq!(charge.kind, "dislocation", "{}", candidate.name);
+            assert_eq!(charge.frank_deg, 0.0);
+            let [x, y] = charge.burgers.unwrap();
+            assert!((x.hypot(y) - 1.0).abs() < 1e-8, "{} has Burgers vector {x}, {y}", candidate.name);
+        }
+        let rendered_faces: Vec<usize> = drawn_faces(&best.crystal).iter().map(Vec::len).collect();
+        assert!(rendered_faces.contains(&5) && rendered_faces.contains(&7));
         assert!(best.crystal.pos.len() > 120, "expected full-patch healed 5-7 crystal, got {}", best.crystal.pos.len());
     }
 }

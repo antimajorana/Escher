@@ -3,6 +3,7 @@
 use papertilling_core::bieberbach::BieberbachSummary;
 use papertilling_core::space3d::{analyze_layer_group, list_layer_groups};
 
+use super::crystal_charge_ui::{CrystalChargeUi, CrystalGroup};
 use crate::mesh3d::atlas_mesh::mesh_from_net3d;
 use crate::mesh3d::GpuMeshData;
 use crate::scene2d::{CirclePrim, LinePrim, Scene2D, ScenePrimitives, compute_bbox};
@@ -15,6 +16,7 @@ pub struct LayersPanelState {
     /// In-plane growth and stacking (C1 WP-U4, `layers_growth`).
     pub growth: super::layers_growth::LayerGrowthState,
     cached_num: u8,
+    charges: CrystalChargeUi,
 }
 
 impl Default for LayersPanelState {
@@ -25,6 +27,7 @@ impl Default for LayersPanelState {
             summary: analyze_layer_group(1).ok(),
             growth: super::layers_growth::LayerGrowthState::default(),
             cached_num: 1,
+            charges: CrystalChargeUi::default(),
         }
     }
 }
@@ -37,9 +40,19 @@ impl LayersPanelState {
         }
     }
 
-    pub fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
+    pub fn show_controls(&mut self, ui: &mut egui::Ui, pristine_only: bool) -> bool {
         let mut dirty = false;
         self.ensure_cached();
+        if !pristine_only {
+            ui.horizontal_wrapped(|ui| {
+                for (number, label) in [(4, "p11m mirror"), (5, "p11a glide")] {
+                    if ui.small_button(label).clicked() {
+                        self.selected_num = number;
+                        dirty = true;
+                    }
+                }
+            });
+        }
         ui.horizontal(|ui| {
             ui.small("Filter (80 Layer Groups):");
             ui.add(egui::TextEdit::singleline(&mut self.filter).desired_width(130.0));
@@ -66,8 +79,12 @@ impl LayersPanelState {
         dirty
     }
 
-    pub fn show_inspector(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+    pub fn show_inspector(&mut self, ui: &mut egui::Ui, tokens: &ThemeTokens, pristine_only: bool) {
         self.ensure_cached();
+        if !pristine_only {
+            self.charges.show(ui, CrystalGroup::Layer(self.selected_num));
+            ui.separator();
+        }
         ui.strong("Layer Group Cohomology (ITE Vol. E)");
         if let Some(s) = &self.summary {
             let (st, col) = if s.is_split {

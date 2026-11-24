@@ -186,7 +186,7 @@ fn centre_and_radius_from_validated(
     validate_extent(lat_info, ctr, r)
 }
 
-fn validate_extent(lat_info: &LatticeCoreInfo, ctr: [f64; 2], r: f64) -> Result<([f64; 2], f64), String> {
+pub(crate) fn validate_extent(lat_info: &LatticeCoreInfo, ctr: [f64; 2], r: f64) -> Result<([f64; 2], f64), String> {
     let fc = mat2_vec(lat_info.lat.a_inv, ctr);
     let cell = &lat_info.lat.cell;
     let h = (cell.a1[0] * cell.a2[1] - cell.a1[1] * cell.a2[0]).abs()
@@ -447,7 +447,7 @@ pub(crate) fn build_point_defects_with_info_detailed(
             for &cut in &cut_lists[idx] {
                 let snap = builder.snapshot();
                 match apply_one_step(&mut builder, d, cut) {
-                    Ok(()) => { last_err = None; chosen = Some(cut); break; }
+                    Ok(applied) => { last_err = None; chosen = Some(applied); break; }
                     Err(e) => { builder.restore(snap); last_err = Some(e); }
                 }
             }
@@ -511,8 +511,13 @@ fn reorder_applied_cuts(eff: &[NormSpec], order: &[usize], ordered_cuts: &[[f64;
     eff.iter().zip(cuts).map(|(d, c)| make_applied_cut(d, c)).collect()
 }
 
-fn apply_one_step(builder: &mut ConeBuilder, d: &NormSpec, cut: [f64; 2]) -> Result<(), String> {
-    if d.is_disloc { builder.add_dislocation(d.b, d.at, Some(cut)) } else { builder.add_disclination(d.angle_deg, d.at, Some(cut)) }
+fn apply_one_step(builder: &mut ConeBuilder, d: &NormSpec, cut: [f64; 2]) -> Result<[f64; 2], String> {
+    if d.is_disloc {
+        builder.add_dislocation(d.b, d.at, Some(cut))?;
+        Ok(cut)
+    } else {
+        builder.add_disclination(d.angle_deg, d.at, cut)
+    }
 }
 
 fn make_applied_cut(d: &NormSpec, cut: [f64; 2]) -> AppliedCut {
@@ -521,7 +526,7 @@ fn make_applied_cut(d: &NormSpec, cut: [f64; 2]) -> AppliedCut {
     let origin = if d.is_disloc { [d.at[0] + 0.5 * d.b[0], d.at[1] + 0.5 * d.b[1]] } else { d.at };
     AppliedCut {
         origin, dir, strip_end: d.is_disloc.then(|| [d.at[0] + d.b[0], d.at[1] + d.b[1]]),
-        is_insertion: d.is_disloc && cross2(dir, d.b) > 0.0, is_half_wall: false,
+        is_insertion: d.angle_deg < 0.0 || (d.is_disloc && cross2(dir, d.b) > 0.0), is_half_wall: false,
     }
 }
 
@@ -558,8 +563,8 @@ fn search_cuts_dfs(
         }
         *budget -= 1;
         let snap = builder.snapshot();
-        if apply_one_step(builder, &eff[idx], cut).is_ok() {
-            chosen.push(cut);
+        if let Ok(applied) = apply_one_step(builder, &eff[idx], cut) {
+            chosen.push(applied);
             if search_cuts_dfs(builder, eff, order, cut_lists, pos + 1, chosen, budget) {
                 return true;
             }

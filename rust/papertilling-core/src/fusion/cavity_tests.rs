@@ -48,7 +48,7 @@ fn sorted(mut xs: Vec<usize>) -> Vec<usize> {
 fn adjacent_corner_f90_v2m90_extracts_d1b_m90_far_field_cavity_and_enumerates_cores() {
     let cell = square_cell();
     // Adjacent face centre (0.5, 0.5) with +90 deg and site (0, 0) with -180 deg (= V^2_{-90}):
-    // Algebraic holonomy R((0,0), -180) * R((0.5,0.5), +90) = R((-0.5, 0.5), -90), class 1b (-90 deg).
+    // Algebraic holonomy R((0.5,0.5), +90) * R((0,0), -180) = R((0.5, -0.5), -90), class 1b (-90 deg).
     let specs = [
         DefectSpec::disclination(90.0, [0.5, 0.5]),
         DefectSpec::disclination(-180.0, [0.0, 0.0]),
@@ -81,6 +81,38 @@ fn adjacent_corner_f90_v2m90_extracts_d1b_m90_far_field_cavity_and_enumerates_co
     // star core (V_inner = 1, 5 edges -> Euler gives 5 faces, each a pentagon {5,5,5,5,5}) must be present!
     assert!(en.cores.iter().any(|c| c.inner_verts == 0 && sorted(c.census.face_sides.clone()) == vec![4, 4, 4, 4, 4, 5]));
     assert!(en.cores.iter().any(|c| c.inner_verts == 1 && sorted(c.census.face_sides.clone()) == vec![5, 5, 5, 5, 5]));
+}
+
+#[test]
+fn noncommuting_cavity_specs_use_the_ordered_combine_charge() {
+    let cell = square_cell();
+    let specs = [
+        DefectSpec::disclination(90.0, [0.0, 0.0]),
+        DefectSpec::disclination(-90.0, [0.5, 0.5]),
+        DefectSpec::dislocation([1.0, 0.0], Some([0.371, 0.413])),
+    ];
+    // The ordered rotation product translates by (-1, 0). The final dislocation contributes
+    // another (-1, 0), so the far-field Burgers vector has length 2. Reversing the order would
+    // give a translation by (-1, 1) and produce a different host.
+    let ext = extract_defect_cavity("p4m", &cell, Frame2D::default(), &specs, None, 0)
+        .expect("far-field dislocation of length two has a cavity");
+    assert!(ext.algebraic_charge.contains("|b| = 2.0000"), "{}", ext.algebraic_charge);
+    assert!(ext.title.contains("|b| = 2.0000"), "{}", ext.title);
+    assert_eq!(
+        Some(ext.algebraic_charge.clone()),
+        crate::defect::combinations::algebraic_specs_charge_label("p4m", &cell, Frame2D::default(), &specs),
+    );
+
+    let crystal = build_point_defects(&cell, &specs, None, None).expect("Volterra configuration builds");
+    let measured = crate::defect::charge::total_charge(&crystal).unwrap();
+    // The outer walk visits the cuts in a different order, giving the diagonal translation.
+    let [bx, by] = measured.burgers.unwrap();
+    assert!((bx.abs() - 1.0).abs() < 1e-6 && (by.abs() - 1.0).abs() < 1e-6);
+    let built = extract_defect_cavity("p4m", &cell, Frame2D::default(), &specs, Some(&crystal), 0)
+        .expect("built configuration has a cavity");
+    assert!(built.title.contains("|b| = 1.4142"), "{}", built.title);
+    assert_eq!(built.algebraic_charge, ext.algebraic_charge);
+    assert!(built.note.contains("different charges"), "{}", built.note);
 }
 
 #[test]
@@ -205,4 +237,12 @@ fn non_buildable_far_field_charges_are_honestly_refused() {
     let err_360 = extract_defect_cavity("p4m", &cell, Frame2D::default(), &specs_360, None, 0)
         .expect_err("+360 deg whole turn must be refused when no crystal is provided");
     assert!(err_360.contains("cannot construct a single-defect far-field boundary"), "{err_360}");
+}
+
+#[test]
+fn vacuum_far_field_cavity_rejects_unrepresentable_lattice_coordinates() {
+    let at = Some([1e30, 0.0]);
+    let specs = [DefectSpec::dislocation([1.0, 0.0], at), DefectSpec::dislocation([-1.0, 0.0], at)];
+    let err = extract_defect_cavity("p4m", &square_cell(), Frame2D::default(), &specs, None, 0).unwrap_err();
+    assert!(err.contains("patch extent exceeds supported finite lattice indices"), "{err}");
 }

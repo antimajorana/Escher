@@ -100,6 +100,7 @@ pub struct PapertillingApp {
     pub(crate) left_rail_width: f32,
     pub(crate) right_inspector_open: bool,
     pub(crate) right_inspector_width: f32,
+    pub(crate) compact_panel: crate::ui::CompactPanel,
     pub(crate) viewport_split_ratio: f32,
     #[cfg(test)]
     pub(crate) test_rects: TestLayoutRects,
@@ -196,6 +197,7 @@ impl PapertillingApp {
             left_rail_width: 300.0,
             right_inspector_open: true,
             right_inspector_width: 320.0,
+            compact_panel: Default::default(),
             viewport_split_ratio: 0.5,
             #[cfg(test)]
             test_rects: TestLayoutRects::default(),
@@ -239,6 +241,7 @@ impl PapertillingApp {
         }
         self.show_hud_bar(ui);
         self.show_status_bar(ui);
+        self.show_compact_panel_switcher(ui);
         self.show_left_rail(ui);
         self.show_right_inspector(ui);
         self.show_viewport_pane(ui);

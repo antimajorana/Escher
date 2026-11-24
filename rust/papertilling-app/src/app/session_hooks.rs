@@ -116,9 +116,7 @@ impl PapertillingApp {
             .filter(|cfg| combine_cfg_matches(cfg, active))
             .cloned()
             .or_else(|| {
-                (item_key(active) == self.combine_seen
-                    && !self.combine.specs.is_empty()
-                    && !self.combine.is_initializing())
+                (item_key(active) == self.combine_seen && !self.combine.is_initializing())
                 .then(|| {
                     let mut cfg = self.combine.to_notebook_json(active);
                     cfg.summary = None;

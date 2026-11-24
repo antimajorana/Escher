@@ -31,7 +31,7 @@ pub(crate) mod s2_defects;
 mod s3_detect;
 mod s4_flat3d;
 mod s5_curved2d;
-mod s6_honeycombs;
+pub(crate) mod s6_honeycombs;
 mod s7_fusion;
 pub(crate) use s7_fusion::CavityRequest;
 pub(crate) mod scene_helpers;

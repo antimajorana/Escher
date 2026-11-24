@@ -138,7 +138,7 @@ impl DefectsView {
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue2D => "Catalogue (2D)",
-            Self::AtlasDefects => "0D–1D & H² Defects",
+            Self::AtlasDefects => "Group defect atlas",
             Self::CombineAndFuse => "Combine, Fuse & Move",
             Self::FuseAndCompare => "Fuse & Equivalence",
             Self::PointAndBoundary => "Point, Stone-Wales & GB",
@@ -191,7 +191,7 @@ impl PapertillingApp {
 
     pub(crate) fn atlas_offered_tabs(&self) -> &'static [AtlasSubTab] {
         match (self.active_mode, self.lattices_view) {
-            (AppMode::Lattices, LatticesView::NonEuclidean) => &[AtlasSubTab::HyperbolicH2],
+            (AppMode::Lattices, LatticesView::NonEuclidean) => &AtlasTabState::HYPERBOLIC_SUBTABS,
             (AppMode::Lattices, _) => &AtlasTabState::PRISTINE_3D_SUBTABS,
             _ => &AtlasTabState::DEFECT_SUBTABS,
         }
@@ -221,17 +221,15 @@ impl PapertillingApp {
         match view {
             LatticesView::ThreeDAndSubperiodic => {
                 self.atlas.set_pristine_only(true);
-                if self.atlas.sub_tab == AtlasSubTab::HyperbolicH2 {
+                if self.atlas.sub_tab.is_hyperbolic() || prev_mode == AppMode::Defects {
                     self.atlas.sub_tab = self.atlas.last_pristine_3d_subtab;
-                    self.atlas.dirty = true;
-                } else if view_changed {
-                    self.atlas.dirty = true;
                 }
+                self.atlas.dirty |= view_changed;
             }
             LatticesView::NonEuclidean => {
                 self.atlas.set_pristine_only(true);
-                if self.atlas.sub_tab != AtlasSubTab::HyperbolicH2 || view_changed {
-                    self.atlas.sub_tab = AtlasSubTab::HyperbolicH2;
+                if !self.atlas.sub_tab.is_hyperbolic() || view_changed {
+                    self.atlas.sub_tab = self.atlas.last_hyperbolic_subtab;
                     self.atlas.dirty = true;
                 }
             }
@@ -282,7 +280,7 @@ impl PapertillingApp {
             },
             NavTab::Atlas => {
                 if self.atlas.pristine_only {
-                    let view = if self.atlas.sub_tab == AtlasSubTab::HyperbolicH2 {
+                    let view = if self.atlas.sub_tab.is_hyperbolic() {
                         LatticesView::NonEuclidean
                     } else {
                         LatticesView::ThreeDAndSubperiodic

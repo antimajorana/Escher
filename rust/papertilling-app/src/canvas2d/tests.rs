@@ -366,6 +366,27 @@ fn studio_ring_ink_applies_to_crystal_patches_only_and_paper_is_unchanged() {
     assert_eq!(render::scene_label_color(&vec_scene, polys, &lbl, &ThemeTokens::studio()), to_color32(lbl.color));
 }
 
+#[test]
+fn concave_core_fill_stays_inside_its_outline() {
+    use crate::scene2d::polygon::point_in_polygon;
+
+    // Two 3 × 1 arms overlap in one square. The missing quadrant used to be painted by the fan.
+    let mut outline = [[0.0, 0.0], [3.0, 0.0], [3.0, 1.0], [1.0, 1.0], [1.0, 3.0], [0.0, 3.0]];
+    for _ in 0..2 {
+        let points: Vec<_> = outline.iter().map(|&[x, y]| egui::pos2(x, y)).collect();
+        let mesh = render::concave_fill_mesh(&points, egui::Color32::WHITE);
+        let mut area = 0.0;
+        for t in mesh.indices.chunks_exact(3) {
+            let (a, b, c) = (mesh.vertices[t[0] as usize].pos, mesh.vertices[t[1] as usize].pos, mesh.vertices[t[2] as usize].pos);
+            let center = [(a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0];
+            assert!(point_in_polygon(center, &outline), "triangle center {center:?} is outside the ring");
+            area += ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs() / 2.0;
+        }
+        assert!((area - 5.0).abs() < 1e-6, "expected the area of both arms, got {area}");
+        outline.reverse();
+    }
+}
+
 fn empty_prims() -> crate::scene2d::ScenePrimitives {
     crate::scene2d::ScenePrimitives {
         polygons: Vec::new(),
@@ -395,6 +416,6 @@ fn unit_cell_labels_sit_outside_the_cell_on_outward_normals() {
     let (h1, h2) = ([1.0_f32, 0.0], [-0.5_f32, 0.866_025_4]);
     let cell = [[0.0, 0.0], h1, [h1[0] + h2[0], h1[1] + h2[1]], h2];
     for p in [edge_label_pos(h1, h2), edge_label_pos(h2, h1)] {
-        assert!(!render::point_in_polygon(p, &cell), "{p:?} must lie outside the unit cell");
+        assert!(!crate::scene2d::polygon::point_in_polygon(p, &cell), "{p:?} must lie outside the unit cell");
     }
 }

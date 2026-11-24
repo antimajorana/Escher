@@ -173,6 +173,11 @@ class LatticeData:
         self.perfect_degree = {s: len(L.rule[s]) for s in L.rule}
 
 
+def _cell_geometry_key(cell: UnitCell) -> tuple:
+    return (tuple(np.round(cell.A, 9).flat), tuple(np.round(cell.basis, 9).flat),
+            tuple(sorted(tuple(b[:4]) for b in cell.bonds)))
+
+
 def lattice_data(lattice, fast: bool | None = None) -> LatticeData:
     """UnitCell, legacy Family, recipe dict, catalogue name, or LatticeData -> cached LatticeData."""
     if isinstance(lattice, LatticeData):
@@ -188,9 +193,9 @@ def lattice_data(lattice, fast: bool | None = None) -> LatticeData:
         cell = lattice.cell()
     else:
         raise TypeError("lattice must be a UnitCell, a Family, a recipe dict or a catalogue name")
-    key = (_fast.enabled(fast), np.round(cell.A, 9).tobytes(), np.round(np.asarray(cell.basis, float), 9).tobytes(),
-           tuple(sorted(tuple(b[:4]) for b in cell.bonds)))
-    return _CACHE[key] if key in _CACHE else _CACHE.setdefault(key, LatticeData(cell, fast=key[0]))
+    use_fast = _fast.enabled(fast)
+    key = (use_fast, _cell_geometry_key(cell))
+    return _CACHE[key] if key in _CACHE else _CACHE.setdefault(key, LatticeData(cell, fast=use_fast))
 
 
 # ==============================================================================================
@@ -502,9 +507,12 @@ class Configuration:
                    frames_consistent=_fast.check_frames(d) == 0, total_frank=_fast.total_frank(d) if faces else None,
                    requested_frank=self.report["expected_frank"], charge=q["label"], single=q["single"], cores=self.cores())
         if show:
-            print(f"V = {out['V']}, E = {out['E']}, F = {out['F']} (with the outside): V - E + F = {out['euler']}; "
-                  f"frames consistent: {out['frames_consistent']}")
-            print(f"total Frank angle {out['total_frank']:+.3f} deg (requested sum {out['requested_frank']:+g})")
+            counts = f"V = {out['V']}, E = {out['E']}"
+            if faces:
+                counts += f", F = {out['F']} (with the outside): V - E + F = {out['euler']}"
+            print(f"{counts}; frames consistent: {out['frames_consistent']}")
+            frank = f"{out['total_frank']:+.3f} deg" if faces else "unavailable from planar faces"
+            print(f"total Frank angle {frank} (requested sum {out['requested_frank']:+g} deg)")
             print(f"total charge: {q['label']}" + (f"; equals the single defect {_fmt(q['single'])}" if q["single"] else ""))
             for c in out["cores"]:
                 print(f"  core: {c['label']}; coordination of its sites {c['coordination']}")

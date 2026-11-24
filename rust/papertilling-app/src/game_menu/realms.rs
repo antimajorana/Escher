@@ -256,7 +256,7 @@ impl PapertillingApp {
         match realm {
             Realm::Geometries => {
                 out.push(Card::new(CardId::Plane2D, "E² Euclidean plane"));
-                out.push(Card::new(CardId::HyperbolicAtlas, "H² hyperbolic tiling (Atlas)"));
+                out.push(Card::new(CardId::HyperbolicAtlas, "H² & H³ hyperbolic atlas"));
                 out.extend(self.wb_cards(WorkbenchView::S5Curved2d, 0..=2));
                 out.extend(self.wb_cards(WorkbenchView::S6Honeycombs, 0..=3));
             }
@@ -285,8 +285,7 @@ impl PapertillingApp {
                     for s in DefectSubTab::ALL {
                         out.push(Card::new(CardId::DefectCatalogue(s), s.label()));
                     }
-                    // C1: the 3D line defects are hidden until a real cut-and-reglue exists
-                    for s in AtlasTabState::DEFECT_SUBTABS.into_iter().filter(|&s| s != AtlasSubTab::SpaceGroups3D) {
+                    for s in AtlasTabState::DEFECT_SUBTABS {
                         out.push(Card::new(CardId::AtlasDefects(s), s.defect_label()));
                     }
                 }

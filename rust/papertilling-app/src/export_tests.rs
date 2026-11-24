@@ -115,6 +115,53 @@ fn px(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
     [img[i], img[i + 1], img[i + 2], img[i + 3]]
 }
 
+#[test]
+fn canvas_exports_visible_branch_cuts_and_insertion_strips() {
+    use crate::canvas2d::{Canvas2D, CanvasCutRay};
+
+    let mut canvas = Canvas2D::new(Scene2D::VectorScene {
+        primitives: ScenePrimitives { bbox: ([-1.0; 2], [1.0; 2]), ..Default::default() },
+    });
+    let dir = TempDir::new("branch-cuts");
+    let svg_path = dir.0.join("cuts.svg");
+    let png_path = dir.0.join("cuts.png");
+    canvas.set_cut_rays(&[
+        CanvasCutRay {
+            origin: [0.0, 0.0],
+            end: [3.0, 0.0],
+            strip: Some(([0.0, -0.5], [0.0, 0.5])),
+            is_insertion: true,
+            is_half_wall: false,
+            spec_index: Some(0),
+        },
+        CanvasCutRay {
+            origin: [1.0, 0.0],
+            end: [1.0, 1.0],
+            strip: None,
+            is_insertion: false,
+            is_half_wall: true,
+            spec_index: Some(1),
+        },
+    ]);
+    canvas.export_to_path(&svg_path, 1).unwrap();
+    let svg = check_svg_file(&svg_path, SVG_SIZE, SVG_SIZE);
+    // The branch tip at x=3 extends the plot bounds and fits at the right margin.
+    let ray = svg.lines().find(|line| line.contains("stroke-dasharray")).unwrap();
+    assert!(ray.contains("x2=\"928.00\""), "{ray}");
+    assert!(svg.contains("stroke-width=\"3.00\""), "the insertion segment is solid");
+    assert!(svg.contains("stroke-width=\"2.80\""), "the half-wall is drawn separately");
+
+    canvas.export_to_path(&png_path, 1).unwrap();
+    let (w, _, data) = decode_png(&png_path);
+    // At 1x the strip runs through (272, 440). Its teal tint must be painted over the background.
+    let [r, g, b, _] = px(&data, w, 272, 440);
+    assert!(r < 100 && g > r && b > r, "expected teal insertion strip, got {r}, {g}, {b}");
+
+    canvas.set_cut_rays(&[]);
+    canvas.export_to_path(&svg_path, 1).unwrap();
+    assert!(!std::fs::read_to_string(&svg_path).unwrap().contains("<line "));
+}
+
 /// Every extension case, read back. Returns the PNG pixels.
 fn export_all_ways(scene: &Scene2D, markers: &[CanvasMarker], dir: &Path, stem: &str) -> Vec<u8> {
     for name in [format!("{stem}.svg"), format!("{stem}.SVG")] {

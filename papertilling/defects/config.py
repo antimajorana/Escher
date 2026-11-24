@@ -23,7 +23,7 @@ from .. import _rust
 from ..legacy import fusion_framework as ff
 from . import fast as _fast
 from .build import (Configuration, build, graph_core, isomorphic_cores, lattice_data, patch_rim, same_charge,
-                    _norm)
+                    _cell_geometry_key, _norm)
 
 
 def _iso_cores(G1: nx.Graph, G2: nx.Graph, fast: bool | None = None) -> bool:
@@ -102,7 +102,7 @@ def dislocation_core_list(lattice, b, radius: int = 2, grid: int = 3, max_candid
                             rings=f["rings"], under=f["under"], added=f["added"], lattice_bonds=f["lattice_bonds"],
                             reconstruction_bonds=f["reconstruction_bonds"], bipartite=nx.is_bipartite(H), graph=H,
                             core_point=f["core_point"], cut=f["cut"]))
-        if skipped == 0:
+        if skipped == 0 or attempt == 1:
             break
         R *= 1.4
     info = dict(grid=grid, R=R, builds=notes["builds"], anomalies=notes["anomalies"], capped=notes["capped"],
@@ -234,7 +234,7 @@ def _show_gallery(config: Configuration, res: dict, radius: int):
 
 
 def _same_lattice(c1: Configuration, c2: Configuration):
-    if c1.lattice is not c2.lattice:
+    if c1.lattice is not c2.lattice and _cell_geometry_key(c1.lattice.cell) != _cell_geometry_key(c2.lattice.cell):
         raise ValueError("the two configurations are on different lattices")
 
 
@@ -351,6 +351,9 @@ def config_to_dict(config: Configuration, *, lattice=None, label: str = "", grid
         "grid": int(grid),
         "radius": int(radius),
     }
+    centre = config.report.get("centre")
+    if centre is not None and not np.array_equal(centre, np.mean([s["at"] for s in config.specs], axis=0)):
+        opts["centre"] = np.asarray(centre, float).tolist()
     out: dict = {
         "format": "papertilling.config.v1",
         "lattice_label": lbl,
@@ -385,7 +388,7 @@ def save_config(config: Configuration, path, **kw) -> Path:
 
 def load_config(source, *, picture: str | None = None, R: float | None = None,
                 fast: bool | None = None) -> Configuration:
-    """Rebuild a `Configuration` from a `.json` file path, JSON string, or `NotebookConfigJson` dict."""
+    """Rebuild a configuration from a JSON path, string, or dict, restoring a saved patch centre when present."""
     if isinstance(source, dict):
         data = source
     elif isinstance(source, Path):
@@ -406,10 +409,10 @@ def load_config(source, *, picture: str | None = None, R: float | None = None,
     specs = []
     for raw in data["defects"]:
         sp = dict(raw)
-        if sp.get("kind") == "disclination" and "angle" not in sp and "angle_deg" in sp:
+        if sp.get("kind") in ("disclination", "rotation") and "angle" not in sp and "angle_deg" in sp:
             sp["angle"] = sp.pop("angle_deg")
         specs.append(sp)
     opts = data.get("options") or {}
     r_use = R if R is not None else opts.get("r_patch")
     pic_use = picture if picture is not None else opts.get("picture", "relaxed")
-    return build(fam.cell(), *specs, R=r_use, picture=pic_use, fast=fast)
+    return build(fam.cell(), *specs, R=r_use, picture=pic_use, centre=opts.get("centre"), fast=fast)

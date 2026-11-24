@@ -139,7 +139,7 @@ pub fn sheet_color_legend(
         }
         Sheet3dColorMode::GaussianCurvature => {
             let sc = SheetColorScales::new(crystal, sheet, None);
-            legend("Gaussian curvature Ω_v (rad)", -sc.omega_span, sc.omega_span, Legend3dMap::Diverging)
+            legend("Angle deficit Ω_v (rad)", -sc.omega_span, sc.omega_span, Legend3dMap::Diverging)
         }
         Sheet3dColorMode::HeightZ => {
             let sc = SheetColorScales::new(crystal, sheet, None);

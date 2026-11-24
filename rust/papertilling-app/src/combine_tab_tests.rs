@@ -275,7 +275,8 @@ fn shift_drag_disclination_annihilates_pair_and_undo_restores() {
 
     assert!(st.move_pin_with_mods(1, [0.05, 0.05], true, square, &backend, &mut canvas));
     let rx = canvas.kinematic_overlay().reaction.as_ref().expect("reaction preview arrow");
-    assert_eq!(rx.to, [0.0, 0.0]);
+    assert_eq!(st.pending_disc_step.unwrap().to, [0.0, 0.0]);
+    assert_eq!(rx.to, st.build_markers()[0].pos);
     assert!(rx.valid);
 
     st.finish_drag_kinematics(square, Some(&mut canvas));
@@ -306,6 +307,12 @@ fn glide_dislocation_back_onto_disclination_absorbs_and_shifts_centre() {
     st.wait_idle(square, Some(&mut canvas));
     assert_eq!(st.specs.len(), 3);
 
+    // A fixed translation of the displayed patch gives a known canvas target for the preview.
+    let crystal = &mut st.last_build.crystal;
+    for (pos, reference) in crystal.pos.iter_mut().zip(&crystal.ref_pos) {
+        *pos = [reference[0] + 4.0, reference[1] - 2.0];
+    }
+
     // Glide emitted dislocation (pin 2) onto disclination #2 at (0.5, 0.5) along its ΔN=0 glide rail.
     let DefectSpec::Dislocation { b, .. } = st.specs[2] else {
         panic!("expected emitted dislocation at index 2");
@@ -313,7 +320,7 @@ fn glide_dislocation_back_onto_disclination_absorbs_and_shifts_centre() {
     let target = [0.5 - 0.5 * b[0], 0.5 - 0.5 * b[1]];
     assert!(st.move_pin_with_mods(2, target, false, square, &backend, &mut canvas));
     let abs_arrow = canvas.kinematic_overlay().reaction.as_ref().expect("expected live absorption preview arrow");
-    assert!((abs_arrow.to[0] - 1.5).abs() < 1e-5 && (abs_arrow.to[1] - 0.5).abs() < 1e-5, "{:?}", abs_arrow.to);
+    assert!((abs_arrow.to[0] - 5.5).abs() < 1e-5 && (abs_arrow.to[1] + 1.5).abs() < 1e-5, "{:?}", abs_arrow.to);
     st.finish_drag_kinematics(square, Some(&mut canvas));
     st.wait_idle(square, Some(&mut canvas));
 

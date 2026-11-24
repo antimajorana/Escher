@@ -1,8 +1,12 @@
 use crate::app::{NavTab, PapertillingApp};
 
+use super::{CompactPanel, compact_layout};
+
 impl PapertillingApp {
     pub(crate) fn show_right_inspector(&mut self, ui: &mut egui::Ui) {
-        if !self.right_inspector_open {
+        let compact = compact_layout(ui.ctx());
+        let open = if compact { self.compact_panel == CompactPanel::Inspector } else { self.right_inspector_open };
+        if !open {
             #[cfg(test)]
             {
                 self.test_rects.right = egui::Rect::NOTHING;
@@ -10,17 +14,18 @@ impl PapertillingApp {
             return;
         }
         let tokens = self.theme.tokens();
-        let resp = egui::Panel::right("right_inspector")
+        let max_width = if compact { (0.40 * ui.available_width()).clamp(260.0, 440.0) } else { 440.0 };
+        let resp = egui::Panel::right(if compact { "compact_right_inspector" } else { "right_inspector" })
             .resizable(true)
-            .default_size(self.right_inspector_width)
-            .size_range(260.0..=440.0)
+            .default_size(self.right_inspector_width.min(max_width))
+            .size_range(260.0..=max_width)
             .show(ui, |ui| {
                 ui.set_clip_rect(ui.max_rect());
                 ui.horizontal(|ui| {
                     ui.strong("Inspector");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("×").on_hover_text("Collapse inspector").clicked() {
-                            self.right_inspector_open = false;
+                            self.toggle_side_panel(CompactPanel::Inspector, ui.ctx());
                         }
                     });
                 });
@@ -72,11 +77,7 @@ impl PapertillingApp {
                         self.drain_combine_fusion_cavity();
                     }
                     NavTab::Fuse => {
-                        let item = self.gallery.active_item().clone();
-                        self.fuse.show_inspector_panel(ui, &item, &tokens);
-                        if let Some(specs) = self.fuse.take_open_in_combine() {
-                            self.open_specs_in_combine(specs);
-                        }
+                        self.fuse.show_inspector_panel(ui, &tokens);
                     }
                     NavTab::Atlas => {
                         self.atlas.show_inspector_panel(ui, &tokens);
@@ -100,7 +101,9 @@ impl PapertillingApp {
                 }
                     });
             });
-        self.right_inspector_width = resp.response.rect.width().clamp(260.0, 440.0);
+        if !compact {
+            self.right_inspector_width = resp.response.rect.width().clamp(260.0, 440.0);
+        }
         #[cfg(test)]
         {
             self.test_rects.right = resp.response.rect;

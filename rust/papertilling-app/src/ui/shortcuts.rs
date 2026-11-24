@@ -104,11 +104,11 @@ impl PapertillingApp {
 
         let k_sidebar = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::B);
         if ctx.input_mut(|i| i.consume_shortcut(&k_sidebar)) {
-            self.left_rail_open = !self.left_rail_open;
+            self.toggle_side_panel(super::CompactPanel::Controls, ctx);
         }
         let k_inspector = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::I);
         if ctx.input_mut(|i| i.consume_shortcut(&k_inspector)) {
-            self.right_inspector_open = !self.right_inspector_open;
+            self.toggle_side_panel(super::CompactPanel::Inspector, ctx);
         }
 
         if in_combine && !self.combine.dragging && !self.combine.cut_dragging {

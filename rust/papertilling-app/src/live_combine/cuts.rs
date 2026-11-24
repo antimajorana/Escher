@@ -192,7 +192,7 @@ pub fn build_fallback_cut_ray_for_spec(
             let at = spec_world_pos(info, idx, spec);
             (Some([at[0] + b[0], at[1] + b[1]]), dir[0] * b[1] - dir[1] * b[0] > 0.0, false)
         }
-        DefectSpec::Disclination { .. } => (None, false, false),
+        DefectSpec::Disclination { angle_deg, .. } => (None, angle_deg < 0.0, false),
         DefectSpec::HalfWall { .. } => (None, false, true),
     };
     let ac = AppliedCut { origin, dir, strip_end, is_insertion, is_half_wall };
@@ -279,40 +279,31 @@ pub fn set_pin_cut_angle(spec: &mut DefectSpec, angle_deg: Option<f64>) {
     }
 }
 
-/// True when two placed pins of the same kind share the same point (`<= 1e-6`).
+/// True when two dislocations or two disclinations share the same point (`<= 1e-6`).
 pub fn has_coincident_same_kind_pins(info: &CombineLatticeInfo, specs: &[DefectSpec]) -> bool {
-    for i in 0..specs.len() {
-        let pi = spec_world_pos(info, i, &specs[i]);
-        let di = matches!(specs[i], DefectSpec::Dislocation { .. });
-        for (j, sj) in specs.iter().enumerate().skip(i + 1) {
-            if matches!(sj, DefectSpec::Dislocation { .. }) == di {
-                let pj = spec_world_pos(info, j, sj);
-                if (pi[0] - pj[0]).hypot(pi[1] - pj[1]) <= 1e-6 {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    specs.iter().enumerate().any(|(idx, spec)| {
+        !matches!(spec, DefectSpec::HalfWall { .. }) && is_pin_coincident(info, specs, idx)
+    })
 }
 
 /// Permanently combine coincident same-kind pins in the Combine list (dropping exact 0-sum pairs).
 pub fn merge_coincident_pins(info: &CombineLatticeInfo, specs: &mut Vec<DefectSpec>) {
-    let mut groups: Vec<(bool, [f64; 2], Vec<DefectSpec>)> = Vec::new();
+    let mut groups: Vec<([f64; 2], Vec<DefectSpec>)> = Vec::new();
     for (idx, s) in specs.iter().enumerate() {
         let pos = spec_world_pos(info, idx, s);
-        let is_d = matches!(s, DefectSpec::Dislocation { .. });
-        if let Some(grp) = groups
-            .iter_mut()
-            .find(|(gd, gpos, _)| *gd == is_d && (gpos[0] - pos[0]).hypot(gpos[1] - pos[1]) <= 1e-6)
+        if !matches!(s, DefectSpec::HalfWall { .. })
+            && let Some((_, group)) = groups.iter_mut().find(|(gpos, group)| {
+                std::mem::discriminant(&group[0]) == std::mem::discriminant(s)
+                    && (gpos[0] - pos[0]).hypot(gpos[1] - pos[1]) <= 1e-6
+            })
         {
-            grp.2.push(s.clone());
+            group.push(s.clone());
         } else {
-            groups.push((is_d, pos, vec![s.clone()]));
+            groups.push((pos, vec![s.clone()]));
         }
     }
     let mut merged = Vec::with_capacity(groups.len());
-    for (_, gpos, grp) in groups {
+    for (gpos, grp) in groups {
         if grp.len() == 1 {
             merged.push(grp.into_iter().next().expect("len 1"));
             continue;

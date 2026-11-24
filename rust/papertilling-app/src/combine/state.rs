@@ -111,12 +111,7 @@ impl CombineTabState {
         let opts = default_build_opts(info.r_auto_base);
         let sheet_opts = Sheet3dViewOpts::default();
         let last_build = build_combined_crystal(gallery_item, &info, &[], &opts, false);
-        let last_sheet3d = build_sheet_bundle_sync(
-            &info,
-            &last_build.crystal,
-            last_build.applied_radius,
-            sheet_opts.kappa_b,
-        );
+        let last_sheet3d = build_sheet_bundle_sync(&info, &last_build, sheet_opts.kappa_b);
         let mut st = Self {
             tool_mode: ToolMode::PanAndDrag,
             override_item: None,
@@ -180,21 +175,29 @@ impl CombineTabState {
         self.open_cavity_in_fusion.take()
     }
 
-    pub(crate) fn build_cavity_request(&self, gallery_item: &CatalogueItemUi) -> crate::workbench::CavityRequest {
+    pub(super) fn can_inspect_current_crystal(&self) -> bool {
+        self.build_is_current()
+            && !self.specs.is_empty()
+            && self.last_build.refused.is_none()
+            && !self.last_build.crystal.pos.is_empty()
+    }
+
+    pub(crate) fn build_cavity_request(
+        &self,
+        gallery_item: &CatalogueItemUi,
+    ) -> Option<crate::workbench::CavityRequest> {
+        if !self.can_inspect_current_crystal() {
+            return None;
+        }
         let item = self.effective_item(gallery_item);
-        let existing_crystal = if self.last_build.refused.is_none() && !self.last_build.crystal.pos.is_empty() {
-            Some(self.last_build.crystal.clone())
-        } else {
-            None
-        };
-        crate::workbench::CavityRequest {
+        Some(crate::workbench::CavityRequest {
             group: item.group.clone(),
             cell: self.info.cell.clone(),
             frame: item.frame,
             lattice_name: item.display_with_orig(),
             specs: self.specs.clone(),
-            existing_crystal,
-        }
+            existing_crystal: Some(self.last_build.crystal.clone()),
+        })
     }
 
     pub fn effective_item<'a>(&'a self, gallery_item: &'a CatalogueItemUi) -> &'a CatalogueItemUi {
@@ -202,6 +205,7 @@ impl CombineTabState {
     }
 
     /// A build or a comparison is running or queued.
+    #[cfg(test)]
     pub fn is_busy(&self) -> bool {
         self.initializer.is_busy()
             || self.builder.is_busy()
@@ -211,6 +215,14 @@ impl CombineTabState {
 
     pub(crate) fn is_building(&self) -> bool {
         self.initializer.is_busy() || self.builder.is_busy()
+    }
+
+    fn build_is_current(&self) -> bool {
+        !self.is_building()
+            && self.init_error.is_none()
+            && !self.last_build.preview
+            && !self.dragging
+            && !self.cut_dragging
     }
 
     pub(super) fn lattice_unavailable(&self) -> bool {
@@ -240,12 +252,7 @@ impl CombineTabState {
         self.info = Arc::new(info);
         // Never show the previous lattice while the new build runs: a defect-free disk is instant.
         self.last_build = build_combined_crystal(gallery_item, &self.info, &[], &self.opts, false);
-        self.last_sheet3d = build_sheet_bundle_sync(
-            &self.info,
-            &self.last_build.crystal,
-            self.last_build.applied_radius,
-            self.sheet_opts.kappa_b,
-        );
+        self.last_sheet3d = build_sheet_bundle_sync(&self.info, &self.last_build, self.sheet_opts.kappa_b);
         self.canvas_dirty = true;
         self.view3d_dirty = true;
         self.compare_result = None;
@@ -305,8 +312,8 @@ impl CombineTabState {
     /// A comparison result that matches the current defects (for the `.json` summary).
     pub(super) fn current_report(&self) -> Option<&EquivalentSingleReport> {
         let fresh = !self.compare_stale
-            && !self.is_busy()
-            && !self.last_build.preview
+            && !self.is_comparing()
+            && self.build_is_current()
             && self.last_build.refused.is_none();
         self.compare_result.as_ref().filter(|_| fresh).and_then(|r| r.as_ref().ok())
     }

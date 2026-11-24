@@ -3,7 +3,10 @@ hyperbolic H^2 tilings, and D-symbol orbifold curvature across Rust and pure-Pyt
 """
 from __future__ import annotations
 
+import json
 import os
+from fractions import Fraction
+
 import papertilling as pt
 from papertilling import _rust
 
@@ -72,6 +75,69 @@ def test_80_layer_and_230_space_groups_with_3d_nets():
 
     net136 = pt.build_net_3d("Rutile136", "ScrewDispiration42_136")
     assert len(net136["positions"]) > 0 and len(net136["bonds"]) > 0
+
+
+def test_layer_mirror_and_glide_keep_transverse_symmetry(monkeypatch):
+    monkeypatch.setenv("PAPERTILLING_NO_RUST", "1")
+
+    # The transverse mirror gives Z^2 x Z_2. In the glide group its square is
+    # an in-plane primitive translation, leaving two free generators and no torsion.
+    mirror = pt.analyze_layer_group(4)
+    assert mirror["symbol"] == "p11m" and mirror["point_order"] == 2
+    assert mirror["is_split"] and mirror["ab_full_label"] == "Z_2 x Z^2"
+    assert mirror["h2_torsion"] == [2, 2] and mirror["ab_plus_label"] == "Z^2"
+
+    glide = pt.analyze_layer_group(5)
+    assert glide["symbol"] == "p11a" and glide["point_order"] == 2
+    assert not glide["is_split"] and glide["ab_full_label"] == "Z^2"
+    assert glide["h2_torsion"] == [2, 2] and glide["ab_plus_label"] == "Z^2"
+
+
+def test_fallback_group_catalogue_entries_are_independent(monkeypatch):
+    monkeypatch.setenv("PAPERTILLING_NO_RUST", "1")
+    for list_groups in (pt.list_layer_groups, pt.list_space_groups_3d):
+        groups = list_groups()
+        groups[0]["ops"][0]["r"][0][0] = 0
+        assert list_groups()[0]["ops"][0]["r"][0][0] == 1
+
+
+def test_space_group_custom_torus_counts_with_native_backend_available(monkeypatch):
+    class DefaultOnlyBackend:
+        def analyze_space_group_3d_json(self, number):
+            assert number == 1
+            return '{"torus_counts": [[2, 8]], "sectors_full": []}'
+
+    monkeypatch.setattr(_rust, "get", DefaultOnlyBackend)
+    # P1 has only translations, so all n^3 elements of its finite quotient are separate classes.
+    assert pt.analyze_space_group_3d(1)["torus_counts"] == [[2, 8]]
+    summary = pt.analyze_space_group_3d(1, (3, 4))
+    assert summary["torus_counts"] == [[3, 27], [4, 64]]
+    assert summary["sectors_full"] == []
+
+
+def test_custom_space_group_converts_exact_inputs_for_both_backends(monkeypatch):
+    spec = {"dim": 1, "ops": [{"r": [[1]], "t": [Fraction(1, 2)]}], "tb_rows": [[[1, 2]]]}
+
+    monkeypatch.setattr(_rust, "get", lambda: None)
+    fallback = pt.analyze_space_group(spec)
+    assert fallback["ab_full_label"] == "Z"
+    # Pure translations have n distinct conjugacy classes on a rank-one torus of scale n.
+    expected_counts = [(2, 2), (3, 3), (4, 4), (6, 6)]
+    assert fallback["torus_counts"] == expected_counts
+
+    class Backend:
+        def bieberbach_analyze_json(self, payload):
+            assert json.loads(payload) == {
+                "dim": 1, "number": 0, "symbol": "custom",
+                "ops": [{"r": [[1]], "t": [[1, 2]]}], "tb_rows": [[[1, 2]]],
+            }
+            return '{"ab_full_label": "Z", "torus_counts": [[2, 2]], "sectors_full": []}'
+
+    monkeypatch.setattr(_rust, "get", Backend)
+    native = pt.analyze_space_group(spec)
+    assert native["ab_full_label"] == "Z"
+    assert [tuple(row) for row in native["torus_counts"]] == expected_counts
+    assert native["sectors_full"] == []
 
 
 def test_hyperbolic_tilings_and_dsymbol_orbifold_curvature():

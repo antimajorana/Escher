@@ -78,7 +78,7 @@ def resolve_half_wall_spec(lat, wall_entry_or_spec, at=None, direction=None) -> 
             default_dir = w.get("direction")
             if w.get("sigma") is not None:
                 sigma = (np.asarray(w["sigma"][0], float), np.asarray(w["sigma"][1], float))
-            if wall_id is not None and (sigma is None or default_dir is None):
+            if wall_id is not None:
                 entry = _lookup_wall_entry(DefectCatalogue(lat.cell), wall_id)
                 wall_kind, sigma = entry["kind"], (entry["sigma"] if sigma is None else sigma)
                 default_dir = (entry.get("direction") or (entry.get("spec") or {}).get("direction")) if default_dir is None else default_dir

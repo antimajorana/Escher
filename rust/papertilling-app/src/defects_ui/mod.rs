@@ -7,7 +7,7 @@ use crate::canvas2d::Canvas2D;
 use crate::defects_tab::{DefectSubTab, DefectsTabState};
 use crate::mesh3d::DefectViewMode;
 use crate::theme::ThemeTokens;
-use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
+use crate::ui::viewport_pane::{defect_display_mode_ui, show_defect_viewport_header, show_split_2d_3d};
 use crate::view3d::View3dState;
 
 pub(crate) mod combos;
@@ -54,6 +54,7 @@ impl DefectsTabState {
             return;
         }
         let busy = self.is_busy();
+        self.view3d_dirty |= defect_display_mode_ui(ui, &mut self.view_mode, &mut self.sheet_opts.color_mode);
         show_defect_viewport_header(ui, busy);
         if self.view3d_dirty {
             if self.view_mode.uses_3d() {
@@ -71,7 +72,7 @@ impl DefectsTabState {
                 self.show_2d_patch(ui, active_item, canvas, tokens);
             }
             DefectViewMode::Sheet3D => {
-                ui.strong("3D Elastic Sheet Geometry (buckling relieves in-plane defect strain)");
+                ui.strong("Approximate elastic sheet · drag to orbit");
                 ui.add_space(2.0);
                 view3d.show(ui, tokens);
             }
@@ -87,7 +88,7 @@ impl DefectsTabState {
                         self.show_2d_patch(ui, active_item, canvas, tokens);
                     },
                     |ui| {
-                        ui.strong("3D Elastic Sheet Geometry (orbit & zoom)");
+                        ui.strong("Approximate elastic sheet");
                         ui.add_space(2.0);
                         view3d.show(ui, tokens);
                     },

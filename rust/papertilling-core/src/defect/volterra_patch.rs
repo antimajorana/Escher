@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use petgraph::graph::UnGraph;
 
-use crate::defect::cone_geometry::{cross2, dot2, mat2_inv, mat2_vec, norm2, sub2};
+use crate::defect::cone_geometry::{add2, cross2, dot2, mat2_inv, mat2_vec, norm2, sub2};
 use crate::defect::core_graph::{LatticeCoreInfo, PerfectLattice, SiteKey, TWO_PI};
 use crate::defect::sym_helper::{np_allclose_vec, round_dec};
-use crate::types::{BuiltCrystal, DirectedBondData};
+use crate::types::{BuiltCrystal, DirectedBondData, Isometry2};
 
 /// Result of a 3-chart Volterra cut-and-reglue patch build, retaining lattice `SiteKey`s.
 #[derive(Clone, Debug)]
@@ -146,7 +146,18 @@ pub fn build_volterra_dislocation(
     cut: Option<[f64; 2]>,
     r_patch: f64,
 ) -> Result<BuiltCrystal, String> {
-    Ok(build_volterra_patch(lat_info, b, core_pt, cut, r_patch)?.crystal)
+    let mut crystal = build_volterra_patch(lat_info, b, core_pt, cut, r_patch)?.crystal;
+    // Bond vectors are expressed in the shifted chart, while reference positions retain
+    // their original lattice coordinates. Carry the chart translation on each seam bond.
+    for (u, bonds) in crystal.adj.iter_mut().enumerate() {
+        for bond in bonds {
+            let t = sub2(crystal.ref_pos[bond.to], add2(crystal.ref_pos[u], bond.vec));
+            if norm2(t) > 1e-9 {
+                bond.seam = Some(Isometry2 { t, ..Isometry2::IDENTITY });
+            }
+        }
+    }
+    Ok(crystal)
 }
 
 /// Bounded CCW faces read from `crystal.pos` (`FastDefect.faces`), keeping faces with area `> 1e-12`.

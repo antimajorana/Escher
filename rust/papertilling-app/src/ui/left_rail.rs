@@ -1,9 +1,13 @@
 use crate::app::{NavTab, PapertillingApp};
 use crate::backend::CatalogueRuleUi;
 
+use super::{CompactPanel, compact_layout};
+
 impl PapertillingApp {
     pub(crate) fn show_left_rail(&mut self, ui: &mut egui::Ui) {
-        if !self.left_rail_open {
+        let compact = compact_layout(ui.ctx());
+        let open = if compact { self.compact_panel == CompactPanel::Controls } else { self.left_rail_open };
+        if !open {
             #[cfg(test)]
             {
                 self.test_rects.left = egui::Rect::NOTHING;
@@ -11,10 +15,11 @@ impl PapertillingApp {
             return;
         }
         let tokens = self.theme.tokens();
-        let resp = egui::Panel::left("left_rail")
+        let max_width = if compact { (0.40 * ui.available_width()).clamp(260.0, 420.0) } else { 420.0 };
+        let resp = egui::Panel::left(if compact { "compact_left_rail" } else { "left_rail" })
             .resizable(true)
-            .default_size(self.left_rail_width)
-            .size_range(260.0..=420.0)
+            .default_size(self.left_rail_width.min(max_width))
+            .size_range(260.0..=max_width)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| match self.active_tab {
                     NavTab::Gallery => {
@@ -103,7 +108,9 @@ impl PapertillingApp {
                     }
                 });
             });
-        self.left_rail_width = resp.response.rect.width().clamp(260.0, 420.0);
+        if !compact {
+            self.left_rail_width = resp.response.rect.width().clamp(260.0, 420.0);
+        }
         #[cfg(test)]
         {
             self.test_rects.left = resp.response.rect;

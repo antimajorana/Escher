@@ -57,11 +57,13 @@ require no Rust toolchain. When `papertilling-rs` (`import papertilling_rs`) is 
 falls back to its own code when `PAPERTILLING_NO_RUST=1` or when the wheel is absent.
 
     cargo run --manifest-path rust/Cargo.toml -p papertilling-app --release                 # native desktop app
-    cargo run --manifest-path rust/Cargo.toml -p papertilling-app --release -- --smoke-test # headless 2D + 3D smoke check
+    cargo run --manifest-path rust/Cargo.toml -p papertilling-app --release -- --smoke-test # native 2D and 3D smoke check
     cargo test --manifest-path rust/Cargo.toml --release --workspace                        # Rust workspace tests
     python tools/build_windows_installer.py                                                 # build dist/papertilling-*-windows-x86_64-setup.exe
     maturin develop --release --manifest-path rust/papertilling-py/Cargo.toml               # install papertilling-rs into active venv
     PAPERTILLING_NO_RUST=1 python -m pytest -q                                              # force pure-Python fallback
+
+The native smoke check opens a window and needs a graphical display and a working graphics adapter.
 
 Defect configurations can be exported and reopened between the Combine tab of `papertilling-app` and Notebook 3 as portable
 `.json` files (`recipe` + `frame` + `defects` + `options` + `summary`) via `save_config` and `load_config` in

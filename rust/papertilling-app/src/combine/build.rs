@@ -96,6 +96,13 @@ impl CombineTabState {
         }
     }
 
+    pub(super) fn set_compare_grid(&mut self, grid: usize) {
+        self.grid = grid;
+        self.comparer.cancel();
+        self.compare_after_build = false;
+        self.compare_stale = self.compare_result.is_some();
+    }
+
     /// Collect finished jobs (call every frame while the tab is shown); `ctx` lets workers wake the UI.
     /// Returns `true` when an initializer or build result landed.
     pub fn poll(
@@ -228,7 +235,13 @@ impl CombineTabState {
         let gpu = mesh_from_sheet3d_with_spectral(c, s, &self.sheet_opts, None);
         let legend = crate::mesh3d::color_scales::sheet_color_legend(c, s, &self.sheet_opts, None);
         let mut cap = sheet3d_caption(&title, s, &self.sheet_opts);
-        if self.is_building() {
+        if let Some(reason) = &self.last_build.refused {
+            cap = if s.xyz.is_empty() {
+                format!("3D sheet unavailable: {reason}")
+            } else {
+                format!("Previous 3D sheet | Build refused: {reason}")
+            };
+        } else if self.is_building() {
             cap.push_str(" | previous result — stale");
         }
         view3d.set_mesh(gpu, cap);
@@ -254,12 +267,10 @@ impl CombineTabState {
                     self.last_build.preview = out.preview;
                     self.last_build.applied_cuts = out.applied_cuts;
                     self.last_build.coalesced_count = 0;
-                    self.last_build.core_nodes = 0;
-                    self.last_build.core_edges = 0;
                     self.last_build.core_summary = out.core_summary;
                     self.last_build.local_cores = out.local_cores;
                 } else {
-                    if out.refused.is_some() {
+                    if out.refused.is_some() && !out.crystal.pos.is_empty() {
                         out.note = crate::live_combine::cuts::with_refusal_canvas_notice(out.note, false);
                     }
                     self.last_build = out;

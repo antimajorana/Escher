@@ -101,6 +101,77 @@ fn right_inspector_collapses_widens_center_and_still_polls_background_tabs() {
 }
 
 #[test]
+fn compact_window_keeps_room_for_the_canvas_and_can_switch_panels() {
+    let mut harness = app_harness(StudioTheme::Paper);
+    harness.set_size(egui::vec2(720.0, 680.0)).run_steps(3);
+    harness.get_by_label("Defects").click();
+    harness.run_steps(2);
+    harness.get_by_label("Allowed defects").click();
+    harness.run_steps(2);
+    harness.get_by_label("Fuse & compare").click();
+    harness.run_steps(3);
+    let app = harness.state();
+    assert_eq!(app.active_tab, NavTab::Fuse);
+    assert!(app.test_rects.left.width() >= 260.0);
+    assert_eq!(app.test_rects.right, egui::Rect::NOTHING);
+    assert!(app.test_rects.center.width() >= 400.0);
+    assert!(harness.query_by_label("Fit both views").is_some());
+
+    harness.get_by_label("Inspector").click();
+    harness.run_steps(2);
+    let app = harness.state();
+    assert_eq!(app.test_rects.left, egui::Rect::NOTHING);
+    assert!(app.test_rects.right.width() >= 260.0);
+    assert!(app.test_rects.center.width() >= 400.0);
+
+    harness.get_by_label("Canvas only").click();
+    harness.run_steps(2);
+    let rects = &harness.state().test_rects;
+    assert_eq!((rects.left, rects.right), (egui::Rect::NOTHING, egui::Rect::NOTHING));
+    assert!(rects.center.width() >= 680.0, "canvas should span the window, got {:?}", rects.center);
+    assert!(harness.query_by_label("Open pair in Place & fuse").is_some());
+
+    harness.set_size(egui::vec2(1280.0, 800.0)).run_steps(2);
+    assert!(harness.state().test_rects.left.width() >= 260.0);
+    assert!(harness.state().test_rects.right.width() >= 260.0);
+}
+
+#[test]
+fn defect_display_controls_switch_real_views_and_placement_keeps_the_2d_editor() {
+    use crate::analysis_mode::tests::{settled, wait_until};
+    use crate::mesh3d::{DefectViewMode, Sheet3dColorMode};
+
+    let mut harness = app_harness(StudioTheme::Paper);
+    harness.state_mut().switch_tab(NavTab::Defects);
+    wait_until(&mut harness, "defect patch", settled);
+    harness.get_by_label("3D sheet").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().defects.view_mode, DefectViewMode::Sheet3D);
+    assert!(harness.state().view3d.has_geometry());
+    let center = harness.state().test_rects.center;
+    harness.query_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|node| center.contains_rect(node.rect()))
+        .expect("sheet colour selector in the viewport")
+        .click();
+    harness.run_steps(2);
+    harness.get_by_label("Angle deficit").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().defects.sheet_opts.color_mode, Sheet3dColorMode::GaussianCurvature);
+    assert_eq!(harness.state().view3d.legend().unwrap().title, "Angle deficit Ω_v (rad)");
+
+    harness.state_mut().switch_tab(NavTab::Combine);
+    wait_until(&mut harness, "combine patch", settled);
+    harness.get_by_label("3D sheet").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().combine.view_mode, DefectViewMode::Sheet3D);
+    assert!(harness.state().view3d.has_geometry());
+    harness.get_by_label("Place dislocation").click();
+    harness.run_steps(2);
+    assert_eq!(harness.state().combine.view_mode, DefectViewMode::Split2D3D);
+    assert!(harness.query_by_label("Click the patch to place a dislocation.").is_some());
+}
+
+#[test]
 fn split_2d_3d_drag_resizes_panes_clamps_and_double_click_resets_to_half() {
     struct SplitState {
         ratio: f32,

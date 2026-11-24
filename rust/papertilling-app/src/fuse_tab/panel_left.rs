@@ -21,7 +21,6 @@ impl FuseTabState {
             item.label,
             group_with_orbifold(&item.group)
         ));
-        ui.small("Pick two catalogue defects, vary their separation Δ, and compare the fused crystal side-by-side against its equivalent single defect.");
 
         if self.choices.is_empty() {
             ui.separator();
@@ -33,7 +32,7 @@ impl FuseTabState {
         let presets = self.available_presets();
         if !presets.is_empty() {
             ui.separator();
-            ui.strong("Quick Fusion Reactions");
+            ui.strong("Example pairs");
             ui.horizontal_wrapped(|ui| {
                 for p in presets {
                     if ui.button(p.label()).on_hover_text(p.tooltip()).clicked() {
@@ -84,10 +83,8 @@ impl FuseTabState {
                 self.refresh_slots_b();
                 rebuild = true;
             }
-            if ui.small_button("Swap A ↔ B").on_hover_text("Exchange Defect A and Defect B").clicked() {
-                std::mem::swap(&mut self.choice_a, &mut self.choice_b);
-                self.pos_a = self.default_pos_for_choice(self.choice_a);
-                self.refresh_slots_b();
+            if ui.small_button("Swap A ↔ B").on_hover_text("Exchange the anchor and movable defects at their current positions").clicked() {
+                self.swap_defects();
                 rebuild = true;
             }
         });
@@ -107,7 +104,7 @@ impl FuseTabState {
 
         // 3. Separation & Approach Stepper
         ui.separator();
-        ui.strong("Separation & Approach (Δ = r_B − r_A)");
+        ui.strong("Separation");
         let a_scale = self.info.cell.a1[0].hypot(self.info.cell.a1[1]).max(1e-6);
         let dx = self.pos_b[0] - self.pos_a[0];
         let dy = self.pos_b[1] - self.pos_a[1];
@@ -122,7 +119,7 @@ impl FuseTabState {
 
         if !self.slots_b.is_empty() {
             let cur_slot = self.current_slot_index().unwrap_or(0);
-            let max_slot = self.slots_b.len() - 1;
+            let slot_count = self.slots_b.len();
             let slot_dist = |p: [f64; 2]| (p[0] - self.pos_a[0]).hypot(p[1] - self.pos_a[1]);
             let best_in_shell = |target_d: f64| -> Option<usize> {
                 self.slots_b
@@ -150,7 +147,7 @@ impl FuseTabState {
                 .find(|&d| d > dist + 1e-3)
                 .and_then(best_in_shell);
 
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(closer_idx.is_some(), egui::Button::new("◀ Closer"))
                     .on_hover_text("Step Defect B one radial lattice shell closer to Defect A along the current ray")
@@ -169,22 +166,24 @@ impl FuseTabState {
                     self.pos_b = self.slots_b[idx];
                     rebuild = true;
                 }
-                ui.small(format!("site {} / {}", cur_slot + 1, self.slots_b.len()));
+                ui.small(format!("{} of {slot_count}", cur_slot + 1));
             });
-            let mut slot_slider = cur_slot;
-            if max_slot > 0
+            let mut site_number = cur_slot + 1;
+            if slot_count > 1
                 && ui
-                    .add(egui::Slider::new(&mut slot_slider, 0..=max_slot).text("Site index"))
+                    .add(egui::Slider::new(&mut site_number, 1..=slot_count).text("Target site"))
                     .changed()
             {
-                self.pos_b = self.slots_b[slot_slider];
+                self.pos_b = self.slots_b[site_number - 1];
                 rebuild = true;
             }
         }
-        ui.small(format!(
-            "Tip: drag pin 2 ({}) or click any hollow target ring on the left crystal to place B.",
-            choice_short_label(&self.info, &self.choices[self.choice_b])
-        ));
+        let b_label = choice_short_label(&self.info, &self.choices[self.choice_b]);
+        ui.small(if self.show_target_sites {
+            format!("Drag pin 2 ({b_label}) or click a hollow target ring to place B.")
+        } else {
+            format!("Drag pin 2 ({b_label}) to place B.")
+        });
 
         // 4. Display, Sync & Burgers Loop
         ui.separator();
@@ -230,7 +229,7 @@ impl FuseTabState {
         }
     }
 
-    fn flipped_choice_index(&self, idx: usize) -> Option<usize> {
+    pub(super) fn flipped_choice_index(&self, idx: usize) -> Option<usize> {
         match *self.choices.get(idx)? {
             FuseDefectChoice::Disclination { class_idx, angle_deg } => {
                 self.choices.iter().position(|c| {
@@ -238,16 +237,12 @@ impl FuseTabState {
                 })
             }
             FuseDefectChoice::Dislocation { disloc_idx, member_idx, sign } => {
-                if let Some(pos) = self.choices.iter().position(|c| {
-                    matches!(*c, FuseDefectChoice::Dislocation { disloc_idx: di, member_idx: mi, sign: s } if di == disloc_idx && mi == member_idx && s == -sign)
-                }) {
-                    return Some(pos);
-                }
                 let (m0, n0) = self.info.dislocations[disloc_idx].members[member_idx];
                 let want = (-m0 * i32::from(sign), -n0 * i32::from(sign));
                 self.choices.iter().position(|c| match *c {
-                    FuseDefectChoice::Dislocation { disloc_idx: di, member_idx: mi, sign: 1 } if di == disloc_idx => {
-                        self.info.dislocations[di].members[mi] == want
+                    FuseDefectChoice::Dislocation { disloc_idx, member_idx, sign } => {
+                        let (m, n) = self.info.dislocations[disloc_idx].members[member_idx];
+                        (m * i32::from(sign), n * i32::from(sign)) == want
                     }
                     _ => false,
                 })

@@ -86,6 +86,35 @@ pub(crate) fn run_job(job: S6Job) -> Result<Built, String> {
     }
 }
 
+/// The Atlas uses the same bounded honeycomb builders and presentation as the workbench.
+pub(crate) struct AtlasHoneycomb(Built);
+
+impl AtlasHoneycomb {
+    #[cfg(test)]
+    pub(crate) fn has_cell_edges(&self) -> bool {
+        self.0.core.complex().is_some_and(|complex| !complex.edges.is_empty())
+    }
+
+    pub(crate) fn scenes(&self) -> (crate::scene2d::Scene2D, crate::mesh3d::GpuMeshData, String) {
+        (self.0.scene2d.clone(), self.0.mesh.clone(), self.0.caption.clone())
+    }
+
+    pub(crate) fn show_inspector(&self, ui: &mut egui::Ui, tokens: &ThemeTokens) {
+        present::show_built(ui, &self.0, tokens, "atlas_h3_inspector");
+    }
+}
+
+pub(crate) fn build_atlas_h3(p: u32, q: u32, r: u32, layers: u32, radius_centi: u32) -> Result<AtlasHoneycomb, String> {
+    use papertilling_core::honeycomb3d::coxeter_gram::{HoneycombRegime, classify_schlafli};
+    let classification = classify_schlafli(p, q, r);
+    let built = match classification.regime {
+        HoneycombRegime::HyperbolicCompactH3 => honeycomb::build_schlafli_growth(p, q, r, SeedKind::Cell, GrowthRule::FaceShells, layers),
+        HoneycombRegime::HyperbolicParacompactH3 => honeycomb::build_paracompact(p, q, r, radius_centi),
+        _ => return Err(classification.reason),
+    }?;
+    Ok(AtlasHoneycomb(built))
+}
+
 type S6Worker = LatestWorker<S6Job, Result<Built, String>>;
 
 #[derive(Default)]

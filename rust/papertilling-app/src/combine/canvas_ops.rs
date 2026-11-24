@@ -6,7 +6,7 @@ use crate::live_combine::cuts::set_pin_cut_angle;
 use crate::live_combine::{map_drawn_to_ref, map_ref_to_drawn};
 use crate::mesh3d::DefectViewMode;
 use crate::theme::ThemeTokens;
-use crate::ui::viewport_pane::{show_defect_viewport_header, show_split_2d_3d};
+use crate::ui::viewport_pane::{defect_display_mode_ui, show_defect_viewport_header, show_split_2d_3d};
 use crate::view3d::View3dState;
 
 impl CombineTabState {
@@ -39,9 +39,11 @@ impl CombineTabState {
             }
         });
 
-        let busy = self.is_building();
-        show_defect_viewport_header(ui, busy);
         self.poll(Some(ui.ctx()), gallery_item, Some(canvas));
+        self.view3d_dirty |= ui.add_enabled_ui(!(self.dragging || self.cut_dragging), |ui| {
+            defect_display_mode_ui(ui, &mut self.view_mode, &mut self.sheet_opts.color_mode)
+        }).inner;
+        show_defect_viewport_header(ui, self.is_building());
         if self.view3d_dirty {
             if self.view_mode.uses_3d() {
                 self.sync_view3d(gallery_item, view3d);
@@ -56,7 +58,7 @@ impl CombineTabState {
                 self.show_2d_pin_editor(ui, gallery_item, backend, canvas, tokens);
             }
             DefectViewMode::Sheet3D => {
-                ui.strong("3D Live Elastic Sheet (orbit, scroll/pinch zoom; Clear All = flat z=0 plane)");
+                ui.strong("Approximate elastic sheet · drag to orbit");
                 ui.add_space(2.0);
                 view3d.show(ui, tokens);
             }
@@ -70,7 +72,7 @@ impl CombineTabState {
                         self.show_2d_pin_editor(ui, gallery_item, backend, canvas, tokens);
                     },
                     |ui| {
-                        ui.strong("Live 3D Elastic Sheet (buckling & screening)");
+                        ui.strong("Approximate elastic sheet");
                         ui.add_space(2.0);
                         view3d.show(ui, tokens);
                     },
@@ -91,7 +93,12 @@ impl CombineTabState {
             self.clear_selection();
             self.sync_selection_to_canvas(canvas);
         }
-        ui.strong("2D Defect Canvas  [drag defect: move, drag empty: pan, scroll: zoom]");
+        ui.small(match self.tool_mode {
+            ToolMode::PanAndDrag => "Drag a pin to move it or drag the background to pan.",
+            ToolMode::PlaceDisclination => "Click the patch to place a disclination at an allowed centre.",
+            ToolMode::PlaceDislocation => "Click the patch to place a dislocation.",
+            ToolMode::PlaceHalfWall => "Click the patch to place the end of the wall.",
+        });
         ui.add_space(2.0);
         let click_to_place = self.tool_mode != ToolMode::PanAndDrag && !self.is_initializing() && self.init_error.is_none();
         let preview_world = match (self.tool_mode, self.last_hover_world) {

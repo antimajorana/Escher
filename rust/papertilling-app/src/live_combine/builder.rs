@@ -21,7 +21,8 @@ use super::snap::spec_world_pos;
 use super::{CombineBuildOptions, CombineBuildOutput, CombineDrawMode, CombineLatticeInfo};
 use crate::aliases::LatticeAliasKey;
 use crate::backend::CatalogueItemUi;
-use crate::live_ops::{build_pristine_disk, summarize_rings_and_core};
+use crate::combine_worker::empty_crystal;
+use crate::live_ops::{PRISTINE_DISK_MIN_RADIUS, build_pristine_disk, summarize_rings};
 use crate::live_plane::{coordination_string, format_dsymbol_key, occupied_wyckoff_letters};
 
 fn append_abelian_charge(detail: &mut String, ab_line: Option<&str>) {
@@ -31,6 +32,15 @@ fn append_abelian_charge(detail: &mut String, ab_line: Option<&str>) {
         }
         detail.push_str(line);
     }
+}
+
+const LIVE_VIEW_LIMIT: &str = "Desktop live-view budget exceeded (~20,000 sites). Move pins closer or choose a smaller patch.";
+
+fn fits_live_view_budget(info: &CombineLatticeInfo, radius: f64, inserted_turns: f64) -> bool {
+    let area = (info.cell.a1[0] * info.cell.a2[1] - info.cell.a1[1] * info.cell.a2[0]).abs();
+    let estimated_sites = std::f64::consts::PI * radius.powi(2) * info.cell.basis.len() as f64
+        * (1.0 + inserted_turns) / area;
+    estimated_sites.is_finite() && estimated_sites <= 20_000.0
 }
 
 /// Build, draw and read out the combined crystal. `preview` (live pin drag): a cheaper picture,
@@ -45,14 +55,35 @@ pub fn build_combined_crystal(
     let t0 = Instant::now();
     let lattice_key = (item.group.clone(), info.cell.clone());
     let base_r = if opts.auto_radius { info.r_auto_base } else { opts.manual_radius };
+    let reference_r = base_r.max(PRISTINE_DISK_MIN_RADIUS);
+
+    let refused = |reason: String, charge_label: &str, charge_detail, patch_centre| {
+        let standin_r = reference_r.min(info.r_auto_base.max(PRISTINE_DISK_MIN_RADIUS));
+        let (crystal, applied_radius) = if fits_live_view_budget(info, standin_r, 0.0) {
+            (build_pristine_disk(&info.lat_info, standin_r), standin_r)
+        } else {
+            (empty_crystal(), 0.0)
+        };
+        CombineBuildOutput {
+            lattice_key: lattice_key.clone(),
+            crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius,
+            charge_label: charge_label.to_owned(), charge_detail,
+            core_summary: String::from("Core: not computed"),
+            local_cores: Vec::new(), patch_centre, applied_cuts: Vec::new(), coalesced_count: 0,
+            note: cuts::format_refusal_note(&reason), preview, refused: Some(reason),
+        }
+    };
 
     if specs.is_empty() {
-        let crystal = build_pristine_disk(&info.lat_info, base_r);
+        if !fits_live_view_budget(info, reference_r, 0.0) {
+            return refused(LIVE_VIEW_LIMIT.into(), "Live view too large", LIVE_VIEW_LIMIT.into(), [0.0, 0.0]);
+        }
+        let crystal = build_pristine_disk(&info.lat_info, reference_r);
         return CombineBuildOutput {
-            lattice_key, crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: base_r,
+            lattice_key, crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: reference_r,
             charge_label: String::from("vacuum (0 defects)"),
             charge_detail: String::from("Frank = +0.0°, b = (0.000, 0.000)"),
-            core_nodes: 0, core_edges: 0, core_summary: String::from("defect-free reference disk"),
+            core_summary: String::from("Core: defect-free reference disk"),
             local_cores: Vec::new(), patch_centre: [0.0, 0.0], applied_cuts: Vec::new(), coalesced_count: 0,
             note: String::new(), preview, refused: None,
         };
@@ -82,65 +113,44 @@ pub fn build_combined_crystal(
         opts.manual_radius
     };
 
-    let area = (info.cell.a1[0] * info.cell.a2[1] - info.cell.a1[1] * info.cell.a2[0]).abs();
     let inserted_turns: f64 = specs.iter().filter_map(|s| match s {
         DefectSpec::Disclination { angle_deg, .. } if *angle_deg < 0.0 => Some(-angle_deg / 360.0),
         _ => None,
     }).sum();
-    let estimated_sites = std::f64::consts::PI * r_target * r_target * info.cell.basis.len() as f64
-        * (1.0 + inserted_turns) / area;
-    if !estimated_sites.is_finite() || estimated_sites > 20_000.0 {
-        let reason = String::from("desktop live-view budget exceeded (~20,000 sites); move pins closer or use a smaller manual patch. No equivalence was computed.");
-        let mut charge_detail = reason.clone();
+    let budget_refusal = || {
+        let mut charge_detail = String::from(LIVE_VIEW_LIMIT);
         append_abelian_charge(&mut charge_detail, abelian_line.as_deref());
-        return CombineBuildOutput {
-            lattice_key,
-            crystal: build_pristine_disk(&info.lat_info, base_r.min(info.r_auto_base)),
-            elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
-            applied_radius: base_r.min(info.r_auto_base),
-            charge_label: String::from("Live view too large"),
-            charge_detail,
-            core_nodes: 0, core_edges: 0, core_summary: String::from("not computed"),
-            local_cores: Vec::new(), patch_centre: ctr, applied_cuts: Vec::new(), coalesced_count: 0,
-            note: reason.clone(), preview, refused: Some(reason),
-        };
+        refused(LIVE_VIEW_LIMIT.into(), "Live view too large", charge_detail, ctr)
+    };
+    if !fits_live_view_budget(info, r_target.max(PRISTINE_DISK_MIN_RADIUS), inserted_turns) {
+        return budget_refusal();
     }
 
     let mut notes = Vec::new();
     let mut applied_r = r_target;
-    let (mut crystal, applied_cuts, coalesced_count, build_meta) =
-        match build_point_defects_detailed(&info.cell, specs, Some(r_target), None) {
-            Ok(res) => res,
-            Err(_) => match build_point_defects_detailed(&info.cell, specs, None, None) {
-                Ok(res) => {
-                    if let Ok((_, r_safe)) = patch_centre_and_radius(&info.lat_info, specs, None, None) {
-                        applied_r = r_safe;
-                    }
-                    notes.push(String::from("expanded to safe surgical radius"));
-                    res
-                }
-                Err(err) => {
-                    let mut charge_detail = match algebraic_specs_charge_label(&item.group, &info.cell, item.frame, specs) {
-                        Some(lbl) => format!("Algebraic total charge: {lbl}\n{err}"),
-                        None => err.clone(),
-                    };
-                    append_abelian_charge(&mut charge_detail, abelian_line.as_deref());
-                    return CombineBuildOutput {
-                        lattice_key,
-                        crystal: build_pristine_disk(&info.lat_info, base_r),
-                        elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
-                        applied_radius: base_r,
-                        charge_label: String::from("Surgery refused"),
-                        charge_detail,
-                        core_nodes: 0, core_edges: 0, core_summary: String::from("refused"),
-                        local_cores: Vec::new(), patch_centre: ctr, applied_cuts: Vec::new(), coalesced_count: 0,
-                        note: cuts::format_refusal_note(&err),
-                        preview,
-                        refused: Some(err),
-                    };
-                }
-            },
-        };
+    let mut result = build_point_defects_detailed(&info.cell, specs, Some(r_target), None);
+    if result.is_err()
+        && let Ok((_, r_safe)) = patch_centre_and_radius(&info.lat_info, specs, None, None)
+        && (r_safe - r_target).abs() > 1e-9
+    {
+        if !fits_live_view_budget(info, r_safe.max(PRISTINE_DISK_MIN_RADIUS), inserted_turns) {
+            return budget_refusal();
+        }
+        result = build_point_defects_detailed(&info.cell, specs, Some(r_safe), None);
+        applied_r = r_safe;
+        notes.push(format!("retried at surgical radius R={r_safe:.1}"));
+    }
+    let (mut crystal, applied_cuts, coalesced_count, build_meta) = match result {
+        Ok(res) => res,
+        Err(err) => {
+            let mut charge_detail = match algebraic_specs_charge_label(&item.group, &info.cell, item.frame, specs) {
+                Some(lbl) => format!("Algebraic total charge: {lbl}\n{err}"),
+                None => err.clone(),
+            };
+            append_abelian_charge(&mut charge_detail, abelian_line.as_deref());
+            return refused(err, "Surgery refused", charge_detail, ctr);
+        }
+    };
     match (build_meta.used_fallback_order, build_meta.used_backtracking) {
         (true, true) => notes.push(String::from("(built via fallback order + cut search)")),
         (true, false) => notes.push(String::from("(built via fallback order)")),
@@ -179,7 +189,19 @@ pub fn build_combined_crystal(
 
     let (charge_label, mut charge_detail) = match classify_crystal_charge(&item.group, &info.cell, item.frame, &crystal) {
         Ok(ch) => {
-            let det = format!("kind={} | Frank={:+.1}° | loop S=({:+.3}, {:+.3})", ch.kind, ch.angle, ch.loop_sum[0], ch.loop_sum[1]);
+            let mut det = format!("kind={} | Frank={:+.1}° | loop S=({:+.3}, {:+.3})", ch.kind, ch.angle, ch.loop_sum[0], ch.loop_sum[1]);
+            if !preview
+                && let Some(ordered_charge) =
+                    algebraic_specs_charge_label(&item.group, &info.cell, item.frame, specs)
+                && ordered_charge != ch.label
+            {
+                use std::fmt::Write as _;
+                let _ = write!(
+                    det,
+                    "\nPin-order algebraic charge: {ordered_charge}\nMeasured boundary charge: {}\nEquivalence uses the measured charge and core graph.",
+                    ch.label
+                );
+            }
             (ch.label, det)
         }
         Err(_) => match total_charge(&crystal) {
@@ -198,22 +220,29 @@ pub fn build_combined_crystal(
     if preview {
         return CombineBuildOutput {
             lattice_key, crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: applied_r,
-            charge_label, charge_detail, core_nodes: 0, core_edges: 0,
+            charge_label, charge_detail,
             core_summary: String::from("(core readout on release)"), local_cores: Vec::new(),
             patch_centre: ctr, applied_cuts, coalesced_count, note: notes.join("; "),
             preview, refused: None,
         };
     }
-    let (core_nodes, core_edges) = core_graph(&crystal, &info.lat_info, opts.core_radius)
-        .or_else(|_| core_graph(&crystal, &info.lat_info, 1))
-        .map_or((0, 0), |g| (g.node_count(), g.edge_count()));
+    let radius = opts.core_radius;
+    let rings = summarize_rings(&crystal);
+    let core_summary = match core_graph(&crystal, &info.lat_info, radius) {
+        Ok(graph) => format!(
+            "Core (r={radius}): {} sites, {} bonds | {rings}",
+            graph.node_count(),
+            graph.edge_count()
+        ),
+        Err(err) => format!("Core (r={radius}) unavailable: {err} | {rings}"),
+    };
 
     CombineBuildOutput {
         lattice_key,
-        core_summary: summarize_rings_and_core(&crystal, &info.lat_info),
+        core_summary,
         local_cores: inspect_crystal_cores(&crystal),
         crystal, elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0, applied_radius: applied_r,
-        charge_label, charge_detail, core_nodes, core_edges,
+        charge_label, charge_detail,
         patch_centre: ctr, applied_cuts, coalesced_count, note: notes.join("; "),
         preview, refused: None,
     }

@@ -1,10 +1,12 @@
 //! Complete 230 3D space groups (`space_groups_230.json`) and 80 layer groups
 //! (`layer_groups_80.json`), analyzed dynamically via the Bieberbach engine.
 
+pub mod holonomy;
 pub mod layer_slab;
 pub mod motifs;
 pub mod nets3d;
 pub mod points3d;
+pub mod screw;
 
 use std::sync::LazyLock;
 
@@ -131,16 +133,20 @@ pub fn analyze_space_group_3d(num: u16) -> Result<BieberbachSummary, String> {
     Ok(summarize_analyzer(&sg, &[2]))
 }
 
-pub fn analyze_layer_group(num: u8) -> Result<BieberbachSummary, String> {
-    let e = layer_group_entry(num)?;
-    let tb_lat = if e.centred {
+pub(crate) fn layer_translation_basis(centred: bool) -> Vec<Vec<Rat>> {
+    if centred {
         vec![
             vec![Rat::new(1, 2), Rat::new(1, 2)],
             vec![Rat::new(-1, 2), Rat::new(1, 2)],
         ]
     } else {
         vec![vec![Rat::ONE, Rat::ZERO], vec![Rat::ZERO, Rat::ONE]]
-    };
+    }
+}
+
+pub fn analyze_layer_group(num: u8) -> Result<BieberbachSummary, String> {
+    let e = layer_group_entry(num)?;
+    let tb_lat = layer_translation_basis(e.centred);
     let mut gens: Vec<ConvOp> = e
         .ops
         .iter()
