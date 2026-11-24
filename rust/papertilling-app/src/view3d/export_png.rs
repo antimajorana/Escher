@@ -15,7 +15,7 @@ use super::legend::{ColorLegend3d, fmt_v, legend_rect_3d, legend_title};
 use super::offscreen::{OffscreenGpuContext, OffscreenScene, render_rgba};
 use super::wire_quads::export_wire_width;
 use crate::export::raster::{MAX_SIDE, Raster};
-use crate::export::text_ttf::draw_text;
+use crate::export::text_ttf::{draw_text, measure_text};
 use crate::theme::ThemeTokens;
 
 /// Pixel size of a 3D PNG export and whether it was scaled down to fit the limits.
@@ -85,7 +85,28 @@ pub(crate) fn compose_overlays(
     tokens: &ThemeTokens,
 ) {
     if !caption.is_empty() {
-        draw_text(img, [8.0 * k, 6.0 * k], caption, 12.0 * k, rgba(tokens.text_primary), (0.0, 0.0));
+        // The export has no camera controls below the title, so all counts can wrap in full.
+        let width = (view.x - 16.0).max(1.0);
+        let mut line = String::new();
+        let mut y = 6.0;
+        let mut draw_line = |text: &str| {
+            let [w, height] = measure_text(text, 12.0);
+            let size = 12.0 * (width / w.max(1.0)).min(1.0);
+            draw_text(img, [8.0 * k, y * k], text, size * k, rgba(tokens.text_primary), (0.0, 0.0));
+            y += height + 2.0;
+        };
+        for word in caption.split_whitespace() {
+            let next = if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
+            if !line.is_empty() && measure_text(&next, 12.0)[0] > width {
+                draw_line(&line);
+                line = word.to_owned();
+            } else {
+                line = next;
+            }
+        }
+        if !line.is_empty() {
+            draw_line(&line);
+        }
     }
     let Some((leg, r)) = legend.zip(legend_rect_3d(egui::Rect::from_min_size(egui::Pos2::ZERO, view))) else {
         return;

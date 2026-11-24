@@ -126,6 +126,10 @@ impl Space3dPanelState {
         (*current == key).then_some(patch.as_ref().ok()).flatten()
     }
 
+    pub(super) fn active_screw_name(&self) -> Option<&str> {
+        self.screw_patch().map(|patch| patch.net.name.as_str())
+    }
+
     pub(super) fn show_screw_readout(&self, ui: &mut egui::Ui) {
         if self.screw_key().is_none() {
             return;
@@ -186,7 +190,7 @@ impl Space3dPanelState {
 
     pub fn show_view_controls(&mut self, ui: &mut egui::Ui) {
         ui.separator();
-        ui.strong("View: Cell, Axes, Slab & Picking");
+        ui.strong("View");
         let v = &mut self.view;
         let mut changed = false;
         ui.horizontal_wrapped(|ui| {
@@ -194,7 +198,7 @@ impl Space3dPanelState {
             changed |= ui.checkbox(&mut v.show_axes, "Axes").changed();
             changed |= ui.checkbox(&mut v.depth_cue, "Depth cue").on_hover_text("Farther sites fainter").changed();
         });
-        ui.small("z-slice slab (fractional z of the drawn block):");
+        ui.small("Height range within the displayed block");
         if ui.add(egui::Slider::new(&mut v.z_slice_range[0], 0.0..=1.0).text("z min")).changed() {
             v.z_slice_range[1] = v.z_slice_range[1].max(v.z_slice_range[0]);
             changed = true;
@@ -290,12 +294,12 @@ impl Space3dPanelState {
         let coord = coordination(net.positions.len(), &net.bonds)[i];
         let f = frame.fractional(p);
         let tag = if picked == Some(i) { "picked" } else { "hover" };
-        let species = match (&self.view.catalogue, screw_key) {
+        let site_label = match (&self.view.catalogue, screw_key) {
             (Some(c), _) => c.orbit_label(kind),
             (None, Some(_)) => format!("orbit {}", usize::from(kind) + 1),
-            (None, None) => species_label(net_kind, kind).to_string(),
+            (None, None) => format!("species {kind}: {}", species_label(net_kind, kind)),
         };
-        ui.colored_label(tokens.status_ok, format!("Site #{i} ({tag}) | species {kind}: {species}"));
+        ui.colored_label(tokens.status_ok, format!("Site #{i} ({tag}) | {site_label}"));
         ui.small(format!("Cartesian: ({:+.4}, {:+.4}, {:+.4})", p[0], p[1], p[2]));
         let nominal = if defect != LineDefect3d::None || screw_key.is_some() { " (helical drawing)" } else { "" };
         ui.small(format!("Fractional: ({:.4}, {:.4}, {:.4}){nominal}", f[0], f[1], f[2]));

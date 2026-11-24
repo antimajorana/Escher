@@ -143,7 +143,10 @@ pub fn grow_honeycomb(kind: HoneycombKind, seed: SeedKind, rule: GrowthRule, cap
             face_shells(&mut x, s0, caps, &q)
         }
     };
-    let (complex, boundary_only) = draw_coxeter(&x, &g, &name, &regime);
+    let (mut complex, boundary_only) = draw_coxeter(&x, &g, &name, &regime);
+    if matches!(cls.finite_site_orbit(), Some((super::coxeter_gram::SiteOrbit::Cell, _))) {
+        complex.orbit_centres = g.layers.iter().take(g.stats.len()).flatten().map(|&c| x.klein_cell_centre(c)).collect();
+    }
     Ok(HoneycombGrowth {
         name,
         regime,

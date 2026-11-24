@@ -16,7 +16,7 @@ scan merges such records silently (it keeps a count only), so they are re-found 
 completions of each listed Volterra build (the same rules as the scan), plus the records that
 dislocation_core_list dropped as isomorphic to a Volterra core.
 
-Each entry's crystal is a crop of the legacy build (sites within D = 2 r_det + radius + 3 bonds of the core
+Each entry's crystal is a crop of the signed Volterra build (sites within D = 2 r_det + radius + 3 bonds of the core
 ring; deep copies, the cached builds are never changed) with the chords added as real bonds. A chord u-v gets
 the bond vector 'vec' (which fixes its place in the order of bonds round u and v, hence the faces) of one of
 the two arcs of the core ring from u to v (turned by up to 30 degrees when needed; when no straight
@@ -235,7 +235,7 @@ def _add_chords(y, ring, chords, lat):
 
 # --- the gallery ------------------------------------------------------------------------------------------------
 def _build_data(x, lat, R, core_point, memo):
-    """Per legacy build (shared by the cores found on it): ring walks, graph, degrees, patch rim."""
+    """Per signed build (shared by the cores found on it): ring walks, graph, degrees, patch rim."""
     if id(x) not in memo:
         keys = list(x.sites)
         deg = x.degrees()

@@ -418,7 +418,7 @@
     },
     "equivalent": false,
     "matches": [],
-    "verdict": "no match among 124 distinct cores scanned (grid=2, 24 Volterra builds, completions capped 6 times, 0 skipped at the rim); a larger grid may find more cores",
+    "verdict": "no match among 93 distinct cores scanned (grid=2, 24 Volterra builds, completions capped 6 times, 0 skipped at the rim); a larger grid may find more cores",
     "candidates": [
      "Volterra core 1",
      "Volterra core 2",
@@ -428,9 +428,9 @@
      "Volterra core 6",
      "Volterra core 7",
      "Volterra core 8",
-     "Volterra core 9",
-     "Volterra core 10",
-     "Volterra core 11",
+     "completion core 9",
+     "completion core 10",
+     "completion core 11",
      "completion core 12",
      "completion core 13",
      "completion core 14",
@@ -512,38 +512,7 @@
      "completion core 90",
      "completion core 91",
      "completion core 92",
-     "completion core 93",
-     "completion core 94",
-     "completion core 95",
-     "completion core 96",
-     "completion core 97",
-     "completion core 98",
-     "completion core 99",
-     "completion core 100",
-     "completion core 101",
-     "completion core 102",
-     "completion core 103",
-     "completion core 104",
-     "completion core 105",
-     "completion core 106",
-     "completion core 107",
-     "completion core 108",
-     "completion core 109",
-     "completion core 110",
-     "completion core 111",
-     "completion core 112",
-     "completion core 113",
-     "completion core 114",
-     "completion core 115",
-     "completion core 116",
-     "completion core 117",
-     "completion core 118",
-     "completion core 119",
-     "completion core 120",
-     "completion core 121",
-     "completion core 122",
-     "completion core 123",
-     "completion core 124"
+     "completion core 93"
     ]
    }
   },
@@ -776,7 +745,15 @@
      "completion core 74",
      "completion core 75",
      "completion core 76",
-     "completion core 77"
+     "completion core 77",
+     "completion core 78",
+     "completion core 79",
+     "completion core 80",
+     "completion core 81",
+     "completion core 82",
+     "completion core 83",
+     "completion core 84",
+     "completion core 85"
     ]
    }
   },
@@ -1008,7 +985,15 @@
      "completion core 74",
      "completion core 75",
      "completion core 76",
-     "completion core 77"
+     "completion core 77",
+     "completion core 78",
+     "completion core 79",
+     "completion core 80",
+     "completion core 81",
+     "completion core 82",
+     "completion core 83",
+     "completion core 84",
+     "completion core 85"
     ]
    }
   },
@@ -2437,12 +2422,16 @@
       6
      ]
     },
-    "equivalent": false,
-    "matches": [],
-    "verdict": "no match among 15 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 0 times, 0 skipped at the rim); a larger grid may find more cores",
+    "equivalent": true,
+    "matches": [
+     "completion core 3"
+    ],
+    "verdict": "equivalent to the single defect (core: completion core 3)",
     "candidates": [
+     "Volterra core 1",
      "Volterra core 2",
-     "Volterra core 3",
+     "completion core 3",
+     "completion core 4",
      "completion core 5",
      "completion core 6",
      "completion core 7",
@@ -2622,11 +2611,14 @@
       6
      ]
     },
-    "equivalent": false,
-    "matches": [],
-    "verdict": "no match among 1 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 0 times, 0 skipped at the rim); a larger grid may find more cores",
+    "equivalent": true,
+    "matches": [
+     "completion core 2"
+    ],
+    "verdict": "equivalent to the single defect (core: completion core 2)",
     "candidates": [
-     "Volterra core 1"
+     "Volterra core 1",
+     "completion core 2"
     ]
    }
   },
@@ -2813,9 +2805,11 @@
     },
     "equivalent": false,
     "matches": [],
-    "verdict": "no match among 12 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 3 times, 0 skipped at the rim); a larger grid may find more cores",
+    "verdict": "no match among 12 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 0 times, 0 skipped at the rim); a larger grid may find more cores",
     "candidates": [
      "Volterra core 1",
+     "completion core 2",
+     "completion core 3",
      "completion core 4",
      "completion core 5",
      "completion core 6",
@@ -2824,9 +2818,7 @@
      "completion core 9",
      "completion core 10",
      "completion core 11",
-     "completion core 12",
-     "completion core 13",
-     "completion core 14"
+     "completion core 12"
     ]
    }
   },
@@ -3010,11 +3002,16 @@
     },
     "equivalent": false,
     "matches": [],
-    "verdict": "no match among 42 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 3 times, 0 skipped at the rim); a larger grid may find more cores",
+    "verdict": "no match among 42 distinct cores scanned (grid=1, 6 Volterra builds, completions capped 4 times, 0 skipped at the rim); a larger grid may find more cores",
     "candidates": [
+     "Volterra core 1",
+     "Volterra core 2",
      "Volterra core 3",
-     "Volterra core 4",
-     "Volterra core 6",
+     "completion core 4",
+     "completion core 5",
+     "completion core 6",
+     "completion core 7",
+     "completion core 8",
      "completion core 9",
      "completion core 10",
      "completion core 11",
@@ -3022,9 +3019,20 @@
      "completion core 13",
      "completion core 14",
      "completion core 15",
+     "completion core 16",
+     "completion core 17",
+     "completion core 18",
+     "completion core 19",
+     "completion core 20",
+     "completion core 21",
+     "completion core 22",
+     "completion core 23",
+     "completion core 24",
      "completion core 25",
      "completion core 26",
      "completion core 27",
+     "completion core 28",
+     "completion core 29",
      "completion core 30",
      "completion core 31",
      "completion core 32",
@@ -3034,26 +3042,10 @@
      "completion core 36",
      "completion core 37",
      "completion core 38",
-     "completion core 58",
-     "completion core 59",
-     "completion core 60",
-     "completion core 61",
-     "completion core 62",
-     "completion core 63",
-     "completion core 64",
-     "completion core 65",
-     "completion core 73",
-     "completion core 84",
-     "completion core 90",
-     "completion core 94",
-     "completion core 99",
-     "completion core 100",
-     "completion core 101",
-     "completion core 104",
-     "completion core 105",
-     "completion core 108",
-     "completion core 109",
-     "completion core 110"
+     "completion core 39",
+     "completion core 40",
+     "completion core 41",
+     "completion core 42"
     ]
    }
   },

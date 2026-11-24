@@ -22,6 +22,7 @@ use serde::Serialize;
 
 use super::coxeter_gram::{classify_schlafli, mat_mul, mat_vec, CoxeterRealisation, HoneycombRegime, Mat4, Vec4};
 use super::key_index::KeyIndex;
+use super::coxeter_gram::SiteOrbit;
 use super::{CellComplex3d, ComplexBuilder};
 use crate::growth::h3_complex::{IDEAL_VERTEX_REASON, INFINITE_CELL_REASON};
 
@@ -94,15 +95,29 @@ fn faces_within(real: &CoxeterRealisation, steps: &[Mat4], radius: f64, search: 
     if idx.min_gap.is_finite() {
         return Err(format!("face keys came {:.2e} apart (precision)", idx.min_gap));
     }
-    Ok(all.into_iter().filter(|g| mat_vec(g, &w2)[0] <= radius.cosh()).collect())
+    // A face centred exactly on the bounding sphere is inside, including the seed at R=0.
+    let limit = radius.cosh() * (1.0 + 8.0 * f64::EPSILON);
+    Ok(all.into_iter().filter(|g| mat_vec(g, &w2)[0] <= limit).collect())
 }
 
 /// The ball truncation of the paracompact honeycomb {p,q,r} at radius `radius`; `search_steps`
 /// (normally 1) is how many face steps D beyond R the search explores.
 pub fn paracompact_ball_with(p: u32, q: u32, r: u32, radius: f64, search_steps: u32) -> Result<ParacompactBall, String> {
+    build_ball(p, q, r, radius, search_steps, false)
+}
+
+/// Faces of the central infinite cell whose centres lie within hyperbolic radius R of the seed face.
+pub fn single_cell_patch(p: u32, q: u32, r: u32, radius: f64) -> Result<ParacompactBall, String> {
+    build_ball(p, q, r, radius, 1, true)
+}
+
+fn build_ball(p: u32, q: u32, r: u32, radius: f64, search_steps: u32, seed_only: bool) -> Result<ParacompactBall, String> {
     let cls = classify_schlafli(p, q, r);
     if cls.regime != HoneycombRegime::HyperbolicParacompactH3 {
         return Err(format!("{{{p},{q},{r}}} is not paracompact: grow it by layers instead ({})", cls.reason));
+    }
+    if seed_only && !cls.has_infinite_euclidean_cells {
+        return Err("For a finite cell use the complete layer-zero construction.".into());
     }
     if !(radius.is_finite() && radius >= 0.0) {
         return Err(format!("radius must be a finite number >= 0, got {radius}"));
@@ -116,7 +131,8 @@ pub fn paracompact_ball_with(p: u32, q: u32, r: u32, radius: f64, search_steps: 
     let mut steps = Vec::new();
     for h in group(&[rr[0], rr[1]], &xi) {
         steps.push(mat_mul(&h, &rr[2]));
-        steps.push(mat_mul(&h, &r3r2));
+        // R0, R1, R2 preserve the seed cell. R3 crosses to the neighbouring cell.
+        if !seed_only { steps.push(mat_mul(&h, &r3r2)); }
     }
     let w2 = real.w[2];
     let step = steps.iter().map(|s| mat_vec(s, &w2)).map(|x| (x[0] * w2[0] - x[1] * w2[1] - x[2] * w2[2] - x[3] * w2[3]).max(1.0).acosh()).fold(0.0, f64::max);
@@ -130,10 +146,30 @@ pub fn paracompact_ball_with(p: u32, q: u32, r: u32, radius: f64, search_steps: 
     let mut cell_faces: Vec<Vec<usize>> = Vec::new();
     let rot = mat_mul(&rr[0], &rr[1]);
     let mut coords: Vec<Vec4> = Vec::new();
+    let (site, _) = cls.finite_site_orbit().expect("classified H³");
+    let klein = |x: Vec4| [1, 2, 3].map(|i| x[i] / x[0]);
+    let mut orbit_centres = Vec::new();
+    let mut incidence_sites: Vec<Vec<[f64; 3]>> = Vec::new();
+    // The ray from face centre f toward ideal cell centre k has unit tangent
+    // k/(-<f,k>) - f. A displacement of 0.1 keeps each opposite-side pair
+    // closer than sites belonging to different faces (centre spacing acosh(2)).
+    let incidence_seed = (site == SiteOrbit::FaceCell).then(|| {
+        let (f, k) = (real.w[2], real.w[3]);
+        let inner = f[0]*k[0] - f[1]*k[1] - f[2]*k[2] - f[3]*k[3];
+        let t = 0.1_f64;
+        [0, 1, 2, 3].map(|i| (-t).exp()*f[i] + t.sinh()*k[i]/inner)
+    });
+    let mut edge_centres = KeyIndex::new(3, 1e-4);
     for g in &kept {
         let mut cyc = Vec::with_capacity(p as usize);
         let mut h = *g;
         for _ in 0..p {
+            if site == SiteOrbit::Edge {
+                let centre = mat_vec(&h, &real.w[1]);
+                if edge_centres.insert(spatial(&centre)).1 {
+                    orbit_centres.push(klein(centre));
+                }
+            }
             let x = mat_vec(&h, &real.w[0]);
             let key = if ideal { direction(&x) } else { spatial(&x) };
             let (vid, new) = vidx.insert(key);
@@ -143,17 +179,28 @@ pub fn paracompact_ball_with(p: u32, q: u32, r: u32, radius: f64, search_steps: 
             cyc.push(vid as usize);
             h = mat_mul(&h, &rot);
         }
+        if site == SiteOrbit::Face {
+            orbit_centres.push(klein(mat_vec(g, &real.w[2])));
+        }
         let f = b.add_face(cyc);
-        for m in [*g, mat_mul(g, &rr[3])] {
-            let c = mat_vec(&m, &real.w[3]);
+        let neighbours = [*g, mat_mul(g, &rr[3])];
+        for m in &neighbours[..if seed_only { 1 } else { 2 }] {
+            let c = mat_vec(m, &real.w[3]);
             let (cid, new) = cidx.insert(if infinite { direction(&c) } else { spatial(&c) });
             if new {
+                if site == SiteOrbit::Cell {
+                    orbit_centres.push(klein(c));
+                }
                 cell_faces.push(Vec::new());
+                if incidence_seed.is_some() { incidence_sites.push(Vec::new()); }
             }
             cell_faces[cid as usize].push(f);
+            if let Some(seed) = &incidence_seed {
+                incidence_sites[cid as usize].push(klein(mat_vec(m, seed)));
+            }
         }
     }
-    if vidx.min_gap.is_finite() || cidx.min_gap.is_finite() {
+    if vidx.min_gap.is_finite() || cidx.min_gap.is_finite() || edge_centres.min_gap.is_finite() {
         return Err("vertex or cell keys came closer than 100 × tolerance (precision)".into());
     }
     // Faces of a finite cell {p,q}: F = 4q / (2p + 2q − pq) (Euler's formula).
@@ -164,6 +211,10 @@ pub fn paracompact_ball_with(p: u32, q: u32, r: u32, radius: f64, search_steps: 
         b.add_cell(fs, 0, truncated);
     }
     let mut cx = b.finish();
+    if incidence_seed.is_some() {
+        orbit_centres = incidence_sites.into_iter().flatten().collect();
+    }
+    cx.orbit_centres = orbit_centres;
     for x in &coords {
         if ideal {
             let s = direction(x);

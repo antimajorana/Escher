@@ -8,7 +8,9 @@ Expected values are hand-derived or independent of the code under test:
     script cs_indep.py, 2026-11-20), and the first one by hand;
   * which point sets have more symmetry than G: hand arguments in the test comments.
 """
+import json
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -16,6 +18,28 @@ import pytest
 from papertilling import _net3d_key as NK
 from papertilling import _wyckoff3d as W
 from papertilling import points3d as P
+
+
+@pytest.mark.slow
+@pytest.mark.filterwarnings("ignore:Set OLD_ERROR_HANDLING to false:DeprecationWarning:spglib")
+def test_stored_single_species_nets_recover_the_group_and_site_orbits():
+    import spglib
+
+    data = Path(P.__file__).parent / "data" / "points3d.json"
+    groups = json.loads(data.read_text(encoding="utf-8"))["groups"]
+    assert set(map(int, groups)) == set(range(1, 231))
+    for group in groups.values():
+        number = group["group"]
+        for k, entry in enumerate(group["entries"]):
+            # Give every site the same species. Any additional period would increase the
+            # operation count in this primitive cell. Orbit indices may be permuted.
+            sites = entry["sites"]
+            dataset = spglib.get_symmetry_dataset((entry["A"], entry["F"], [1] * sites), symprec=1e-5)
+            assert dataset is not None and dataset.number == number, (number, k)
+            assert len(dataset.rotations) == len(W.group_entry(number)["ops"]), (number, k)
+            pairs = set(zip(entry["labels"], dataset.equivalent_atoms))
+            assert len(pairs) == len(set(dataset.equivalent_atoms)) == len(set(entry["labels"])), (number, k)
+            assert NK.state(sites, entry["bonds"]) == (1, 3, 1), (number, k)
 
 
 def mults(number):

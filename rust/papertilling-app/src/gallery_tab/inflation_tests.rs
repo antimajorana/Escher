@@ -172,3 +172,34 @@ fn kittest_more_drawer_reveals_seed_rule_and_periodic_grid_toggle() {
     assert!(h.query_by_label_contains("Patch repeat:").is_some());
     assert!(matches!(h.state().cv.scene(), Scene2D::PeriodicCell { .. }));
 }
+
+#[test]
+fn open_patch_preserves_multi_orbit_bond_colours() {
+    use std::collections::BTreeSet;
+
+    use super::thumb_cache::ThumbGeom;
+    use crate::scene2d::bond_palette;
+
+    let backend = AppBackend::new();
+    let mut cv = canvas();
+    let mut st = GalleryTabState::new(&backend, &mut cv);
+    select(&mut st, &backend, &mut cv, "named", "p4g", "shastry_sutherland");
+    st.set_show_unit_cell(false, &mut cv);
+    assert!(st.inflation.enabled);
+    assert!(st.inflation.last_error.is_none(), "{:?}", st.inflation.last_error);
+
+    assert!(st.cell().bonds.iter().any(|b| b.kind == 0), "Shastry-Sutherland has kind 0 bonds");
+    assert!(st.cell().bonds.iter().any(|b| b.kind == 1), "Shastry-Sutherland has kind 1 bonds");
+
+    let Scene2D::VectorScene { primitives } = cv.scene() else {
+        panic!("expected VectorScene for open patch");
+    };
+    let count_0 = primitives.lines.iter().filter(|l| l.color == bond_palette(0)).count();
+    let count_1 = primitives.lines.iter().filter(|l| l.color == bond_palette(1)).count();
+    assert!(count_0 > 0, "expected bond_palette(0) edges in open patch");
+    assert!(count_1 > 0, "expected bond_palette(1) edges in open patch");
+
+    let patch_colours: BTreeSet<[u8; 4]> = primitives.lines.iter().map(|l| l.color).collect();
+    let thumb_colours: BTreeSet<[u8; 4]> = ThumbGeom::build(st.active_item()).lines.iter().map(|l| l.2).collect();
+    assert_eq!(patch_colours, thumb_colours, "open patch bond colours must match ThumbGeom");
+}

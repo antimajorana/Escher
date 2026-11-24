@@ -182,3 +182,28 @@ fn stone_wales_is_neutral_with_zero_burgers() {
     assert_eq!(det.defects.len(), 1);
     assert_eq!((det.defects[0].kind.as_str(), det.defects[0].burgers), ("neutral", Some([0.0, 0.0])));
 }
+
+#[test]
+fn nye_annulus_counts_its_clockwise_hole_and_both_disconnected_components() {
+    let pos: Vec<_> = (0..16).map(|i| [f64::from(i % 4), f64::from(i / 4)]).collect();
+    let mut edges = Vec::new();
+    for i in 0..16 {
+        if i % 4 < 3 { edges.push((i, i + 1)); }
+        if i < 12 { edges.push((i, i + 4)); }
+    }
+    let faces = PlanarFaces::new(&BondGraph::from_edges(&pos, &edges));
+    let by_corner = |v| faces.faces.iter().position(|f| f.iter().min() == Some(&v)).unwrap();
+    let ring: Vec<_> = (0..9).filter(|&i| i != by_corner(5)).collect();
+    let islands = vec![by_corner(0), by_corner(10)];
+    let point_contact = vec![by_corner(0), by_corner(5)];
+    for (region, expected) in [(ring, [-1.0, 9.0]), (islands, [1.0, 1.0]), (point_contact, [1.0, 1.0])] {
+        let walks = nye_loops::region_boundaries(&faces, &region.iter().copied().collect());
+        let mut areas: Vec<_> = walks.iter().map(|w| signed_area(&pos, w)).collect();
+        areas.sort_by(f64::total_cmp);
+        assert_eq!(areas, expected);
+        let nye = nye_tensor(&pos, &square_cell(), Frame2D::default(), Some(&edges), None, Some(&region)).unwrap();
+        assert!(nye.boundary_walk.is_empty());
+        assert_eq!(nye.total, Some([0.0; 2]));
+        assert_eq!(nye.boundary_closure, [0.0; 2]);
+    }
+}

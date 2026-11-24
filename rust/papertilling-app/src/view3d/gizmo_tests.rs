@@ -163,4 +163,11 @@ fn gizmo_axis_ends_and_hits_match_the_view_rotation() {
     assert_eq!(preset_for_axis(0), CameraPreset::Side);
     assert_eq!(preset_for_axis(1), CameraPreset::Front);
     assert_eq!(preset_for_axis(2), CameraPreset::Top);
+    for axis in 0..3 {
+        for positive in [false, true] {
+            view.look_from_axis(axis, positive);
+            let depth = view.rotation()[axis][2];
+            assert!((depth - if positive { 1.0 } else { -1.0 }).abs() < 1e-5);
+        }
+    }
 }

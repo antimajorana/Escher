@@ -8,7 +8,7 @@ use papertilling_core::bieberbach::{
     analyze_wallpaper_group, from_wallpaper_group, BieberbachSummary, SpaceGroupAnalyzer,
 };
 use papertilling_core::plane::family::LatticeFamily;
-use papertilling_core::plane::groups::{canonical_symbol, prim_u, prim_u_inv, WALLPAPER_GROUPS};
+use papertilling_core::plane::groups::{canonical_symbol, WALLPAPER_GROUPS};
 use papertilling_core::types::{Isometry2, Recipe};
 
 use crate::theme::ThemeTokens;
@@ -67,10 +67,8 @@ pub fn format_holonomy_abelian_charge(
     let cell = LatticeFamily::from_recipe(recipe, None).ok()?.cell();
     let a = [[cell.a1[0], cell.a2[0]], [cell.a1[1], cell.a2[1]]];
     let a_inv = mat2_inv_loc(a)?;
-    let r_conv_f = mat2_mul_loc(a_inv, mat2_mul_loc(holonomy.m, a));
-    let u_inv = prim_u_inv(canon).ok()?;
-    let u = prim_u(canon).ok()?;
-    let r_prim_f = mat2_mul_loc(u_inv, mat2_mul_loc(r_conv_f, u));
+    // LatticeFamily::cell already returns primitive Cartesian basis columns.
+    let r_prim_f = mat2_mul_loc(a_inv, mat2_mul_loc(holonomy.m, a));
     let r_prim = vec![
         vec![r_prim_f[0][0].round() as i64, r_prim_f[0][1].round() as i64],
         vec![r_prim_f[1][0].round() as i64, r_prim_f[1][1].round() as i64],
@@ -83,8 +81,7 @@ pub fn format_holonomy_abelian_charge(
         }
     }
     let r_idx = sg.point_index(&r_prim)?;
-    let t_conv = mat2_vec_loc(a_inv, holonomy.t);
-    let t_prim = mat2_vec_loc(u_inv, t_conv);
+    let t_prim = mat2_vec_loc(a_inv, holonomy.t);
     let mut b_prim = [0_i64; 2];
     for k in 0..2 {
         let diff = t_prim[k] - sg.tau[r_idx][k].to_f64();
@@ -187,4 +184,27 @@ pub fn show_bieberbach_inspector_section(
         ui.small(format!("Abelianized loop charge: {chi_line}"));
     }
     show_wallpaper_bieberbach_collapsible(ui, group, id_salt, tokens);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centred_rectangular_primitive_translation_survives_abelianization() {
+        let recipe = Recipe {
+            group: "cmm".into(),
+            a: 2.0,
+            b: Some(3.0),
+            gamma: None,
+            sites: vec![[0.0, 0.0]],
+            bonds: Vec::new(),
+        };
+        // Reflections identify the two primitive periods and their negatives in G^ab.
+        // Each primitive period has order two. The sum of two such periods is trivial.
+        let charge =
+            |t| format_holonomy_abelian_charge("cmm", &recipe, &Isometry2 { m: [[1.0, 0.0], [0.0, 1.0]], t }).unwrap();
+        assert_ne!(charge([1.0, 1.5]), charge([0.0, 0.0]));
+        assert_eq!(charge([2.0, 3.0]), charge([0.0, 0.0]));
+    }
 }

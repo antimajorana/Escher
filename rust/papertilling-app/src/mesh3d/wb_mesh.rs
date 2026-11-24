@@ -30,6 +30,27 @@ pub fn mesh_from_points_edges(points: &[[f64; 3]], edges: &[(usize, usize, u8)],
     mesh_from_net3d(&net)
 }
 
+/// Put solid site markers in the mesh's opaque prefix, in its existing model coordinates.
+pub(crate) fn add_site_markers(mesh: &mut GpuMeshData, sites: &[[f64; 3]]) {
+    let mut markers = Vec::with_capacity(24 * sites.len());
+    for site in sites {
+        let point = core::array::from_fn(|i| (site[i] as f32 - mesh.center[i]) / mesh.radius);
+        super::geom::append_octahedron(&mut markers, point, 0.007, [0.10, 0.32, 0.60, 1.0]);
+    }
+    let count = markers.len();
+    mesh.faces.splice(mesh.opaque_vertex_count..mesh.opaque_vertex_count, markers);
+    mesh.opaque_vertex_count += count;
+}
+
+/// Draw bonds in the model frame used for the cell mesh.
+pub(crate) fn add_site_bonds(mesh: &mut GpuMeshData, sites: &[[f64; 3]], bonds: &[[usize; 2]]) {
+    let point = |u: usize| core::array::from_fn(|i| (sites[u][i] as f32 - mesh.center[i]) / mesh.radius);
+    for &[u, v] in bonds {
+        push_wire(&mut mesh.wires, point(u), point(v), [0.10, 0.32, 0.60, 1.0]);
+    }
+    mesh.edge_count += bonds.len();
+}
+
 /// Default face tint: the ring-size palette (`face_size_rgba`), slightly transparent.
 pub fn wb_face_tint(face: &[usize]) -> [f32; 4] {
     face_size_rgba(face.len(), true)

@@ -32,6 +32,7 @@ pub mod point_defects;
 pub mod sheet3d;
 mod sheet3d_energy;
 mod sheet3d_opt;
+pub(crate) mod sheet3d_polygon;
 pub(crate) mod sheet3d_topology;
 pub mod single_cache;
 pub mod single_crystal;
@@ -44,7 +45,10 @@ mod stage5_gate_tests;
 pub mod stone_wales;
 pub mod surgery;
 mod sym_helper;
+mod volterra_charts;
 pub mod volterra_patch;
+#[cfg(test)]
+mod volterra_patch_tests;
 pub mod volterra_scan;
 pub mod wall_build;
 pub mod wall_endings;

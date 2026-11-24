@@ -45,7 +45,6 @@ impl CoreOut {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn complex(&self) -> Option<&CellComplex3d> {
         match self {
             Self::Growth(cx, _) => Some(cx),
@@ -146,10 +145,11 @@ pub(crate) fn show_built(ui: &mut egui::Ui, b: &Built, tokens: &ThemeTokens, gri
         }
         _ => {}
     }
-    egui::Grid::new(grid_id).num_columns(2).striped(true).show(ui, |ui| {
+    let column_width = ((ui.available_width() - ui.spacing().item_spacing.x) * 0.5).max(1.0);
+    egui::Grid::new(grid_id).num_columns(2).max_col_width(column_width).striped(true).show(ui, |ui| {
         for (k, v) in &b.rows {
-            ui.label(k);
-            ui.label(v);
+            ui.add(egui::Label::new(k).wrap());
+            ui.add(egui::Label::new(v).wrap());
             ui.end_row();
         }
     });
@@ -184,8 +184,9 @@ pub(crate) fn show_built(ui: &mut egui::Ui, b: &Built, tokens: &ThemeTokens, gri
                 });
         });
     }
-    for n in &b.notes {
-        ui.add_space(4.0);
-        ui.add(egui::Label::new(egui::RichText::new(n).small()).wrap());
-    }
+    egui::CollapsingHeader::new("Geometry and numerical limits").show(ui, |ui| {
+        for note in &b.notes {
+            ui.add(egui::Label::new(egui::RichText::new(note).small()).wrap());
+        }
+    });
 }

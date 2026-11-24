@@ -3,7 +3,7 @@
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
-use super::{FuseDefectChoice, FusePreset, FuseTabState, compute_slots_for_b, spec_from_choice};
+use super::{FuseDefectChoice, FuseJob, FusePreset, FuseTabState, compute_slots_for_b, run_fuse_job, spec_from_choice};
 use crate::analysis_mode::tests::{assert_no_forbidden_tokens, settled, wait_until};
 use crate::app::{AppMode, DefectsView, NavTab, PapertillingApp};
 use crate::backend::AppBackend;
@@ -11,6 +11,8 @@ use crate::canvas2d::{Canvas2D, Scene2D};
 use crate::combine_worker::empty_crystal;
 use crate::live_combine::map_ref_to_drawn;
 use crate::theme::{StudioTheme, typography};
+use papertilling_core::defect::charge::{check_frames, total_charge};
+use papertilling_core::defect::single_cache::SingleDefectCache;
 use papertilling_core::defect::surgery::DefectSpec;
 
 fn harness() -> Harness<'static, PapertillingApp> {
@@ -69,10 +71,16 @@ fn fuse_and_compare_default_hud_honeycomb_5_7_completion_equivalence() {
         );
         assert!(!cand.crystal.pos.is_empty());
 
+        let target_b = bundle.report.charge.b.expect("honeycomb dislocation b");
         let c_res = &app.fuse.combined_inspectors.circuit.overlay.as_ref().expect("combined Burgers loop").result;
         let s_res = &app.fuse.single_inspectors.circuit.overlay.as_ref().expect("single Burgers loop").result;
         assert!(c_res.burgers_norm > 0.5, "combined |b| = {}", c_res.burgers_norm);
         assert!((c_res.burgers_norm - s_res.burgers_norm).abs() < 1e-6, "{} vs {}", c_res.burgers_norm, s_res.burgers_norm);
+        assert!(
+            (s_res.closure_vector[0] - target_b[0]).hypot(s_res.closure_vector[1] - target_b[1]) < 1e-6,
+            "single circuit closure {:?} flipped relative to target {target_b:?}",
+            s_res.closure_vector
+        );
         assert!(c_res.frank_angle_deg.unwrap_or(0.0).abs() < 1e-6 && s_res.frank_angle_deg.unwrap_or(0.0).abs() < 1e-6);
     }
 
@@ -273,4 +281,71 @@ fn camera_sync_keeps_translated_patches_centered_independently() {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
     assert_eq!(left.world_to_screen_at(rect, [12.0, -9.0]), right.world_to_screen_at(rect, [0.0, 0.0]));
     assert_eq!(left.zoom, right.zoom);
+}
+
+#[test]
+fn fuse_gui_path_preserves_signed_burgers_vector_on_c2_and_non_c2_groups() {
+    let backend = AppBackend::new();
+    let mut cache = SingleDefectCache::default();
+
+    for (key, expected_group) in [("square", "p4m"), ("breathing_kagome", "p3m1"), ("chiral_triangular", "p3")] {
+        let item = backend.find_named(key).unwrap_or_else(|| panic!("missing named lattice {key}")).clone();
+        assert_eq!(item.group, expected_group);
+        let mut fuse = FuseTabState::new(&item, &backend);
+        let job = FuseJob {
+            item: item.clone(),
+            info: fuse.info.clone(),
+            specs: fuse.current_specs(),
+            relaxed: true,
+            auto_radius: fuse.auto_radius,
+            manual_radius: fuse.manual_radius,
+        };
+        let res = run_fuse_job(&mut cache, job);
+        assert!(res.combined.refused.is_none(), "{key} refused: {:?}", res.combined.refused);
+        let comb_b = total_charge(&res.combined.crystal)
+            .unwrap_or_else(|e| panic!("{key} combined total_charge: {e}"))
+            .burgers
+            .unwrap_or_else(|| panic!("{key} expected dislocation combined charge"));
+        assert!(comb_b[0].hypot(comb_b[1]) > 1e-4, "{key} non-zero b");
+
+        let bundle = res.bundle.unwrap_or_else(|e| panic!("{key} bundle err: {e}"));
+        assert_eq!(bundle.report.kind, "dislocation", "{key}");
+        assert_eq!(bundle.report.scan.as_ref().expect("scan").other_class, 0, "{key}: spurious other_class");
+        assert!(!bundle.candidates.is_empty(), "{key}: expected single-dislocation candidates");
+        let rep_b = bundle.report.charge.b.expect("report b");
+        assert!(
+            (rep_b[0] - comb_b[0]).hypot(rep_b[1] - comb_b[1]) < 1e-6,
+            "{key}: report b {rep_b:?} != combined b {comb_b:?}"
+        );
+        for cand in &bundle.candidates {
+            if cand.kind == "Volterra" {
+                assert_eq!(check_frames(&cand.crystal), 0, "{key} {}", cand.name);
+            }
+            let ch = total_charge(&cand.crystal).unwrap_or_else(|e| panic!("{key} {} charge: {e}", cand.name));
+            assert_eq!(ch.kind, "dislocation", "{key} {}", cand.name);
+            let cb = ch.burgers.expect("candidate burgers");
+            assert!(
+                (cb[0] - comb_b[0]).hypot(cb[1] - comb_b[1]) < 1e-6,
+                "{key} {}: got {cb:?} instead of exact +{comb_b:?}",
+                cand.name
+            );
+            assert!(
+                (ch.holonomy.t[0] + comb_b[0]).hypot(ch.holonomy.t[1] + comb_b[1]) < 1e-6,
+                "{key} {}: holonomy.t {:?} != -b",
+                cand.name,
+                ch.holonomy.t
+            );
+        }
+
+        fuse.selected_candidate = bundle.default_index;
+        fuse.last_combined = res.combined;
+        fuse.last_bundle = Some(Ok(bundle));
+        fuse.sync_single_canvas_only(&item, true);
+        let s_res = &fuse.single_inspectors.circuit.overlay.as_ref().expect("single circuit overlay").result;
+        assert!(
+            (s_res.closure_vector[0] - comb_b[0]).hypot(s_res.closure_vector[1] - comb_b[1]) < 1e-6,
+            "{key}: GUI single-crystal circuit closure {:?} != +{comb_b:?}",
+            s_res.closure_vector
+        );
+    }
 }

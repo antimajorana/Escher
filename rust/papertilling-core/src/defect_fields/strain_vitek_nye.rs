@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::nye_loops::{default_cutoff, fit_frame_angle, g_dir, region_boundary_walk, region_frank, snap_edges};
+use super::nye_loops::{default_cutoff, fit_frame_angle, g_dir, region_boundaries, region_frank, snap_edges};
 use super::topo_detect::topological_charges;
 use super::{BondGraph, PlanarFaces, RefLattice, norm, sub};
 use crate::types::{Cell2D, Frame2D};
@@ -122,12 +122,12 @@ pub struct NyeField {
     /// Frame angle (degrees) fitted on the outer boundary ring.
     pub frame_angle_deg: f64,
     pub region: Vec<usize>,
-    /// Counter-clockwise boundary walk of the region.
+    /// Boundary circuit when the region has a single component of boundary, empty otherwise.
     pub boundary_walk: Vec<usize>,
     pub net_frank_deg: f64,
     /// `sum_f alpha(f) A_f` over the region (`None` when the net Frank angle is non-zero).
     pub total: Option<[f64; 2]>,
-    /// `sum G` along `boundary_walk` (same snapping), for the telescoping check.
+    /// Sum of snapped vectors along all oriented boundary components.
     pub boundary_closure: [f64; 2],
     pub reason: String,
 }
@@ -166,11 +166,11 @@ pub fn nye_tensor(
         }
         None => (0..pf.faces.len()).collect(),
     };
-    let walk = region_boundary_walk(&pf, &reg);
+    let mut walks = region_boundaries(&pf, &reg);
     let tc = topological_charges(&g, &pf, &rl);
-    let net = region_frank(&pf, &reg, &walk, &tc.vertex_frank, &tc.face_frank);
+    let net = region_frank(&pf, &reg, &walks, &tc.vertex_frank, &tc.face_frank);
     let mut closure = [0.0, 0.0];
-    for w in walk.windows(2) {
+    for w in walks.iter().flat_map(|walk| walk.windows(2)) {
         let e = g_dir(&snap, w[0], w[1]);
         closure = [closure[0] + e[0], closure[1] + e[1]];
     }
@@ -183,6 +183,10 @@ pub fn nye_tensor(
     } else {
         (None, format!("[PROVED] region encloses net Frank angle {net} deg: the Burgers vector depends on the frame"))
     };
+    let reason = if walks.len() > 1 {
+        format!("{reason}. Summed {} boundary circuits.", walks.len())
+    } else { reason };
+    let walk = if walks.len() == 1 { walks.pop().unwrap() } else { Vec::new() };
     Ok(NyeField {
         faces: pf.faces, areas: pf.areas, alpha, frame_angle_deg: th.to_degrees(), region: reg.into_iter().collect(),
         boundary_walk: walk, net_frank_deg: net, total, boundary_closure: closure, reason,

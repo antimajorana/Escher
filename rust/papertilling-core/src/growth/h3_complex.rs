@@ -48,7 +48,7 @@ pub const KEY_TOL: f64 = 1e-4;
 pub const IDEAL_VERTEX_REASON: &str = "[PROVED] an ideal vertex lies in infinitely many cells: its vertex figure {q,r} \
      is a Euclidean tiling ((q-2)(r-2) = 4)";
 /// [PROVED] reason for an infinite cell (plan §1 Q4).
-pub const INFINITE_CELL_REASON: &str = "[PROVED] every cell is an infinite horospherical {4,4} or {6,3} tiling \
+pub const INFINITE_CELL_REASON: &str = "[PROVED] every cell is an infinite horospherical tiling \
      ((p-2)(q-2) = 4), so a cell has infinitely many vertices and no layer can be built whole";
 
 /// The id returned for a cell of the engine's final look-ahead that is not interned
@@ -462,6 +462,13 @@ impl CoxeterComplex {
         } else {
             [(1.0 + k[0] * k[0] + k[1] * k[1] + k[2] * k[2]).sqrt(), k[0], k[1], k[2]]
         }
+    }
+
+    /// Centre of a finite hyperbolic cell in the Klein ball.
+    pub(crate) fn klein_cell_centre(&self, cell: u32) -> [f64; 3] {
+        let [x, y, z, _] = self.st.borrow().cells.point(cell);
+        let t = (1.0 + x*x + y*y + z*z).sqrt();
+        [x/t, y/t, z/t]
     }
 
     /// The fundamental points w0..w3 of the realisation (S³ uses them to pick a pole).

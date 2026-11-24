@@ -1,9 +1,10 @@
 //! Discrete stretching + orientation-safe hinge bending energy and analytic gradients for `sheet3d`.
 
 use std::collections::HashMap;
-use std::f64::consts::PI;
 
 use crate::defect::gsv_model::{GsvModel, StretchTerm, eval_gsv_fg};
+pub(crate) use crate::defect::sheet3d_polygon::compute_vertex_omega;
+use crate::defect::sheet3d_polygon::concave_face_triangulation;
 use crate::types::BuiltCrystal;
 
 #[derive(Clone, Copy)]
@@ -34,12 +35,58 @@ pub(crate) struct Spring {
 
 type EdgeIncidence = Vec<(usize, HingePt, i32, usize, usize)>;
 
+#[allow(dead_code)]
 pub(crate) fn build_hinges(faces: &[Vec<usize>]) -> Vec<Hinge> {
+    build_hinges_with_ref(faces, None)
+}
+
+pub(crate) fn build_hinges_with_ref(
+    faces: &[Vec<usize>],
+    ref_xyz: Option<&[[f64; 3]]>,
+) -> Vec<Hinge> {
     let mut edge_map: HashMap<(usize, usize), EdgeIncidence> = HashMap::new();
     let mut hinges = Vec::new();
 
     for (fi, f) in faces.iter().enumerate() {
         let k = f.len();
+        if let Some(tris) = ref_xyz.and_then(|xyz| concave_face_triangulation(xyz, f)) {
+            let mut local_inc: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+            for [ia, ib, ic] in tris {
+                let (u, v, w) = (f[ia], f[ib], f[ic]);
+                for (a, b, opp_v) in [(u, v, w), (v, w, u), (w, u, v)] {
+                    local_inc.entry((a.min(b), a.max(b))).or_default().push(opp_v);
+                }
+            }
+            for m in 0..k {
+                let u = f[m];
+                let v = f[(m + 1) % k];
+                let opp = local_inc
+                    .get(&(u.min(v), u.max(v)))
+                    .and_then(|v_opp| v_opp.first().copied())
+                    .map_or(HingePt::FaceCentroid(fi), HingePt::Vert);
+                let dir = if u < v { 1 } else { -1 };
+                edge_map
+                    .entry((u.min(v), u.max(v)))
+                    .or_default()
+                    .push((fi, opp, dir, u, v));
+            }
+            let mut diag_keys: Vec<(usize, usize)> = local_inc.keys().copied().collect();
+            diag_keys.sort_unstable();
+            for (du, dv) in diag_keys {
+                let opps = &local_inc[&(du, dv)];
+                if opps.len() == 2 && opps[0] != opps[1] {
+                    hinges.push(Hinge {
+                        p: HingePt::Vert(du),
+                        q: HingePt::Vert(dv),
+                        opp_a: HingePt::Vert(opps[0]),
+                        opp_b: HingePt::Vert(opps[1]),
+                        weight: 0.5,
+                        sign: 1.0,
+                    });
+                }
+            }
+            continue;
+        }
         for m in 0..k {
             let u = f[m];
             let v = f[(m + 1) % k];
@@ -390,62 +437,6 @@ pub(crate) fn compute_strains(
     (bond_strain, face_strain)
 }
 
-pub(crate) fn compute_vertex_omega(
-    xyz: &[[f64; 3]],
-    faces: &[Vec<usize>],
-    is_boundary: &[bool],
-) -> Vec<f64> {
-    let mut angle_sum = vec![0.0_f64; xyz.len()];
-    for f in faces {
-        let k = f.len();
-        if k < 3 {
-            continue;
-        }
-        if k == 3 {
-            for m in 0..3 {
-                let prev = f[(m + 2) % 3];
-                let curr = f[m];
-                let next = f[(m + 1) % 3];
-                let e1 = sub3(xyz[prev], xyz[curr]);
-                let e2 = sub3(xyz[next], xyz[curr]);
-                let d = (norm3(e1) * norm3(e2)).max(1e-15);
-                angle_sum[curr] += (dot3(e1, e2) / d).clamp(-1.0, 1.0).acos();
-            }
-        } else {
-            let inv = 1.0 / (k as f64);
-            let mut c = [0.0_f64; 3];
-            for &u in f {
-                c[0] += xyz[u][0] * inv;
-                c[1] += xyz[u][1] * inv;
-                c[2] += xyz[u][2] * inv;
-            }
-            for m in 0..k {
-                let prev = f[(m + k - 1) % k];
-                let curr = f[m];
-                let next = f[(m + 1) % k];
-                let e_prev = sub3(xyz[prev], xyz[curr]);
-                let e_cent = sub3(c, xyz[curr]);
-                let e_next = sub3(xyz[next], xyz[curr]);
-                let d1 = (norm3(e_prev) * norm3(e_cent)).max(1e-15);
-                let d2 = (norm3(e_cent) * norm3(e_next)).max(1e-15);
-                angle_sum[curr] += (dot3(e_prev, e_cent) / d1).clamp(-1.0, 1.0).acos()
-                    + (dot3(e_cent, e_next) / d2).clamp(-1.0, 1.0).acos();
-            }
-        }
-    }
-    angle_sum
-        .into_iter()
-        .enumerate()
-        .map(|(u, s)| {
-            if is_boundary[u] || s == 0.0 {
-                0.0
-            } else {
-                2.0 * PI - s
-            }
-        })
-        .collect()
-}
-
 pub(crate) fn compute_hinge_bend_breakdown(
     xyz: &[[f64; 3]],
     edges: &[(usize, usize)],
@@ -506,9 +497,20 @@ pub(crate) fn compute_hinge_bend_breakdown(
             add_site(hp, 0.25 * e_h);
         }
         match (h.p, h.q, h.opp_a, h.opp_b) {
-            (HingePt::Vert(u), HingePt::Vert(v), _, _) => {
+            (HingePt::Vert(u), HingePt::Vert(v), oa, ob) => {
                 if let Some(&idx) = edge_map.get(&(u.min(v), u.max(v))) {
                     bond_bend[idx] += e_h;
+                } else if let (HingePt::Vert(va), HingePt::Vert(vb)) = (oa, ob) {
+                    let perim: Vec<usize> = [(u, va), (va, v), (v, vb), (vb, u)]
+                        .into_iter()
+                        .filter_map(|(x, y)| edge_map.get(&(x.min(y), x.max(y))).copied())
+                        .collect();
+                    if !perim.is_empty() {
+                        let share = e_h / (perim.len() as f64);
+                        for idx in perim {
+                            bond_bend[idx] += share;
+                        }
+                    }
                 }
             }
             (HingePt::FaceCentroid(_), HingePt::Vert(curr), HingePt::Vert(prev), HingePt::Vert(next)) => {

@@ -185,22 +185,32 @@ def _grow(faces, left, rim, v2f, seed, clr):
     return reg | {f for f in range(len(faces)) if f not in outside}
 
 
-def _boundary_walk(faces, left, reg):
-    out = {}
-    for f in (faces[fi] for fi in reg):
-        for u, v in zip(f, f[1:] + f[:1]):
+def _boundaries(faces, left, reg):
+    following, boundary = {}, set()
+    for fi in reg:
+        f = faces[fi]
+        for u, v, w in zip(f, f[1:] + f[:1], f[2:] + f[:2]):
+            following[u, v] = w
             if left.get((v, u)) not in reg:
-                out.setdefault(u, []).append(v)
-    for lst in out.values():
-        lst.sort(reverse=True)
-    stack, walk = [min(out)] if out else [], []
-    while stack:  # Hierholzer on the boundary darts (counter-clockwise)
-        walk.append(stack.pop()) if not out.get(stack[-1]) else stack.append(out[stack[-1]].pop())
-    return walk[::-1]
+                boundary.add((u, v))
+    walks = []
+    for u, v in sorted(boundary):
+        if (u, v) not in boundary:
+            continue
+        walk = [u]
+        while (u, v) in boundary:
+            boundary.remove((u, v))
+            walk.append(v)
+            w = following[u, v]
+            while (w, v) in following:
+                w = following[w, v]
+            u, v = v, w
+        walks.append(walk)
+    return walks
 
 
-def _region_frank(faces, reg, walk, vq, fq):
-    on = set(walk)
+def _region_frank(faces, reg, walks, vq, fq):
+    on = {v for walk in walks for v in walk}
     inner = {v for f in reg for v in faces[f] if v not in on}
     return round((sum(fq[f] for f in reg) + sum(vq[v] for v in inner)) * 1e6) / 1e6 + 0.0
 
@@ -301,13 +311,16 @@ def _py_detect(pos, group, cell, frame, edges, cutoff, clearance):
         foreign = set().union(set(), *(seeds[i] for i in range(len(clusters)) if i not in grp))
         regs = ((_grow(faces, left, rim, v2f, seed, c), c) for c in range(clearance, -1, -1))
         reg, clean = next((r, not (r & foreign)) for r, c in regs if c == 0 or not (r & foreign))
-        walk = _boundary_walk(faces, left, reg)
-        frank = _region_frank(faces, reg, walk, vq, fq)
+        walks = _boundaries(faces, left, reg)
+        walk = walks[0] if len(walks) == 1 else []
+        frank = _region_frank(faces, reg, walks, vq, fq)
         d = dict(kind="disclination", clusters=grp, frank_deg=frank, loop_path=walk, burgers=None, burgers_fs_rh=None,
                  uv=None, weber=None,
                  centre=np.mean([clusters[i]["centre"] for i in grp], axis=0).tolist(),
                  frame_angle_deg=math.degrees(ref.frame_angle), reason="")
-        if len(walk) < 4:
+        if len(walks) > 1:
+            d["reason"] = "REFUSED: the region has several boundary circuits; a single transported Burgers circuit is undefined"
+        elif len(walk) < 4:
             d["reason"] = "REFUSED: no closed loop could be formed round the cluster (it touches the rim)"
         elif frank != 0.0:
             d["reason"] = "[PROVED] net Frank angle != 0 inside the loop: its closure depends on the frame; no Burgers vector"
@@ -403,7 +416,7 @@ def compute_nye_and_strain(pos, lattice, *, ref_pos=None, edges=None, cutoff=Non
     """Discrete Nye tensor per face (one far-field frame fitted on the outer ring) and, with `ref_pos`, the local
     deformation gradient `F`, strains `eps` / `green`, displacement `u` per site, and (with `burgers`) Vitek arrows.
 
-    `nye_total = sum_f alpha(f) A_f` equals `boundary_closure` (the outer loop's Burgers vector) whenever the patch
+    `nye_total = sum_f alpha(f) A_f` equals `boundary_closure` (the sum over all oriented boundary circuits) whenever the patch
     encloses zero net Frank angle; otherwise `nye_total` is None and `reason` says why."""
     cell, _ = _cell_dict(lattice)
     frame, P = frame or _IDENT_FRAME, _pos(pos)
@@ -437,16 +450,19 @@ def compute_nye_and_strain(pos, lattice, *, ref_pos=None, edges=None, cutoff=Non
     gdir = lambda u, v: snap[(u, v)] if u < v else -snap[(v, u)]  # noqa: E731
     alpha = [sum((gdir(f[k], f[(k + 1) % len(f)]) for k in range(len(f))), np.zeros(2)) / a for f, a in zip(faces, areas)]
     reg = set(range(len(faces)))
-    walk = _boundary_walk(faces, left, reg)
+    walks = _boundaries(faces, left, reg)
+    walk = walks[0] if len(walks) == 1 else []
     vq, fq, _ = _charges(P, es, nbrs, faces, rim, left, ref)
-    net = _region_frank(faces, reg, walk, vq, fq)
-    closure = sum((gdir(u, v) for u, v in zip(walk[:-1], walk[1:])), np.zeros(2))
+    net = _region_frank(faces, reg, walks, vq, fq)
+    closure = sum((gdir(u, v) for circuit in walks for u, v in zip(circuit, circuit[1:])), np.zeros(2))
     total = sum((al * a for al, a in zip(alpha, areas)), np.zeros(2)).tolist() if net == 0.0 else None
     out = dict(edges=np.array(es, int).reshape(-1, 2), faces=faces, areas=areas, alpha=np.array(alpha).reshape(-1, 2),
                frame_angle_deg=math.degrees(th), boundary_walk=walk, net_frank_deg=net, nye_total=total,
                boundary_closure=closure.tolist(),
                reason=("[PROVED] antisymmetric snapping telescopes: sum_f alpha A_f = boundary closure" if total is not None
                        else f"[PROVED] region encloses net Frank angle {net} deg: the Burgers vector depends on the frame"))
+    if len(walks) > 1:
+        out["reason"] += f". Summed {len(walks)} boundary circuits."
     return _with_strain(out, P, es, ref_pos, burgers)
 
 

@@ -25,6 +25,7 @@ const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.
 
 fn simple_cubic() -> Space3dPanelState {
     let mut s = Space3dPanelState::default();
+    s.set_catalogue(None);
     s.selected_net = CanonicalNet3d::SimpleCubic;
     s.selected_defect = LineDefect3d::None;
     s
@@ -153,6 +154,7 @@ fn mobius_pan_moves_the_central_face_to_a_known_distance() {
 
 fn app_harness() -> Harness<'static, PapertillingApp> {
     let mut app = PapertillingApp::new(false, String::from("kittest"), String::from("kittest"));
+    app.atlas.space3d.set_catalogue(None);
     app.atlas.space3d.selected_net = CanonicalNet3d::SimpleCubic;
     app.atlas.space3d.selected_defect = LineDefect3d::None;
     app.atlas.sub_tab = AtlasSubTab::SpaceGroups3D;
@@ -295,7 +297,9 @@ fn h2_disk_zoom_scales_coordinates_and_preserves_2d_and_3d_picking() {
     let Scene2D::VectorScene { primitives } = sc else { panic!("vector scene") };
     assert_eq!(primitives.bbox, ([-1.05, -1.05], [1.05, 1.05]));
     let hyp = h.view.as_ref().unwrap().clone();
-    assert!((primitives.circles[0].center[0] - (hyp.poincare_pts[0][0] * 2.5) as f32).abs() < 1e-5);
+    let centre = lorentz_centroid(&hyp.faces[1].iter().map(|&v| hyp.poincare_pts[v]).collect::<Vec<_>>());
+    assert_eq!(primitives.circles.len(), hyp.faces.len());
+    assert!((primitives.circles[1].center[0] - (centre[0] * 2.5) as f32).abs() < 1e-5);
     assert_eq!(h.pick_2d([hyp.poincare_pts[0][0] * 2.5, hyp.poincare_pts[0][1] * 2.5], 100.0, 9.0), Some(HypPick::Vertex(0)));
 
     let f1 = &hyp.faces[1];

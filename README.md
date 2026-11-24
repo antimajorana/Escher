@@ -18,7 +18,7 @@ Every official desktop download and Python acceleration wheel includes `SOURCE-N
 
 A match requires both the loop charge and the core bond pattern, within the search limits. [Scientific scope and mirror/glide examples](docs/SCIENTIFIC_SCOPE.md)
 
-Browse 17 wallpaper groups and surface models under **Lattice**. Compare space, layer, and regular hyperbolic groups under **Advanced → All Views → Forge**.
+Open **View → Explore geometry** for 3D space groups and hyperbolic tilings. In **Hyperbolic H³**, start at layer 0 and increase **Layers** to grow the honeycomb. Browse 17 wallpaper groups and surface models under **Lattice**. Compare space, layer, and regular hyperbolic groups under **Advanced → All Views → Forge**.
 
 ## Python
 

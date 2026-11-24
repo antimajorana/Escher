@@ -474,46 +474,75 @@ pub(crate) fn cart_norm_sq(a: [[f64; 2]; 2], m: [i64; 2]) -> f64 {
     v[0] * v[0] + v[1] * v[1]
 }
 
-pub(crate) fn shortest_nonzero_in_coset(coset: &LatticeCoset, a: [[f64; 2]; 2]) -> Option<[i64; 2]> {
-    let lim = coset.index().unwrap_or(4).max(4) + 2;
-    let mut best: Option<(f64, [i64; 2])> = None;
-    for m0 in -lim..=lim {
-        for m1 in -lim..=lim {
-            if (m0, m1) != (0, 0) && coset.contains([m0, m1]) {
-                let n2 = cart_norm_sq(a, [m0, m1]);
-                if best.is_none_or(|(bn, _)| n2 < bn - 1e-9) { best = Some((n2, [m0, m1])); }
+/// Closest nonzero vectors in an affine lattice, measured in the Cartesian cell metric.
+/// A rank-one coset is a line. In rank two, bound the parallel lines to inspect by their
+/// perpendicular distance from zero and the length of an already known candidate.
+pub(crate) fn shortest_coset_vectors(coset: &LatticeCoset, a: [[f64; 2]; 2]) -> Vec<[i64; 2]> {
+    let cart = |v: [i64; 2]| mat2_vec(a, v.map(|x| x as f64));
+    let dot = |u: [f64; 2], v: [f64; 2]| u[0] * v[0] + u[1] * v[1];
+    let cross = |u: [f64; 2], v: [f64; 2]| u[0] * v[1] - u[1] * v[0];
+    let shift = |v: [i64; 2], d: [i64; 2], n: i64| [v[0] + n * d[0], v[1] + n * d[1]];
+    let nearest_on_line = |offset, dir| {
+        let u = cart(dir);
+        let k = (-dot(cart(offset), u) / dot(u, u)).round() as i64;
+        // Include both possible ties and the neighbours of zero on a line through zero.
+        [k - 1, k, k + 1].map(|n| shift(offset, dir, n))
+    };
+    let mut candidates = BTreeSet::new();
+    match coset.basis_cols.as_slice() {
+        [] => {
+            candidates.insert(coset.offset);
+        }
+        &[u] => candidates.extend(nearest_on_line(coset.offset, u)),
+        &[u, v] => {
+            let (cu, cv) = (cart(u), cart(v));
+            let reduced = crate::surface::glides::gauss_reduce([[cu[0], cv[0]], [cu[1], cv[1]]]);
+            let [u, v] =
+                [0, 1].map(|i| [0, 1].map(|j| i64::from(reduced[0][i]) * u[j] + i64::from(reduced[1][i]) * v[j]));
+            let (cu, cv) = (cart(u), cart(v));
+            let area = cross(cu, cv);
+            let centre = -cross(cu, cart(coset.offset)) / area;
+            let line = |n| nearest_on_line(shift(coset.offset, v, n), u);
+            let trial = line(centre.round() as i64);
+            let radius = trial
+                .iter()
+                .filter(|&&w| w != [0, 0])
+                .map(|&w| cart_norm_sq(a, w))
+                .fold(f64::INFINITY, f64::min)
+                .sqrt();
+            let span = radius * dot(cu, cu).sqrt() / area.abs();
+            for n in (centre - span).floor() as i64..=(centre + span).ceil() as i64 {
+                candidates.extend(line(n));
             }
         }
+        _ => unreachable!("a planar lattice has rank at most two"),
     }
-    best.map(|(_, v)| v)
+    shortest_nonzero_in_set(&candidates, a)
+}
+
+pub(crate) fn shortest_nonzero_in_coset(coset: &LatticeCoset, a: [[f64; 2]; 2]) -> Option<[i64; 2]> {
+    shortest_coset_vectors(coset, a).into_iter().min()
 }
 
 pub(crate) fn shortest_nonzero_in_union(union: &LatticeCosetUnion, a: [[f64; 2]; 2]) -> Vec<[i64; 2]> {
-    let lim = union.index().unwrap_or(4).max(4) + 2;
-    let (mut best_n2, mut cands) = (f64::INFINITY, Vec::new());
-    for m0 in -lim..=lim {
-        for m1 in -lim..=lim {
-            if (m0, m1) != (0, 0) && union.contains([m0, m1]) {
-                let n2 = cart_norm_sq(a, [m0, m1]);
-                if n2 < best_n2 + 1e-7 * best_n2.max(1.0) {
-                    if n2 < best_n2 { best_n2 = n2; }
-                    cands.push((n2, [m0, m1]));
-                }
-            }
-        }
+    let mut candidates = BTreeSet::new();
+    for &offset in &union.offsets {
+        let coset = LatticeCoset { offset, basis_cols: union.basis_cols.clone() };
+        candidates.extend(shortest_coset_vectors(&coset, a));
     }
-    let mut out: Vec<[i64; 2]> = cands.into_iter()
-        .filter(|&(n2, _)| (n2 - best_n2).abs() <= 1e-7 * best_n2.max(1.0))
-        .map(|(_, v)| v).collect();
-    out.sort_by_key(|&v| (-v[0], -v[1]));
-    out
+    shortest_nonzero_in_set(&candidates, a)
 }
 
 pub(crate) fn shortest_nonzero_in_set(set: &BTreeSet<[i64; 2]>, a: [[f64; 2]; 2]) -> Vec<[i64; 2]> {
-    let best_n2 = set.iter().copied().filter(|&v| v != [0, 0]).map(|v| cart_norm_sq(a, v)).fold(f64::INFINITY, f64::min);
-    if !best_n2.is_finite() { return Vec::new(); }
-    let mut out: Vec<[i64; 2]> = set.iter().copied()
-        .filter(|&v| v != [0, 0] && (cart_norm_sq(a, v) - best_n2).abs() <= 1e-7 * best_n2.max(1.0))
+    let best_n2 =
+        set.iter().copied().filter(|&v| v != [0, 0]).map(|v| cart_norm_sq(a, v)).fold(f64::INFINITY, f64::min);
+    if !best_n2.is_finite() {
+        return Vec::new();
+    }
+    let mut out: Vec<[i64; 2]> = set
+        .iter()
+        .copied()
+        .filter(|&v| v != [0, 0] && (cart_norm_sq(a, v) - best_n2).abs() <= 1e-9 * best_n2)
         .collect();
     out.sort_by_key(|&v| (-v[0], -v[1]));
     out

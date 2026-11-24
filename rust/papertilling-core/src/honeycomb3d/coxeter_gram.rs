@@ -51,7 +51,54 @@ pub struct Classification {
     pub reason: String,
 }
 
+/// The sparsest single orbit of finite sites for a supported regular H³ reflection group.
+/// The reciprocal stabilizer order is the number of sites per fundamental chamber.
+/// Ties prefer existing vertices, then cell centres, then face centres.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiteOrbit {
+    Vertex,
+    Cell,
+    Face,
+    Edge,
+    FaceCell,
+}
+
+impl SiteOrbit {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Vertex => "vertices",
+            Self::Cell => "cell centres",
+            Self::Face => "face centres",
+            Self::Edge => "edge centres",
+            Self::FaceCell => "sites just inside each square face",
+        }
+    }
+}
+
 impl Classification {
+    pub fn finite_site_orbit(&self) -> Option<(SiteOrbit, u32)> {
+        if !matches!(self.regime, HoneycombRegime::HyperbolicCompactH3 | HoneycombRegime::HyperbolicParacompactH3) {
+            return None;
+        }
+        // In [4,4,4], the two finite corner orbits each have regular octahedral
+        // Dirichlet cells: their points alone gain extra mirrors. A site just
+        // inside each face has D4 stabilizer, the largest remaining finite order.
+        if (self.p, self.q, self.r) == (4, 4, 4) {
+            return Some((SiteOrbit::FaceCell, 8));
+        }
+        // Number of flags of a spherical {a,b}. A Euclidean link is a cusp.
+        let flags = |a: u32, b: u32| {
+            let excess = 2 * (a + b) - a * b;
+            (8_u32 * a * b).checked_div(excess).unwrap_or(0)
+        };
+        let (p,q,r) = (self.p,self.q,self.r);
+        let options = [
+            (SiteOrbit::Vertex, flags(q,r)), (SiteOrbit::Cell, flags(p,q)),
+            (SiteOrbit::Face, 4*p), (SiteOrbit::Edge, 4*r),
+        ];
+        options.into_iter().rev().max_by_key(|&(_, order)| order)
+    }
+
     pub fn is_buildable(&self) -> bool {
         !matches!(self.regime, HoneycombRegime::HyperidealRefused | HoneycombRegime::DegenerateRefused)
     }
@@ -96,8 +143,8 @@ pub fn classify_schlafli(p: u32, q: u32, r: u32) -> Classification {
         }
         return out;
     }
-    let cell_k = (p as i64 - 2) * (q as i64 - 2);
-    let vfig_k = (q as i64 - 2) * (r as i64 - 2);
+    let cell_k = (i64::from(p) - 2).saturating_mul(i64::from(q) - 2);
+    let vfig_k = (i64::from(q) - 2).saturating_mul(i64::from(r) - 2);
     out.cell_k = cell_k;
     out.vfig_k = vfig_k;
     out.det_g = gram_det(p, q, r);

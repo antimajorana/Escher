@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 
 use papertilling_core::growth::{SeedKind, Stopped};
-use papertilling_core::honeycomb3d::growth_build::{DRAW_ALL_FACES_MAX, MAX_GROWTH_CELLS};
+use papertilling_core::honeycomb3d::growth_build::DRAW_ALL_FACES_MAX;
 use papertilling_core::honeycomb3d::{Classification, GrowthRule, HoneycombGrowth, ParacompactBall};
 
 use super::present::{Built, COUNTS_EVIDENCE, CoreOut, GrowthMeta, palette_rgba, projection_scene};
-use crate::mesh3d::wb_mesh::{mesh_from_polygons, placeholder_mesh};
+use crate::mesh3d::wb_mesh::mesh_from_polygons;
 use crate::workbench::scene_helpers::unit_circle_lines;
 
 pub(crate) fn seed_label(seed: SeedKind) -> &'static str {
@@ -53,13 +53,13 @@ fn model_note(regime: &str) -> &'static str {
         }
         "EuclideanE3" => "Drawn in Euclidean coordinates (isometric).",
         _ => {
-            "Drawn in the Poincaré ball model of H³: conformal, not isometric; ideal vertices lie on the unit sphere."
+            "Klein ball. Straight segments are hyperbolic geodesics. Ideal vertices lie on the boundary. Use intrinsic angles for measurements."
         }
     }
 }
 
 /// Present a seeded [`HoneycombGrowth`] (S³, E³, or compact H³) as 3D mesh, 2D xy projection, banners, and layer table.
-pub(crate) fn present_growth(g: HoneycombGrowth, cls: Option<&Classification>, requested_layers: u32) -> Built {
+pub(crate) fn present_growth(g: HoneycombGrowth, cls: Option<&Classification>, requested_layers: u32, max_cells: usize) -> Built {
     let HoneycombGrowth { seed, rule, stats, stopped, boundary_only, complex: cx, .. } = g;
     let outer_layer = stats.len().saturating_sub(1) as u32;
     let default_shell = if boundary_only { outer_layer } else { u32::MAX };
@@ -86,15 +86,16 @@ pub(crate) fn present_growth(g: HoneycombGrowth, cls: Option<&Classification>, r
         }
     };
     let edges: Vec<(usize, usize)> = cx.edges.iter().map(|e| (e[0], e[1])).collect();
+    let positions = if cx.klein.is_empty() { &cx.points } else { &cx.klein };
     let mesh = if cx.faces.is_empty() {
-        placeholder_mesh()
+        crate::mesh3d::GpuMeshData { radius: 1.0, ..Default::default() }
     } else {
-        mesh_from_polygons(&cx.points, &cx.faces, &edges, tint)
+        mesh_from_polygons(positions, &cx.faces, &edges, tint)
     };
     let hyperbolic = cx.regime.starts_with("Hyperbolic");
     let extra = if hyperbolic { unit_circle_lines(96, [120, 120, 120, 255]) } else { Vec::new() };
     let title = format!("{}: xy projection of the edges", cx.name);
-    let scene2d = projection_scene(&cx.points, edges.iter().copied(), extra, &title, model_note(&cx.regime));
+    let scene2d = projection_scene(positions, edges.iter().copied(), extra, &title, model_note(&cx.regime));
 
     let (v, e, f, _) = cx.counts();
     // Always read total cell count and Euler characteristic from `stats.last()` rather than `cx.cells`
@@ -124,7 +125,7 @@ pub(crate) fn present_growth(g: HoneycombGrowth, cls: Option<&Classification>, r
     let mut banners = Vec::new();
     let mut notes = Vec::new();
     if let Some(st) = &stopped {
-        let msg = format_stopped(st, MAX_GROWTH_CELLS);
+        let msg = format_stopped(st, max_cells);
         banners.push(msg.clone());
         notes.push(msg);
     }
@@ -177,14 +178,15 @@ pub(crate) fn present_growth(g: HoneycombGrowth, cls: Option<&Classification>, r
 pub(crate) fn present_paracompact_ball(b: ParacompactBall, cls: &Classification) -> Built {
     let cx = &b.complex;
     let edges: Vec<(usize, usize)> = cx.edges.iter().map(|e| (e[0], e[1])).collect();
+    let positions = if cx.klein.is_empty() { &cx.points } else { &cx.klein };
     let mesh = if cx.faces.is_empty() {
-        placeholder_mesh()
+        crate::mesh3d::GpuMeshData { radius: 1.0, ..Default::default() }
     } else {
-        mesh_from_polygons(&cx.points, &cx.faces, &edges, |face| palette_rgba(face.len(), 0.52))
+        mesh_from_polygons(positions, &cx.faces, &edges, |face| palette_rgba(face.len(), 0.52))
     };
     let extra = unit_circle_lines(96, [120, 120, 120, 255]);
     let title = format!("{} (ball R = {:.2}): xy projection of the edges", b.name, b.radius);
-    let scene2d = projection_scene(&cx.points, edges.iter().copied(), extra, &title, model_note(&cx.regime));
+    let scene2d = projection_scene(positions, edges.iter().copied(), extra, &title, model_note(&cx.regime));
 
     let (v, e, f, c) = cx.counts();
     let ideal = cx.is_ideal.iter().filter(|&&x| x).count();

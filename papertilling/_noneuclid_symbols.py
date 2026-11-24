@@ -55,48 +55,79 @@ def orbifold_to_wallpaper(symbol: str) -> str:
 
 
 _ORB_WP = {
-    (0, 0, 1, (), (6, 3, 2)): "p6m", (0, 0, 0, (6, 3, 2), ()): "p6", (0, 0, 1, (), (4, 4, 2)): "p4m", (0, 0, 0, (4, 4, 2), ()): "p4",
-    (0, 0, 1, (4,), (2,)): "p4g", (0, 0, 1, (), (3, 3, 3)): "p3m1", (0, 0, 1, (3,), (3,)): "p31m", (0, 0, 0, (3, 3, 3), ()): "p3",
-    (0, 0, 1, (), (2, 2, 2, 2)): "pmm", (0, 0, 1, (2, 2), ()): "pmg", (0, 1, 0, (2, 2), ()): "pgg", (0, 0, 1, (2,), (2, 2)): "cmm",
-    (0, 0, 2, (), ()): "pm", (0, 2, 0, (), ()): "pg", (0, 1, 1, (), ()): "cm", (0, 0, 0, (2, 2, 2, 2), ()): "p2", (1, 0, 0, (), ()): "p1",
+    (0, 0, (), ((6, 3, 2),)): "p6m", (0, 0, (6, 3, 2), ()): "p6", (0, 0, (), ((4, 4, 2),)): "p4m", (0, 0, (4, 4, 2), ()): "p4",
+    (0, 0, (4,), ((2,),)): "p4g", (0, 0, (), ((3, 3, 3),)): "p3m1", (0, 0, (3,), ((3,),)): "p31m", (0, 0, (3, 3, 3), ()): "p3",
+    (0, 0, (), ((2, 2, 2, 2),)): "pmm", (0, 0, (2, 2), ((),)): "pmg", (0, 1, (2, 2), ()): "pgg", (0, 0, (2,), ((2, 2),)): "cmm",
+    (0, 0, (), ((), ())): "pm", (0, 2, (), ()): "pg", (0, 1, (), ((),)): "cm", (0, 0, (2, 2, 2, 2), ()): "p2", (1, 0, (), ()): "p1",
 }
 
 
+def _rot_desc(vals: list[int]) -> tuple[int, ...]:
+    n = len(vals)
+    return tuple(vals) if n <= 1 else max(tuple(vals[r:] + vals[:r]) for r in range(n))
+
+
 def _canon_desc(vals: list[int]) -> tuple[int, ...]:
-    n, r_s = len(vals), list(reversed(vals))
-    return tuple(vals) if n <= 1 else max([tuple(vals[r:] + vals[:r]) for r in range(n)] + [tuple(r_s[r:] + r_s[:r]) for r in range(n)])
+    return max(_rot_desc(vals), _rot_desc(list(reversed(vals))))
+
+
+def _canon_boundaries(bnds: list[list[int]], crosscaps: int) -> tuple[tuple[int, ...], ...]:
+    # Orientable base (crosscaps == 0): global reflection reverses all boundary cycles simultaneously;
+    # nonorientable base (crosscaps > 0): sliding one boundary through a crosscap reverses it independently.
+    if crosscaps > 0:
+        return tuple(sorted((_canon_desc(b) for b in bnds), reverse=True))
+    fwd = tuple(sorted((_rot_desc(b) for b in bnds), reverse=True))
+    rev = tuple(sorted((_rot_desc(list(reversed(b))) for b in bnds), reverse=True))
+    return max(fwd, rev)
 
 
 def parse_orbifold(symbol: str) -> dict[str, Any]:
     if (fn := _rs_fn("parse_orbifold_json")) is not None:
-        return json.loads(fn(symbol))
+        try:
+            return json.loads(fn(symbol))
+        except ValueError as exc:
+            if not str(exc).endswith("is not representable as an exact i128 fraction"):
+                raise
+            # Python's Fraction can represent this otherwise valid signature.
     if not (t := symbol.strip().replace("×", "x")):
         raise ValueError("empty orbifold symbol")
     if t == "1":
         return {"input": symbol, "canonical": "1", "handles": 0, "crosscaps": 0, "boundary_components": 0, "cones": [], "corners": [],
                 "chi_num": 2, "chi_den": 1, "chi_orb": 2.0, "geometry_kind": "Spherical", "wallpaper_group": None, "provenance": "[PROVED]"}
     handles = crosscaps = boundaries = 0
-    cones, corners, in_mir = [], [], False
+    cones, corners, bnds, in_mir = [], [], [], False
     toks = re.findall(r"\([^)]*\)|[*oxOX]|[0-9.,\s]+", t)
     if "".join(toks) != t:
         raise ValueError(f"unexpected syntax in orbifold symbol {symbol!r}")
     for tok in toks:
-        if tok == "*": boundaries += 1; in_mir = True
+        if tok == "*": boundaries += 1; bnds.append([]); in_mir = True
         elif tok in "oO": handles += 1; in_mir = False
         elif tok in "xX": crosscaps += 1; in_mir = False
         else:
-            inner = tok[1:-1] if tok.startswith("(") else tok
-            vals = [int(p) for p in re.split(r"[.,\s]+", inner.strip()) if p] if any(c in inner for c in "., \t") else ([int(inner.strip())] if tok.startswith("(") else [int(c) for c in inner.strip()])
+            grouped = tok.startswith("(")
+            inner = (tok[1:-1] if grouped else tok).strip()
+            if re.search(r"[.,\s]", inner):
+                vals = [int(part) for part in re.split(r"[.,\s]+", inner) if part]
+            elif grouped:
+                vals = [int(inner)]
+            else:
+                vals = [int(ch) for ch in inner]
             if any(v < 2 for v in vals):
                 raise ValueError(f"orbifold orders must be >= 2 in {symbol!r}")
-            (corners if in_mir else cones).extend(vals)
+            if in_mir:
+                bnds[-1].extend(vals); corners.extend(vals)
+            else:
+                cones.extend(vals)
     if handles == 0 and crosscaps == 0 and ((boundaries == 0 and len(cones) == 1) or (boundaries == 1 and not cones and len(corners) == 1) or (boundaries == 0 and len(cones) == 2 and cones[0] != cones[1]) or (boundaries == 1 and not cones and len(corners) == 2 and corners[0] != corners[1])):
         raise ValueError(f"[PROVED: bad orbifold — no manifold cover]: {symbol!r} is a Thurston bad orbifold")
     chi = Fraction(2 - 2 * handles - crosscaps - boundaries, 1) - sum((Fraction(n - 1, n) for n in cones), Fraction(0)) - sum((Fraction(m - 1, 2 * m) for m in corners), Fraction(0))
-    cor_d = _canon_desc(corners)
-    wg = _ORB_WP.get((handles, crosscaps, boundaries, tuple(sorted(cones, reverse=True)), cor_d))
+    c_desc = tuple(sorted(cones, reverse=True))
+    b_can = _canon_boundaries(bnds, crosscaps)
+    wg = _ORB_WP.get((handles, crosscaps, c_desc, b_can))
     fmt = lambda seq: "".join(map(str, seq)) if all(x < 10 for x in seq) else "(" + ",".join(map(str, seq)) + ")"
-    canon = dict(WALLPAPER_ORBIFOLD_TABLE)[wg] if wg else ("o" * handles + fmt(sorted(cones, reverse=True)) + ("*" + fmt(list(cor_d)) + "*" * (boundaries - 1) if boundaries else "") + "x" * crosscaps)
+    # On a nonorientable surface each handle contributes two crosscaps.
+    h, x = (0, crosscaps + 2 * handles) if crosscaps else (handles, 0)
+    canon = dict(WALLPAPER_ORBIFOLD_TABLE)[wg] if wg else ("o" * h + fmt(c_desc) + "".join("*" + fmt(b) for b in b_can) + "x" * x)
     return {"input": symbol, "canonical": canon, "handles": handles, "crosscaps": crosscaps, "boundary_components": boundaries,
             "cones": cones, "corners": corners, "chi_num": chi.numerator, "chi_den": chi.denominator, "chi_orb": float(chi),
             "geometry_kind": "Spherical" if chi > 0 else ("Euclidean" if chi == 0 else "Hyperbolic"), "wallpaper_group": wg, "provenance": "[PROVED]"}

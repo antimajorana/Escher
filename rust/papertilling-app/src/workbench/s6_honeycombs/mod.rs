@@ -22,6 +22,7 @@ use crate::mesh3d::wb_mesh::placeholder_mesh;
 use crate::theme::ThemeTokens;
 use crate::workbench::{WbCtx, WbPanel, WbScenes};
 
+mod atlas_sites;
 mod honeycomb;
 mod honeycomb_present;
 mod present;
@@ -64,7 +65,7 @@ impl S6Sub {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum S6Job {
     SchlafliGrowth { p: u32, q: u32, r: u32, seed: SeedKind, rule: GrowthRule, layers: u32 },
-    ParacompactBall { p: u32, q: u32, r: u32, radius_centi: u32 },
+    ParacompactBall { p: u32, q: u32, r: u32, radius_centi: u32, seed_only: bool },
     Euclid { kind: EuclideanKind, seed: SeedKind, rule: GrowthRule, layers: u32 },
     Net { kind: TpmsKind, labyrinths: u32, reps: u32 },
     Surface { kind: TpmsKind, mode: tpms::TpmsMode, n: usize, reps: u32 },
@@ -77,7 +78,7 @@ pub(crate) fn run_job(job: S6Job) -> Result<Built, String> {
         S6Job::SchlafliGrowth { p, q, r, seed, rule, layers } => {
             honeycomb::build_schlafli_growth(p, q, r, seed, rule, layers)
         }
-        S6Job::ParacompactBall { p, q, r, radius_centi } => honeycomb::build_paracompact(p, q, r, radius_centi),
+        S6Job::ParacompactBall { p, q, r, radius_centi, seed_only } => honeycomb::build_paracompact(p, q, r, radius_centi, seed_only),
         S6Job::Euclid { kind, seed, rule, layers } => honeycomb::build_euclid(kind, seed, rule, layers),
         S6Job::Net { kind, labyrinths, reps } => tpms::build_net(kind, labyrinths, reps),
         S6Job::Surface { kind, mode, n, reps } => tpms::build_surface(kind, mode, n, reps),
@@ -95,6 +96,14 @@ impl AtlasHoneycomb {
         self.0.core.complex().is_some_and(|complex| !complex.edges.is_empty())
     }
 
+    #[cfg(test)]
+    pub(crate) fn layer_counts(&self) -> Vec<usize> {
+        match &self.0.core {
+            present::CoreOut::Growth(_, meta) => meta.stats.iter().map(|s| s.cells).collect(),
+            _ => Vec::new(),
+        }
+    }
+
     pub(crate) fn scenes(&self) -> (crate::scene2d::Scene2D, crate::mesh3d::GpuMeshData, String) {
         (self.0.scene2d.clone(), self.0.mesh.clone(), self.0.caption.clone())
     }
@@ -104,14 +113,27 @@ impl AtlasHoneycomb {
     }
 }
 
-pub(crate) fn build_atlas_h3(p: u32, q: u32, r: u32, layers: u32, radius_centi: u32) -> Result<AtlasHoneycomb, String> {
+pub(crate) fn build_atlas_h3(p: u32, q: u32, r: u32, layers: u32, ball_preview: bool, radius_centi: u32) -> Result<AtlasHoneycomb, String> {
     use papertilling_core::honeycomb3d::coxeter_gram::{HoneycombRegime, classify_schlafli};
     let classification = classify_schlafli(p, q, r);
-    let built = match classification.regime {
-        HoneycombRegime::HyperbolicCompactH3 => honeycomb::build_schlafli_growth(p, q, r, SeedKind::Cell, GrowthRule::FaceShells, layers),
-        HoneycombRegime::HyperbolicParacompactH3 => honeycomb::build_paracompact(p, q, r, radius_centi),
+    use papertilling_core::growth::GrowthCaps;
+    use papertilling_core::honeycomb3d::{HoneycombKind, grow_honeycomb};
+    // The interactive atlas draws individual sites. Keep complete layers and report which one exceeded the budget.
+    const ATLAS_CELL_CAP: usize = 5_000;
+    let growth = |depth| {
+        let caps = GrowthCaps { max_layers: depth, max_cells: ATLAS_CELL_CAP };
+        let g = grow_honeycomb(HoneycombKind::Schlafli(p, q, r), SeedKind::Cell, GrowthRule::Touching, caps)?;
+        Ok::<_, String>(honeycomb_present::present_growth(g, Some(&classification), depth, ATLAS_CELL_CAP))
+    };
+    let mut built = match classification.regime {
+        HoneycombRegime::HyperbolicCompactH3 => growth(layers),
+        HoneycombRegime::HyperbolicParacompactH3 if !classification.has_infinite_euclidean_cells && !ball_preview => {
+            growth(0)
+        }
+        HoneycombRegime::HyperbolicParacompactH3 => honeycomb::build_paracompact(p, q, r, radius_centi, !ball_preview),
         _ => return Err(classification.reason),
     }?;
+    atlas_sites::add_orbit(&mut built, &classification);
     Ok(AtlasHoneycomb(built))
 }
 

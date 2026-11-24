@@ -123,6 +123,19 @@ fn caption_ink_lies_top_left_and_scales_with_the_png_scale() {
     assert!((ratio - 4.0).abs() <= 0.08, "ink {s1:.1} -> {s2:.1}, ratio {ratio:.4}");
 }
 
+#[test]
+fn narrow_export_preserves_the_last_cell_count() {
+    let t = ThemeTokens::paper();
+    let view = egui::vec2(95.0, 120.0);
+    let mut first = canvas(view, 1.0, &t);
+    let mut second = canvas(view, 1.0, &t);
+    compose_overlays(&mut first, view, 1.0, "64 V, 144 E, 108 F, 27 cells", None, &t);
+    compose_overlays(&mut second, view, 1.0, "64 V, 144 E, 108 F, 28 cells", None, &t);
+    let after_first_line = 4 * (first.w * 22) as usize;
+    assert!(first.rgba[after_first_line..] != second.rgba[after_first_line..], "last digit disappeared from the export");
+    assert!(ink(&first, bg(&t), t.text_primary.r(), [90, 0, 95, 120]).is_none());
+}
+
 fn legend() -> ColorLegend3d {
     ColorLegend3d { title: String::from("σ_xx"), min_val: -0.5, max_val: 0.5, map: Legend3dMap::Diverging }
 }

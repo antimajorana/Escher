@@ -13,6 +13,20 @@ use super::{build_hyperbolic_tiling, build_hyperbolic_tiling_capped, orthogonal_
 
 // ---- edge-matched copy of the pre-upgrade wedge edge-BFS (e09ee15 mod.rs), caps as parameters ----
 
+#[test]
+fn almost_radial_geodesic_keeps_distinct_endpoints() {
+    let (a, b) = ([0.1, 0.0], [0.6, 1e-7]);
+    let arc = super::sample_geodesic_arc(a, b, 8);
+    assert_eq!((arc[0], arc[8]), (a, b));
+    assert!(arc[4][0] > a[0] && arc[4][0] < b[0]);
+    // In the Klein disk all sampled points lie on the line joining its endpoints.
+    let (u, v) = (super::to_klein(a), super::to_klein(b));
+    for z in arc {
+        let p = super::to_klein(z);
+        assert!(((p[0] - u[0]) * (v[1] - u[1]) - (p[1] - u[1]) * (v[0] - u[0])).abs() < 1e-14);
+    }
+}
+
 fn c_sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] { [a[0] - b[0], a[1] - b[1]] }
 fn c_mul(a: [f64; 2], b: [f64; 2]) -> [f64; 2] { [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]] }
 fn c_conj(a: [f64; 2]) -> [f64; 2] { [a[0], -a[1]] }
@@ -562,5 +576,15 @@ fn kagome_cluster_known_counts_and_disks() {
             };
             assert!(h.edges.iter().all(|&(u, v)| (pdist(h.poincare_pts[u], h.poincare_pts[v]) - lk).abs() < 1e-5 * lk));
         }
+    }
+}
+
+#[test]
+fn hyperboloid_projection_preserves_outer_disk_sites() {
+    for r in [0.96, 0.98, 0.995] {
+        let [x, y, t] = super::to_hyperboloid([r, 0.0]);
+        assert!((x / (1.0 + t) - r).abs() < 1e-12);
+        assert_eq!(y, 0.0);
+        assert!((t*t - x*x - 1.0).abs() < 1e-9);
     }
 }

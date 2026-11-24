@@ -274,6 +274,12 @@ mod tests {
         let best = &bundle.candidates[bundle.default_index];
         assert!(best.is_match);
         assert_eq!(best.kind, "Volterra");
+        let target_b = bundle.report.charge.b.expect("square dislocation b");
+        for candidate in &bundle.candidates {
+            let charge = crate::defect::charge::total_charge(&candidate.crystal).unwrap();
+            let [x, y] = charge.burgers.unwrap();
+            assert!((x - target_b[0]).hypot(y - target_b[1]) < 1e-8, "{} got [{x}, {y}] vs {target_b:?}", candidate.name);
+        }
         assert!(best.crystal.pos.len() > 80, "expected full-patch crystal, got {} sites", best.crystal.pos.len());
     }
 
@@ -297,12 +303,14 @@ mod tests {
         assert!(best.is_match);
         assert_eq!(best.kind, "completion");
         assert!(best.rings.contains(&5) && best.rings.contains(&7), "rings={:?}", best.rings);
+        let target_b = bundle.report.charge.b.expect("honeycomb dislocation b");
         for candidate in &bundle.candidates {
             let charge = crate::defect::charge::total_charge(&candidate.crystal).unwrap();
             assert_eq!(charge.kind, "dislocation", "{}", candidate.name);
             assert_eq!(charge.frank_deg, 0.0);
             let [x, y] = charge.burgers.unwrap();
             assert!((x.hypot(y) - 1.0).abs() < 1e-8, "{} has Burgers vector {x}, {y}", candidate.name);
+            assert!((x - target_b[0]).hypot(y - target_b[1]) < 1e-8, "{} flipped sign: [{x}, {y}] vs {target_b:?}", candidate.name);
         }
         let rendered_faces: Vec<usize> = drawn_faces(&best.crystal).iter().map(Vec::len).collect();
         assert!(rendered_faces.contains(&5) && rendered_faces.contains(&7));

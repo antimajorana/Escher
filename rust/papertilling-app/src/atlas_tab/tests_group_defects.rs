@@ -42,9 +42,20 @@ fn crystal_atlas_selects_matching_nets_and_shows_real_rejoined_screw_bonds() {
     assert!(h.query_by_label("Translation · shift (0, 0, 1)").is_some());
     h.get_by_label("+1 a₃").click();
     h.run_steps(3);
+    assert_eq!(h.state().atlas.space3d.screw_periods, 1);
     let net = h.state_mut().atlas.space3d.ensure_net();
     assert!(net.defect_axis.is_some());
     assert!(net.bonds.iter().any(|&(_, _, kind)| kind == 1));
+    h.get_by_label("Reference").click();
+    h.run_steps(3);
+    assert!(h.state_mut().atlas.space3d.ensure_net().defect_axis.is_none());
+    h.get_by_label("+1 a₃").click();
+    h.run_steps(3);
+    h.get_by_label("#136 P4_2/mnm (Rutile)").click();
+    h.run_steps(3);
+    let panel = &mut h.state_mut().atlas.space3d;
+    assert_eq!(panel.screw_periods, 0);
+    assert_eq!(panel.ensure_net().space_group_num, 136);
 
     h.get_by_label("Layer-group charges").click();
     h.run_steps(3);
@@ -66,7 +77,7 @@ fn hyperbolic_atlas_switches_between_word_comparison_and_h3_reference() {
     h.run_steps(3);
     assert_eq!(h.state().atlas.sub_tab, AtlasSubTab::HyperbolicH3);
     assert!(h.state().view3d.mesh_data().vertex_count >= 20);
-    assert!(h.query_by_label("Poincaré ball").is_some());
+    assert!(h.query_by_label("Klein ball").is_some());
 
     let app = h.state_mut();
     app.atlas.last_hyperbolic_subtab = AtlasSubTab::HyperbolicH3;

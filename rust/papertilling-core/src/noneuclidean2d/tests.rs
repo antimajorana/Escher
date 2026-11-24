@@ -123,6 +123,62 @@ fn conway_orbifolds_17_wallpaper_and_bad_rejections() {
 }
 
 #[test]
+fn conway_orbifold_boundary_cycles_orientation_and_i128_bounds() {
+    assert_eq!(parse_orbifold("o*234 x").unwrap().canonical, "*432xxx");
+    assert_eq!(parse_orbifold("*( 12 )(12)").unwrap().canonical, "*(12,12)");
+    // Two decorated mirror boundaries vs one decorated + one empty:
+    // chi(*23*45) = 2 - 2 - (1/4 + 1/3 + 3/8 + 2/5) = -163/120 (hand calculation).
+    for sym in ["*23*45", "*45*23", "*32*54"] {
+        let p = parse_orbifold(sym).unwrap();
+        assert_eq!(p.canonical, "*54*32", "{sym}");
+        assert_eq!((p.boundary_components, p.chi_num, p.chi_den), (2, -163, 120), "{sym}");
+        assert_eq!((p.geometry_kind, p.wallpaper_group.as_deref()), (GeometryKind::Hyperbolic, None));
+    }
+    for sym in ["*5432*", "**2345"] {
+        let p = parse_orbifold(sym).unwrap();
+        assert_eq!(p.canonical, "*5432*", "{sym}");
+        assert_eq!((p.boundary_components, p.chi_num, p.chi_den), (2, -163, 120), "{sym}");
+    }
+    // Two 1-corner boundaries must not match wallpaper pm ("**"); chi(*2*2) = 2 - 2 - 2*(1/4) = -1/2.
+    let two_corners = parse_orbifold("*2*2").unwrap();
+    assert_eq!((two_corners.canonical.as_str(), two_corners.wallpaper_group.as_deref()), ("*2*2", None));
+    assert_eq!((two_corners.chi_num, two_corners.chi_den), (-1, 2));
+
+    // Orientable base (crosscaps == 0): global reflection reverses all boundary cycles simultaneously,
+    // distinguishing concordant *234*234 (~ *432*432) from mirror-paired *234*432 (~ *432*234);
+    // chi = 2 - 2 - 2*(1/4 + 1/3 + 3/8) = -23/12.
+    let conc_a = parse_orbifold("*234*234").unwrap();
+    let conc_b = parse_orbifold("*432*432").unwrap();
+    let opp_a = parse_orbifold("*234*432").unwrap();
+    let opp_b = parse_orbifold("*432*234").unwrap();
+    assert_eq!((conc_a.canonical.as_str(), conc_b.canonical.as_str()), ("*432*432", "*432*432"));
+    assert_eq!((opp_a.canonical.as_str(), opp_b.canonical.as_str()), ("*432*423", "*432*423"));
+    assert_ne!(conc_a.canonical, opp_a.canonical);
+    assert_eq!((conc_a.chi_num, conc_a.chi_den), (-23, 12));
+    assert_eq!(parse_orbifold("o*234*234").unwrap().canonical, "o*432*432");
+    assert_eq!(parse_orbifold("o*234*432").unwrap().canonical, "o*432*423");
+
+    // Nonorientable base (crosscaps > 0): sliding one boundary around a crosscap reverses it alone;
+    // chi(*234*234x) = -1 - 23/12 = -35/12.
+    let nonor_a = parse_orbifold("*234*234x").unwrap();
+    let nonor_b = parse_orbifold("*234*432x").unwrap();
+    assert_eq!((nonor_a.canonical.as_str(), nonor_b.canonical.as_str()), ("*432*432x", "*432*432x"));
+    assert_eq!((nonor_a.chi_num, nonor_a.chi_den), (-35, 12));
+
+    // Large valid u32 orders whose unreduced denominator product (> 3.40e38) overflows i128,
+    // while the exact reduced fraction has den = 4294967291 * 4294967279 * 4294967231 <= i128::MAX.
+    let fit = parse_orbifold("4294967291,4294967279,4294967231,4294967291").unwrap();
+    assert_eq!(
+        (fit.chi_num, fit.chi_den, fit.geometry_kind),
+        (-158_456_321_745_008_244_180_050_234_010_i128, 79_228_160_909_397_609_687_688_407_659_i128, GeometryKind::Hyperbolic)
+    );
+
+    // Four distinct primes near 2^32: reduced denominator ≈ 3.4028e38 > i128::MAX -> representability error.
+    let over = parse_orbifold("4294967291,4294967279,4294967231,4294967197").unwrap_err();
+    assert!(over.contains("i128"), "{over}");
+}
+
+#[test]
 fn wythoff_archimedean_and_vertex_config_obstructions() {
     // Archimedean counts: Coxeter, Longuet-Higgins & Miller (1954); Cromwell, Polyhedra (1997).
     let trunc_ico = build_wythoff(3, 5, WythoffOp::Truncated, 1).unwrap();

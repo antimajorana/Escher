@@ -89,6 +89,7 @@ pub(crate) struct SchlafliState {
     pub(crate) rule: GrowthRule,
     pub(crate) layers: u32,
     pub(crate) radius_centi: u32,
+    pub(crate) surrounding_cells: bool,
 }
 
 impl Default for SchlafliState {
@@ -97,10 +98,11 @@ impl Default for SchlafliState {
             p: 4,
             q: 3,
             r: 4,
-            seed: SeedKind::Vertex,
+            seed: SeedKind::Cell,
             rule: GrowthRule::Touching,
             layers: 1,
             radius_centi: RADIUS_CENTI_DEFAULT,
+            surrounding_cells: false,
         }
     }
 }
@@ -113,7 +115,13 @@ impl SchlafliState {
     pub(crate) fn job(&self) -> S6Job {
         let c = self.classify();
         if c.regime == HoneycombRegime::HyperbolicParacompactH3 {
+            if !self.surrounding_cells && !c.has_infinite_euclidean_cells {
+                return S6Job::SchlafliGrowth {
+                    p: self.p, q: self.q, r: self.r, seed: SeedKind::Cell, rule: GrowthRule::Touching, layers: 0,
+                };
+            }
             S6Job::ParacompactBall {
+                seed_only: !self.surrounding_cells,
                 p: self.p,
                 q: self.q,
                 r: self.r,
@@ -149,9 +157,14 @@ impl SchlafliState {
         if c.regime == HoneycombRegime::HyperbolicParacompactH3 {
             let why = if c.has_infinite_euclidean_cells { INFINITE_CELL_REASON } else { IDEAL_VERTEX_REASON };
             ui.colored_label(egui::Color32::from_rgb(180, 95, 20), egui::RichText::new(why).small());
-            ui.add_enabled_ui(false, |ui| {
-                let _ = show_seed_rule_layers(ui, &mut self.seed, &mut self.rule, &mut self.layers);
-            });
+            ch |= ui.checkbox(&mut self.surrounding_cells, "Include surrounding cells (radius preview)").changed();
+            if !self.surrounding_cells && !c.has_infinite_euclidean_cells {
+                ui.small("Layer 0 · one complete polyhedron");
+                return ch;
+            }
+            if !self.surrounding_cells {
+                ui.small("Layer 0 · one infinite cell, showing faces within the chosen radius.");
+            }
             let mut rad = f64::from(self.radius_centi.clamp(RADIUS_CENTI_MIN, RADIUS_CENTI_MAX)) / 100.0;
             ui.horizontal(|ui| {
                 ui.label("Ball radius R:");
@@ -178,6 +191,7 @@ impl SchlafliState {
             "rule": format!("{:?}", self.rule),
             "layers": self.layers,
             "radius_centi": self.radius_centi,
+            "surrounding_cells": self.surrounding_cells,
         })
     }
 
@@ -202,6 +216,9 @@ impl SchlafliState {
         if let Some(x) = get("layers").or_else(|| get("shells")) {
             self.layers = x.min(MAX_GROWTH_LAYERS);
         }
+        // Older saved paracompact views always showed the surrounding ball.
+        self.surrounding_cells = v.get("surrounding_cells").and_then(Value::as_bool)
+            .unwrap_or(self.classify().regime == HoneycombRegime::HyperbolicParacompactH3);
         if let Some(x) = get("radius_centi") {
             self.radius_centi = x.clamp(RADIUS_CENTI_MIN, RADIUS_CENTI_MAX);
         }
@@ -295,11 +312,11 @@ pub(crate) fn build_schlafli_growth(
     }
     let caps = GrowthCaps { max_layers: layers, max_cells: MAX_GROWTH_CELLS };
     let g = grow_honeycomb(HoneycombKind::Schlafli(p, q, r), seed, rule, caps)?;
-    Ok(present_growth(g, Some(&c), layers))
+    Ok(present_growth(g, Some(&c), layers, MAX_GROWTH_CELLS))
 }
 
 /// Build the paracompact ball truncation of `{p,q,r}` at radius `radius_centi / 100.0`.
-pub(crate) fn build_paracompact(p: u32, q: u32, r: u32, radius_centi: u32) -> Result<Built, String> {
+pub(crate) fn build_paracompact(p: u32, q: u32, r: u32, radius_centi: u32, seed_only: bool) -> Result<Built, String> {
     let c = classify_schlafli(p, q, r);
     if !c.is_buildable() {
         return Err(c.reason);
@@ -310,8 +327,16 @@ pub(crate) fn build_paracompact(p: u32, q: u32, r: u32, radius_centi: u32) -> Re
         ));
     }
     let radius = f64::from(radius_centi) / 100.0;
-    let b = paracompact_ball(p, q, r, radius)?;
-    Ok(present_paracompact_ball(b, &c))
+    let b = if seed_only {
+        papertilling_core::honeycomb3d::paracompact_ball::single_cell_patch(p, q, r, radius)
+    } else {
+        paracompact_ball(p, q, r, radius)
+    }?;
+    let mut built = present_paracompact_ball(b, &c);
+    if seed_only {
+        built.rows.insert(0, ("Layer 0".into(), "One infinite cell (visible faces only)".into()));
+    }
+    Ok(built)
 }
 
 pub(crate) fn build_euclid(kind: EuclideanKind, seed: SeedKind, rule: GrowthRule, layers: u32) -> Result<Built, String> {
@@ -320,5 +345,5 @@ pub(crate) fn build_euclid(kind: EuclideanKind, seed: SeedKind, rule: GrowthRule
     }
     let caps = GrowthCaps { max_layers: layers, max_cells: MAX_GROWTH_CELLS };
     let g = grow_honeycomb(HoneycombKind::Euclid(kind), seed, rule, caps)?;
-    Ok(present_growth(g, None, layers))
+    Ok(present_growth(g, None, layers, MAX_GROWTH_CELLS))
 }

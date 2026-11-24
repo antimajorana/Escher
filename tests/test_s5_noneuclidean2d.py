@@ -120,6 +120,34 @@ def test_bad_orbifolds_refused(ne, bad):
         ne.parse_orbifold(bad)
 
 
+def test_orbifold_per_boundary_cycles_and_orientation(ne):
+    assert ne.parse_orbifold("o*234 x")["canonical"] == "*432xxx"
+    assert ne.parse_orbifold("*( 12 )(12)")["canonical"] == "*(12,12)"
+    # Two cornered boundaries (*23*45) vs one cornered + one empty (*5432*):
+    # chi = 2 - 2 - (1/4 + 1/3 + 3/8 + 2/5) = -163/120 (hand calculation).
+    for sym in ("*23*45", "*45*23", "*32*54"):
+        info = ne.parse_orbifold(sym)
+        assert (info["canonical"], info["boundary_components"], info["wallpaper_group"]) == ("*54*32", 2, None)
+        assert (info["chi_num"], info["chi_den"], info["geometry_kind"]) == (-163, 120, "Hyperbolic")
+    for sym in ("*5432*", "**2345"):
+        info = ne.parse_orbifold(sym)
+        assert (info["canonical"], info["boundary_components"], info["chi_num"], info["chi_den"]) == ("*5432*", 2, -163, 120)
+    two_c = ne.parse_orbifold("*2*2")  # chi = 2 - 2 - 2*(1/4) = -1/2; must not match pm ("**")
+    assert (two_c["canonical"], two_c["wallpaper_group"], two_c["chi_num"], two_c["chi_den"]) == ("*2*2", None, -1, 2)
+    # Orientable base (crosscaps == 0): global reflection reverses all boundary cycles simultaneously.
+    assert ne.parse_orbifold("*234*234")["canonical"] == "*432*432"
+    assert ne.parse_orbifold("*432*432")["canonical"] == "*432*432"
+    assert ne.parse_orbifold("*234*432")["canonical"] == "*432*423"
+    assert ne.parse_orbifold("*432*234")["canonical"] == "*432*423"
+    assert (ne.parse_orbifold("*234*234")["chi_num"], ne.parse_orbifold("*234*234")["chi_den"]) == (-23, 12)
+    assert ne.parse_orbifold("o*234*234")["canonical"] == "o*432*432"
+    assert ne.parse_orbifold("o*234*432")["canonical"] == "o*432*423"
+    # Nonorientable base (crosscaps > 0): crosscap slide reverses one boundary independently; chi = -35/12.
+    assert ne.parse_orbifold("*234*234x")["canonical"] == "*432*432x"
+    assert ne.parse_orbifold("*234*432x")["canonical"] == "*432*432x"
+    assert (ne.parse_orbifold("*234*432x")["chi_num"], ne.parse_orbifold("*234*432x")["chi_den"]) == (-35, 12)
+
+
 # The 21 vertex types with angle sum 2 pi; exactly 11 extend to vertex-transitive tilings
 # (Grunbaum & Shephard, Tilings and Patterns, 1987, section 2.1).
 EUCLID_21 = ["3.7.42", "3.8.24", "3.9.18", "3.10.15", "3.12.12", "4.5.20", "4.6.12", "4.8.8", "5.5.10",
@@ -324,6 +352,16 @@ def test_rust_parity(monkeypatch):
         t = ne_mod.tgcell_quotient(name)
         assert (t["n_vertices"], t["n_edges"], t["n_faces"]) == (v, e, f)
     assert ne_mod.parse_orbifold("*237")["chi_den"] == 84
+    assert ne_mod.parse_orbifold("*23*45")["canonical"] == "*54*32"
+    assert ne_mod.parse_orbifold("*234*234")["canonical"] == "*432*432"
+    assert ne_mod.parse_orbifold("*234*432")["canonical"] == "*432*423"
+    assert ne_mod.parse_orbifold("*234*432x")["canonical"] == "*432*432x"
+    orders = [4294967291, 4294967279, 4294967231, 4294967197]
+    symbol = ",".join(map(str, orders))
+    with pytest.raises(ValueError, match="i128"):
+        rs.parse_orbifold_json(symbol)
+    value = ne_mod.parse_orbifold(symbol)
+    assert Fraction(value["chi_num"], value["chi_den"]) == 2 - sum(Fraction(n - 1, n) for n in orders)
     w = ne_mod.build_wythoff(5, 3, "Cantellated")
     assert (w["vertex_symbol"], w["n_vertices"], w["n_edges"], w["n_faces"]) == ("3.4.5.4", 60, 120, 62)
     snub = ne_mod.build_wythoff(7, 3, "Snub")

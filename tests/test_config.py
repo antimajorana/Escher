@@ -19,6 +19,29 @@ from papertilling.defects.config import classify, compare, config_to_dict, equiv
 from papertilling.legacy.lab_defects import frame_faces
 
 
+@pytest.mark.parametrize("group", ["p3", "p4g"])
+@pytest.mark.parametrize("fast", [False, True])
+def test_signed_gallery_patch_on_oblique_cuts(group, fast):
+    from papertilling.defects._signed_scan import _signed_patch
+    from papertilling.lattice import load_catalogue
+
+    lat = lattice_data(load_catalogue(group=group, rule="points").lattices[0])
+    b = np.array(lat.cell.a1)
+    core = lat.A @ np.array([0.371, 0.413])
+    oblique = lat.A @ np.array([1.0, -1.0])
+    for cut in (oblique, -oblique):
+        patch = _signed_patch(lat.cell, b, core, cut, 6.0, fast=fast)
+        # The one unbounded clockwise face completes a planar disk. Interior bonds cancel
+        # in the sum over CCW faces, leaving the Burgers circuit of the entire disk, +b.
+        material = frame_faces(patch)
+        assert len(patch.sites) - len(patch.edges) + len(material) == 2
+        outer = max(range(len(material)), key=lambda i: len(material[i]))
+        assert np.allclose(-patch.loop_sum(material[outer], "vec"), b)
+        drawn = patch.faces()
+        assert len(drawn) + 1 == len(material)
+        assert np.allclose(sum(patch.loop_sum(f, "vec") for f in drawn), b)
+
+
 def R(deg):
     a = math.radians(deg)
     return np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]])
@@ -69,7 +92,8 @@ def test_honeycomb_57(capsys):
     C04 (proved result there): every cut-and-reglue core of the honeycomb is bipartite; a 5-ring is an
     odd cycle, so this core is not isomorphic to any Volterra core. C04 result 4 (computational
     evidence there): core K2 plus one bond between its two 2-bond sites is the 5-7 core; asserted here
-    as the completion with rings (5, 7)."""
+    as a completion with one pentagon and one heptagon. A representative can also contain ordinary
+    hexagons when several bonds partition a larger Volterra ring."""
     lat = lattice_data("honeycomb")
     c1 = next(r["point"] for r in lat.centres if r["order"] == 6)
     t0 = time.time()
@@ -83,7 +107,9 @@ def test_honeycomb_57(capsys):
     vol = [c for c in res["candidates"] if c["volterra"]]
     assert vol and all(c["bipartite"] for c in vol)                    # C04: Volterra cores bipartite
     assert not any(n.startswith("Volterra") for n in res["matches"])
-    assert any(c["name"] in res["matches"] and tuple(c["rings"]) == (5, 7) for c in res["candidates"])
+    matched = [c for c in res["candidates"] if c["name"] in res["matches"]]
+    assert any(tuple(r for r in c["rings"] if r != 6) == (5, 7)
+               and not c["under"] for c in matched)
     print(f"# time honeycomb 5-7 control {time.time() - t0:.1f} s")
 
 

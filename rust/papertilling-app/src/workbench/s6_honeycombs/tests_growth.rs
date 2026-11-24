@@ -171,7 +171,7 @@ fn paracompact_ball_radius_monotonicity_and_proved_reasons() {
     for ((p, q, r), want_reason) in [((6, 3, 3), INFINITE_CELL_REASON), ((3, 3, 6), IDEAL_VERTEX_REASON)] {
         let mut counts = Vec::new();
         for rc in [40, 80, 120, 160] {
-            let b = run_job(S6Job::ParacompactBall { p, q, r, radius_centi: rc }).unwrap();
+            let b = run_job(S6Job::ParacompactBall { p, q, r, radius_centi: rc, seed_only: false }).unwrap();
             let CoreOut::Ball(ball) = &b.core else { panic!("expected Ball") };
             assert_eq!(ball.reason, want_reason);
             assert!(b.notes.iter().any(|n| n == want_reason));
@@ -195,6 +195,7 @@ fn kittest_s6_h3_cap_banner_and_paracompact_ball_controls() {
         app.workbench.s6.schlafli.p = 5;
         app.workbench.s6.schlafli.q = 3;
         app.workbench.s6.schlafli.r = 5;
+        app.workbench.s6.schlafli.seed = SeedKind::Vertex;
         app.workbench.s6.schlafli.layers = 10;
         app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     }
@@ -208,6 +209,7 @@ fn kittest_s6_h3_cap_banner_and_paracompact_ball_controls() {
         app.workbench.s6.schlafli.p = 3;
         app.workbench.s6.schlafli.q = 3;
         app.workbench.s6.schlafli.r = 6;
+        app.workbench.s6.schlafli.surrounding_cells = true;
         app.workbench_call(|wb, cx, c, v| wb.on_enter(cx, c, v));
     }
     wait_until(&mut h, "{3,3,6} ball", |a| !a.workbench_busy() && !a.workbench.dirty);

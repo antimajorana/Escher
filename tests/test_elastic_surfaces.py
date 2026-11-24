@@ -151,3 +151,23 @@ def test_analytical_gradient_matches_finite_differences():
             em = sum(_eval_energy_grad(Pm, su, sv, sl0, sw, hp, hq, ha, hb, hw, 0.15)[:2])
             fd[i, j] = (ep - em) / (2.0 * eps)
     assert np.allclose(grad, fd, atol=1e-7, rtol=1e-6)
+
+
+def test_concave_polygon_flat_sheet_python_fallback():
+    from papertilling.surfaces.elastic import _concave_face_triangulation, _run_elastic
+
+    pts = np.array([[0.0, 0.0], [1.0, -1.0], [1.0, 0.0], [1.0, 1.0], [-0.1, 0.0]], float)
+    edges = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 4), (2, 3), (3, 4)]
+    edge_l0 = np.array([np.linalg.norm(pts[v] - pts[u]) for u, v in edges], float)
+    faces = [[0, 1, 2], [0, 2, 3], [0, 3, 4, 1]]
+    quad3_inv = [[pts[u, 0], -pts[u, 1], 0.0] for u in faces[2]]
+    assert _concave_face_triangulation(quad3_inv) is not None
+
+    x0 = np.column_stack([pts, np.array([0.22, -0.11, 0.08, -0.14, 0.19], float)])
+    c_quad = pts[faces[2]].mean(axis=0)
+    spokes = {2: [float(np.linalg.norm(pts[u] - c_quad)) for u in faces[2]]}
+    res = _run_elastic(5, x0, edges, edge_l0, list(range(len(edges))), faces, spokes, 0.05, 400,
+                       is_proj=False, is_open_sheet=True)
+    assert res.converged
+    assert res.stretch_energy < 1e-10
+    assert res.bend_energy < 1e-10

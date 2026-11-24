@@ -9,13 +9,13 @@ use crate::mesh3d::DefectViewMode;
 use crate::workbench::WorkbenchView;
 
 const MAX_SMOKE_FRAMES: u32 = 1800;
-/// The final stage (Atlas H² + the offscreen 3D PNG export). Stages: 0..4 surfaces, 5 defects sheet, 6 combine
+/// The final stage (Atlas H³ + the offscreen 3D PNG export). Stages: 0..4 surfaces, 5 defects sheet, 6 combine
 /// sheet, 7 FvK, 8 sheet3d-mobius (the Mobius wall, relaxed drawing; fails on collapsed bonds), 9 analysis-hidden
 /// (no shown label names Analysis, key 6 is a no-op; then the cylinder surface), 10 Atlas 3D, 11 flat 3D,
-/// 12 curved 2D, 13 honeycombs, 14 Atlas H².
+/// 12 curved 2D, 13 honeycombs, 14 Atlas H², 15 Atlas H³ seed, 16 Atlas H³ contact layer.
 /// Stages 11-13 enter through the Command Deck (open, switch realm, equip the view's card), so the OK line's
 /// `deck=` field counts three realm switches.
-pub(super) const LAST_SMOKE_STAGE: u32 = 14;
+pub(super) const LAST_SMOKE_STAGE: u32 = 16;
 /// Stage 8 fails when the Mobius wall's shortest drawn bond is below this fraction of the lattice spacing (the
 /// median rest bond length): a collapsed or non-converged picture. Set from the measured healthy run (see
 /// `PAPERTILLING_SMOKE_INFO`).
@@ -55,6 +55,8 @@ impl PapertillingApp {
                     || (self.analysis.spectrum.last_error.is_none()
                         && (self.analysis.spectrum.result.is_none() || self.view3d.legend().is_none()))
             }
+            NavTab::Atlas => self.atlas.sub_tab == crate::atlas_tab::AtlasSubTab::HyperbolicH3
+                && self.atlas.hyperbolic3d.is_building(),
             NavTab::Workbench => self.workbench_busy() || self.workbench.dirty,
             _ => false,
         }
@@ -144,8 +146,8 @@ impl PapertillingApp {
                 if !self.smoke_reported {
                     self.smoke_reported = true;
                     println!(
-                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages=15 (surfaces x5,defects-sheet,combine-sheet,fvk,sheet3d-mobius,analysis-hidden,atlas-3d,flat3d,curved2d,honeycombs,atlas-h2) export3d={export3d} deck={}",
-                        self.adapter_name, self.backend_name, self.view3d.counters.uploads(), self.deck.realm_switches
+                        "PAPERTILLING_SMOKE_OK adapter={} backend={} frames={painted} uploads={} stages={} (surfaces x5,defects-sheet,combine-sheet,fvk,sheet3d-mobius,analysis-hidden,atlas-3d,flat3d,curved2d,honeycombs,atlas-h2,atlas-h3-seed,atlas-h3-layer1) export3d={export3d} deck={}",
+                        self.adapter_name, self.backend_name, self.view3d.counters.uploads(), LAST_SMOKE_STAGE + 1, self.deck.realm_switches
                     );
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -164,8 +166,13 @@ impl PapertillingApp {
                 11 => self.smoke_enter_via_deck(ctx, Realm::Manifolds, WorkbenchView::S4Flat3d),
                 12 => self.smoke_enter_via_deck(ctx, Realm::Geometries, WorkbenchView::S5Curved2d),
                 13 => self.smoke_enter_via_deck(ctx, Realm::Geometries, WorkbenchView::S6Honeycombs),
-                LAST_SMOKE_STAGE => {
+                14 => {
                     self.select_lattices_view(super::LatticesView::NonEuclidean);
+                    self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
+                }
+                stage @ (15 | LAST_SMOKE_STAGE) => {
+                    self.atlas.sub_tab = crate::atlas_tab::AtlasSubTab::HyperbolicH3;
+                    self.atlas.hyperbolic3d.select_cell_layers([4, 3, 5], stage - 15);
                     self.atlas.sync_scenes(&mut self.canvas2d, &mut self.view3d);
                 }
                 5 => {

@@ -37,39 +37,30 @@ def to_klein(z: list[float] | tuple[float, float]) -> list[float]:
 
 
 def to_hyperboloid(z: list[float] | tuple[float, float]) -> list[float]:
-    """Upper-sheet hyperboloid image of a Poincare point, radius clamped to 0.95 for display."""
-    n2 = z[0] * z[0] + z[1] * z[1]
-    if n2 > 0.9025:
-        sc = math.sqrt(0.9025 / n2)
-        x, y = z[0] * sc, z[1] * sc
-    else:
-        x, y = z[0], z[1]
-    d = max(0.05, 1.0 - (x * x + y * y))
-    return [2.0 * x / d, 2.0 * y / d, (1.0 + x * x + y * y) / d]
-
-
-def _orth_circle(a, b):
-    det = a[0] * b[1] - a[1] * b[0]
-    if abs(det) < 1e-10:
-        return None
-    r0, r1 = 0.5 * (1.0 + a[0] ** 2 + a[1] ** 2), 0.5 * (1.0 + b[0] ** 2 + b[1] ** 2)
-    cx, cy = (r0 * b[1] - a[1] * r1) / det, (a[0] * r1 - r0 * b[0]) / det
-    r2 = cx * cx + cy * cy - 1.0
-    return (cx, cy, r2) if r2 > 0.0 else None
+    """Upper-sheet hyperboloid coordinates for an interior Poincaré disk point."""
+    x, y = z
+    n2 = x * x + y * y
+    if n2 >= 1.0:
+        # Preserve the finite display fallback for points on or outside the ideal circle.
+        scale = 0.95 / math.sqrt(n2)
+        x, y = x * scale, y * scale
+        n2 = x * x + y * y
+    d = 1.0 - n2
+    return [2.0 * x / d, 2.0 * y / d, (1.0 + n2) / d]
 
 
 def _geodesic_arc(a, b, segs: int = 8):
-    """Points along the Poincare geodesic from a to b (the chord ends for a diameter)."""
-    oc = _orth_circle(a, b)
-    if oc is None:
-        return [list(a), list(b)]
-    cx, cy, r2 = oc
-    rad = math.sqrt(r2)
-    th0, th1 = math.atan2(a[1] - cy, a[0] - cx), math.atan2(b[1] - cy, b[0] - cx)
-    dth = (th1 - th0 + math.pi) % (2.0 * math.pi) - math.pi
-    if abs(dth) < 1e-6:
-        dth = 0.0
-    return [[cx + rad * math.cos(th0 + dth * k / segs), cy + rad * math.sin(th0 + dth * k / segs)] for k in range(segs + 1)]
+    """Sample a straight Klein chord and map the samples to the Poincaré disk."""
+    u, v = to_klein(a), to_klein(b)
+    segments = max(1, segs)
+    arc = [list(a)]
+    for k in range(1, segments):
+        t = k / segments
+        x, y = ((1.0 - t) * left + t * right for left, right in zip(u, v))
+        scale = 1.0 + math.sqrt(max(0.0, 1.0 - (x * x + y * y)))
+        arc.append([x / scale, y / scale])
+    arc.append(list(b))
+    return arc
 
 
 def _vertex_completion_patch(p: int, q: int, lay: int, seed: str = "cell"):

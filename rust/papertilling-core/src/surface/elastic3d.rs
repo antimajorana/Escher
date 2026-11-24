@@ -212,8 +212,16 @@ pub fn estimate_planar_frank_deg(faces: &[Vec<usize>], bmap: &BTreeMap<(usize, u
             for m in 0..3 { ang_sum[f[m]] += tri_angle(edge_l(f[(m + 2) % 3], f[m]), edge_l(f[m], f[(m + 1) % 3]), edge_l(f[(m + 2) % 3], f[(m + 1) % 3])); }
             continue;
         }
-        let fallback = cyclic_polygon_radii(&(0..d).map(|m| edge_l(f[m], f[(m + 1) % d])).collect::<Vec<_>>());
+        let el: Vec<f64> = (0..d).map(|m| edge_l(f[m], f[(m + 1) % d])).collect();
+        let fallback = cyclic_polygon_radii(&el);
         let sp = spoke_lengths.get(&fi).unwrap_or(&fallback);
+        let gamma_sum: f64 = (0..d).map(|m| tri_angle(sp[m], sp[(m + 1) % d], el[m])).sum();
+        if (gamma_sum - 2.0 * PI).abs() > 1e-4
+            && let Some(angs) = crate::defect::sheet3d_polygon::reconstruct_concave_planar_angles(sp, &el)
+        {
+            for m in 0..d { ang_sum[f[m]] += angs[m]; }
+            continue;
+        }
         for m in 0..d {
             let (pm, nm) = ((m + d - 1) % d, (m + 1) % d);
             ang_sum[f[m]] += tri_angle(sp[m], edge_l(f[pm], f[m]), sp[pm]) + tri_angle(sp[m], edge_l(f[m], f[nm]), sp[nm]);
@@ -222,12 +230,38 @@ pub fn estimate_planar_frank_deg(faces: &[Vec<usize>], bmap: &BTreeMap<(usize, u
     (0..=v_max).filter(|&u| in_face[u] && !boundary[u]).map(|u| 2.0 * PI - ang_sum[u]).sum::<f64>().to_degrees()
 }
 
-fn build_hinges(faces: &[Vec<usize>], vc_map: &BTreeMap<usize, usize>, is_proj: bool) -> Vec<Hinge> {
+fn build_hinges(
+    faces: &[Vec<usize>],
+    vc_map: &BTreeMap<usize, usize>,
+    concave_tris: &BTreeMap<usize, Vec<[usize; 3]>>,
+    is_proj: bool,
+) -> Vec<Hinge> {
     let mut edge_inc: BTreeMap<(usize, usize), Vec<(usize, usize)>> = BTreeMap::new();
     let (mut hinges, mult) = (Vec::new(), if is_proj { 0.5 } else { 1.0 });
     for (fi, f) in faces.iter().enumerate() {
         let d = f.len();
         if d < 3 { continue; }
+        if let Some(tris) = concave_tris.get(&fi) {
+            let mut local_inc: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
+            for &[ia, ib, ic] in tris {
+                let (u, v, w) = (f[ia], f[ib], f[ic]);
+                for (a, b, opp) in [(u, v, w), (v, w, u), (w, u, v)] {
+                    local_inc.entry((a.min(b), a.max(b))).or_default().push(opp);
+                }
+            }
+            for m in 0..d {
+                let (u, v) = (f[m], f[(m + 1) % d]);
+                if let Some(&opp) = local_inc.get(&(u.min(v), u.max(v))).and_then(|v_o| v_o.first()) {
+                    edge_inc.entry((u.min(v), u.max(v))).or_default().push((fi, opp));
+                }
+            }
+            for ((du, dv), opps) in local_inc {
+                if opps.len() == 2 && opps[0] != opps[1] {
+                    hinges.push(Hinge { p: du, q: dv, a: opps[0], b: opps[1], w: 0.5 * mult });
+                }
+            }
+            continue;
+        }
         for m in 0..d {
             let (u, v) = (f[m], f[(m + 1) % d]);
             edge_inc.entry((u.min(v), u.max(v))).or_default().push((fi, if d == 3 { f[(m + 2) % 3] } else { vc_map[&fi] }));
@@ -308,11 +342,23 @@ pub fn relax_indexed_elastic(
     let kappa_eff = kappa_b * l_mean * l_mean;
     let sw = if is_proj { 0.5 } else { 1.0 };
 
+    let edge_map: HashMap<(usize, usize), f64> = edges.iter().zip(edge_l0).map(|(&(u, v), &l0)| ((u.min(v), u.max(v)), l0)).collect();
     let mut springs: Vec<(usize, usize, f64, f64)> = edges.iter().zip(edge_l0).map(|(&(u, v), &l0)| (u, v, l0, sw)).collect();
-    let (mut vc_map, mut c0) = (BTreeMap::new(), Vec::new());
+    let (mut vc_map, mut concave_tris, mut c0) = (BTreeMap::new(), BTreeMap::new(), Vec::new());
     for (fi, f) in faces.iter().enumerate() {
         let d = f.len();
         if d >= 4 {
+            let el: Vec<f64> = (0..d).map(|m| edge_map.get(&(f[m].min(f[(m + 1) % d]), f[m].max(f[(m + 1) % d]))).copied().unwrap_or(l_mean)).collect();
+            let xy_matches = is_open_sheet && (0..d).all(|m| {
+                let (a, b) = (f[m], f[(m + 1) % d]);
+                ((x0[b][0] - x0[a][0]).hypot(x0[b][1] - x0[a][1]) - el[m]).abs() <= 1e-12 + 1e-9 * el[m]
+            });
+            let local_pts: Vec<_> = f.iter().map(|&u| if xy_matches { [x0[u][0], x0[u][1], 0.0] } else { x0[u] }).collect();
+            let indices: Vec<_> = (0..d).collect();
+            if let Some(tris) = crate::defect::sheet3d_polygon::concave_face_triangulation(&local_pts, &indices) {
+                concave_tris.insert(fi, tris);
+            }
+            // Stretching still uses the supplied rest spokes on every face.
             let vc = n_pts + vc_map.len();
             vc_map.insert(fi, vc);
             let s = f.iter().fold([0.0; 3], |a, &u| [a[0] + x0[u][0], a[1] + x0[u][1], a[2] + x0[u][2]]);
@@ -325,7 +371,7 @@ pub fn relax_indexed_elastic(
             for (m, &v_idx) in f.iter().enumerate() { springs.push((vc, v_idx, sp[m], sw)); }
         }
     }
-    let hinges = build_hinges(faces, &vc_map, is_proj);
+    let hinges = build_hinges(faces, &vc_map, &concave_tris, is_proj);
 
     let mut x = Vec::with_capacity(3 * (v_count + c0.len()));
     for p in x0.iter().take(v_count).chain(c0.iter()) { x.extend_from_slice(p); }
