@@ -1,4 +1,4 @@
-<img align="right" src="assets/escher.png" width="112" height="112" alt="Six colored hyperbolic pentagons on black">
+<img align="right" src="assets/escher.png" width="112" height="112" alt="Round black Escher icon with six colorful hyperbolic pentagons">
 
 # Escher
 
