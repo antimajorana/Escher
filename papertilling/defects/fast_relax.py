@@ -28,6 +28,7 @@ import math
 
 import numpy as np
 import scipy.sparse as sp
+from scipy import __version__ as scipy_version
 from scipy.sparse.linalg import splu
 
 from ..legacy import fusion_framework as ff
@@ -176,7 +177,8 @@ def relax_picture(d, steps: int = 80, fast: bool | None = None):
     """Same effect as legacy fusion_framework.relax_picture (drawing positions, picture flag, long-bond
     marks); fast=False (or PAPERTILLING_LEGACY=1) runs the legacy function itself."""
     from .fast import enabled
-    if not enabled(fast):
+    # SuperLU can crash on SciPy 1.10, so use the existing LSMR solver there.
+    if not enabled(fast) or scipy_version.split(".")[:2] == ["1", "10"]:
         return ff.relax_picture(d, steps=steps)
     S = relax_setup(d)
     if S["m"]:
