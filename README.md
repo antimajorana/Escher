@@ -8,6 +8,8 @@ Escher lets you build lattices and explore how their defects combine and bend a 
 
 Run `*-windows-x86_64-setup.exe` on 64-bit Windows. The release also includes portable Windows, macOS, and Linux builds. [Latest downloads](https://github.com/antimajorana/Escher/releases/latest)
 
+The **Source code** archives on each release page contain the matching source for its desktop downloads and Python acceleration wheels. [Escher releases](https://github.com/antimajorana/Escher/releases)
+
 ## Try it on the honeycomb
 
 1. Use **Find lattice** to select **Honeycomb**. In **Defects → Fuse & compare**, choose **+α + −α → Dislocation**.
