@@ -1,8 +1,8 @@
-<img align="right" src="assets/escher.png" width="112" height="112" alt="Circular Escher logo with a central pentagon and three hyperbolic growth layers on black">
+<img align="right" src="assets/escher.png" width="112" height="112" alt="Six colored hyperbolic pentagons on black">
 
 # Escher
 
-Escher lets you build lattices and explore how their defects combine and bend a sheet. The logo shows a plaquette-centered hyperbolic `{5,5}` tiling with three layers around its central pentagon.
+Escher lets you build lattices and explore how their defects combine and bend a sheet. The logo shows the central pentagon of a hyperbolic `{5,5}` tiling and its five edge-sharing neighbors.
 
 ## Install
 
