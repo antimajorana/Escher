@@ -11,9 +11,9 @@ AppName=Escher
 AppVersion={#MyAppVersion}
 ; package author
 AppPublisher=Escher contributors
-AppPublisherURL=https://github.com/antimajorana/papertilling
-AppSupportURL=https://github.com/antimajorana/papertilling/issues
-AppUpdatesURL=https://github.com/antimajorana/papertilling/releases
+AppPublisherURL=https://github.com/antimajorana/Escher
+AppSupportURL=https://github.com/antimajorana/Escher/issues
+AppUpdatesURL=https://github.com/antimajorana/Escher/releases
 DefaultDirName={autopf}\Escher
 DefaultGroupName=Escher
 DisableProgramGroupPage=yes

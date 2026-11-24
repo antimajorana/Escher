@@ -6,7 +6,7 @@ Escher lets you build lattices and explore how their defects combine and bend a 
 
 ## Install
 
-Run `*-windows-x86_64-setup.exe` on 64-bit Windows. The release also includes portable Windows, macOS, and Linux builds. [Latest downloads](https://github.com/antimajorana/papertilling/releases/latest)
+Run `*-windows-x86_64-setup.exe` on 64-bit Windows. The release also includes portable Windows, macOS, and Linux builds. [Latest downloads](https://github.com/antimajorana/Escher/releases/latest)
 
 ## Try it on the honeycomb
 

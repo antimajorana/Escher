@@ -8,4 +8,4 @@ edition = "2024"
 rust-version = "1.95"
 license = "GPL-3.0-only"
 authors = ["antimajorana"]
-repository = "https://github.com/antimajorana/papertilling"
+repository = "https://github.com/antimajorana/Escher"

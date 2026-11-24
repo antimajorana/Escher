@@ -160,7 +160,7 @@ static class SetupProgram {
             k.SetValue("DisplayName", AppName);
             k.SetValue("DisplayVersion", AppVer);
             k.SetValue("Publisher", "antimajorana"); // package author
-            k.SetValue("URLInfoAbout", "https://github.com/antimajorana/papertilling");
+            k.SetValue("URLInfoAbout", "https://github.com/antimajorana/Escher");
             k.SetValue("DisplayIcon", appExe);
             k.SetValue("InstallLocation", installDir);
             k.SetValue("UninstallString", "\"" + uninsExe + "\" --uninstall");

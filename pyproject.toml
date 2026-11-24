@@ -40,8 +40,8 @@ test = ["pytest>=7.0"]
 all = ["numba>=0.58", "ipywidgets>=8.0", "jupyterlab>=4.0", "pytest>=7.0"]
 
 [project.urls]
-Homepage = "https://github.com/antimajorana/papertilling"
-Issues = "https://github.com/antimajorana/papertilling/issues"
+Homepage = "https://github.com/antimajorana/Escher"
+Issues = "https://github.com/antimajorana/Escher/issues"
 
 [tool.setuptools.packages.find]
 include = ["papertilling*"]
