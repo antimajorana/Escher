@@ -1,8 +1,8 @@
-<img align="right" src="assets/escher.png" width="112" height="112" alt="Round black Escher icon with six colorful hyperbolic pentagons">
+<img align="right" src="assets/escher.png" width="112" height="112" alt="Blue, gold, and red hyperbolic pentagons on a black disk with a thin metallic rim">
 
 # Escher
 
-Escher lets you build lattices and explore how their defects combine and bend a sheet. The off-center logo shows a pentagon and its five edge-sharing neighbors from a hyperbolic `{5,5}` tiling.
+Escher lets you build lattices and explore how their defects combine and bend a sheet. Its logo shows three pentagons from a hyperbolic `{5,5}` tiling.
 
 ## Install
 
