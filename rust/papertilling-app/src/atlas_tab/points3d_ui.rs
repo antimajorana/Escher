@@ -179,7 +179,9 @@ fn show_body(ui: &mut egui::Ui, sp: &mut Space3dPanelState) -> bool {
     if let Some(k) = pick {
         dirty |= sp.choose_catalogue(CatalogueChoice { sg: num, idx: k, ..base });
     }
-    if let Some(c) = active {
+    if !sp.pristine_only && sp.screw_periods != 0 {
+        ui.small("The screw preview uses a fixed block of cells. Select Reference to adjust the growth layers.");
+    } else if let Some(c) = active {
         let mut layers = c.layers;
         if ui.add(egui::Slider::new(&mut layers, 0..=MAX_LAYERS).text("Layers")).changed() {
             dirty |= sp.choose_catalogue(CatalogueChoice { layers, ..c });

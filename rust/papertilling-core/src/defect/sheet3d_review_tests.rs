@@ -348,3 +348,92 @@ fn sheet3d_review_raw_folded_dipole_unfolds_without_creasing() {
     );
     assert!(res.bend_energy < 0.05, "unexpected crease: E_bend={:.5}", res.bend_energy);
 }
+
+#[test]
+fn sheet3d_review_flat_concave_polygon_zero_curvature_and_bend() {
+    // 5-vertex flat patch with interior vertex 0 incident on two 45 deg triangles and one
+    // 270 deg reflex corner of concave quad [0, 3, 4, 1] whose centroid (0.475, 0) lies outside.
+    let (_, cell, _) = named_cell("square");
+    let pos = vec![[0.0, 0.0], [1.0, -1.0], [1.0, 0.0], [1.0, 1.0], [-0.1, 0.0]];
+    let edges = vec![(0, 1), (1, 2), (0, 2), (2, 3), (0, 3), (3, 4), (4, 1)];
+    let crystal = crystal_from_graph(pos.clone(), edges.clone());
+
+    let res_flat = relax_sheet_3d(&crystal, &cell, &Sheet3DOptions::default(), None);
+    assert!(res_flat.has_finite_geometry() && res_flat.converged);
+    assert_eq!(res_flat.is_boundary, vec![false, true, true, true, true]);
+    assert!(res_flat.stretch_energy < 1e-12, "flat stretch={:.3e}", res_flat.stretch_energy);
+    assert!(res_flat.bend_energy < 1e-12, "flat bend={:.3e}", res_flat.bend_energy);
+    assert!(res_flat.vertex_omega[0].abs() < 1e-12, "omega[0]={}", res_flat.vertex_omega[0]);
+    assert!(res_flat.site_bend_energy.iter().all(|&e| e < 1e-12));
+    assert!(res_flat.bond_bend_energy.iter().all(|&e| e < 1e-12));
+
+    // Perturbed out-of-plane warm_z must relax back to a flat strain-free, zero-curvature sheet.
+    let warm_z = [0.22, -0.11, 0.08, -0.14, 0.19];
+    let res_warm = relax_sheet_3d(&crystal, &cell, &Sheet3DOptions::default(), Some(&warm_z));
+    assert!(res_warm.has_finite_geometry() && res_warm.converged);
+    assert!(res_warm.stretch_energy < 1e-10, "warm stretch={:.3e}", res_warm.stretch_energy);
+    assert!(res_warm.bend_energy < 1e-10, "warm bend={:.3e}", res_warm.bend_energy);
+    assert!(res_warm.vertex_omega[0].abs() < 1e-10, "warm omega[0]={}", res_warm.vertex_omega[0]);
+
+    // Matching surface::elastic3d path (used by Python bridge relax_defect_sheet_3d_json).
+    let bmap: std::collections::BTreeMap<(usize, usize), f64> = edges
+        .iter()
+        .map(|&(u, v)| ((u.min(v), u.max(v)), (pos[u][0] - pos[v][0]).hypot(pos[u][1] - pos[v][1])))
+        .collect();
+    let faces = vec![vec![0, 1, 2], vec![0, 2, 3], vec![0, 3, 4, 1]];
+    let spokes = crate::surface::face_spoke_lengths(&faces, &bmap, None, Some(&pos));
+    let frank = crate::surface::estimate_planar_frank_deg(&faces, &bmap, &spokes);
+    assert!(frank.abs() < 1e-9, "expected 0 deg planar Frank angle, got {frank}");
+    let el_edges: Vec<(usize, usize)> = bmap.keys().copied().collect();
+    let el_l0: Vec<f64> = bmap.values().copied().collect();
+    let bond_idx: Vec<usize> = (0..el_edges.len()).collect();
+    let x0: Vec<[f64; 3]> = (0..5).map(|i| [pos[i][0], pos[i][1], warm_z[i]]).collect();
+    let el_res = crate::surface::relax_indexed_elastic(
+        5, &x0, &el_edges, &el_l0, &bond_idx, &faces, &spokes, 0.05, 400, false, true,
+    )
+    .unwrap();
+    assert!(el_res.converged);
+    assert!(el_res.stretch_energy < 1e-10 && el_res.bend_energy < 1e-10);
+}
+
+#[test]
+fn sheet3d_review_nonplanar_and_oriented_concave_geometry() {
+    let base = [[0.0, 0.0, 0.0], [1.0, -1.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [-0.1, 0.0, 0.0]];
+    let faces_ccw = vec![vec![0, 1, 2], vec![0, 2, 3], vec![0, 3, 4, 1]];
+    let faces_cw = vec![vec![0, 2, 1], vec![0, 3, 2], vec![0, 1, 4, 3]];
+    let bnd = [false, true, true, true, true];
+
+    // Upside-down (N_z = -1), vertical wall (N_z = 0), and reversed cyclic walk order.
+    let inv_xyz: Vec<[f64; 3]> = base.iter().map(|&[x, y, z]| [x, -y, -z]).collect();
+    let vert_xyz: Vec<[f64; 3]> = base.iter().map(|&[x, y, z]| [x, z, y]).collect();
+    assert!(compute_vertex_omega(&inv_xyz, &faces_ccw, &bnd, &inv_xyz)[0].abs() < 1e-12);
+    assert!(compute_vertex_omega(&vert_xyz, &faces_ccw, &bnd, &vert_xyz)[0].abs() < 1e-12);
+    assert!(compute_vertex_omega(&base, &faces_cw, &bnd, &base)[0].abs() < 1e-12);
+
+    // Nonplanar isometric 40 deg V-fold along crease y = 0 (developable, Gaussian curvature 0).
+    let (c, s) = (20.0_f64.to_radians().cos(), 20.0_f64.to_radians().sin());
+    let vfold: Vec<[f64; 3]> = base.iter().map(|&[x, y, _]| [x, y * c, y.abs() * s]).collect();
+    assert!(compute_vertex_omega(&vfold, &faces_ccw, &bnd, &base)[0].abs() < 1e-12);
+
+    // Closed nonplanar concave polyhedron (V=5, E=8, F=5, chi=2): Gauss-Bonnet sum(Omega) == 4*pi.
+    let poly_xyz = [[0.0, 0.0, 0.0], [1.0, -1.0, 0.0], [1.0, 0.0, -0.55], [1.0, 1.0, 0.0], [-0.1, 0.0, 0.0]];
+    let poly_faces = vec![vec![0, 1, 2], vec![0, 2, 3], vec![0, 3, 4, 1], vec![1, 4, 2], vec![4, 3, 2]];
+    let omegas = compute_vertex_omega(&poly_xyz, &poly_faces, &[false; 5], &poly_xyz);
+    let gb_sum: f64 = omegas.iter().sum();
+    assert!((gb_sum - 4.0 * PI).abs() < 1e-12, "Gauss-Bonnet sum={gb_sum}, expected {}", 4.0 * PI);
+
+    // Convex nonplanar quad preserves documented centroid-fan semantics without redistributing C_f.
+    let warped_sq = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.2], [1.0, 1.0, 0.0], [0.0, 1.0, 0.2], [2.0, 0.0, 0.0]];
+    let conv_faces = vec![vec![0, 1, 2, 3], vec![0, 4, 1], vec![0, 3, 4]];
+    let got = compute_vertex_omega(&warped_sq, &conv_faces, &[false, true, true, true, true], &warped_sq)[0];
+    let c_sq = [0.5, 0.5, 0.1];
+    let ang = |a: [f64; 3], b: [f64; 3]| {
+        let d = ((a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) * (b[0] * b[0] + b[1] * b[1] + b[2] * b[2])).sqrt();
+        ((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / d).clamp(-1.0, 1.0).acos()
+    };
+    let sq_fan_0 = ang(warped_sq[3], c_sq) + ang(c_sq, warped_sq[1]);
+    let tri1_0 = ang(warped_sq[4], warped_sq[1]);
+    let tri2_0 = ang(warped_sq[3], warped_sq[4]);
+    let expected = TWO_PI - (sq_fan_0 + tri1_0 + tri2_0);
+    assert!((got - expected).abs() < 1e-12, "convex nonplanar fan semantics altered: {got} vs {expected}");
+}

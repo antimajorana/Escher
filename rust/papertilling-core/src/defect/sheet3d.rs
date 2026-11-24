@@ -16,11 +16,11 @@ use crate::defect::gsv_elastic::{
 use crate::defect::gsv_mobius::seed_mobius_3d;
 use crate::defect::gsv_model::{GsvModel, compute_gsv_diagnostics, eval_gsv_fg};
 use crate::defect::sheet3d_energy::{
-    bond_stretch_energy_3d, build_hinges, compute_hinge_bend_breakdown, compute_strains,
+    bond_stretch_energy_3d, build_hinges_with_ref, compute_hinge_bend_breakdown, compute_strains,
     compute_vertex_omega, dist3_at, eval_gsv_sheet_fg, eval_hinge_bending_fg,
 };
 #[cfg(test)]
-use crate::defect::sheet3d_energy::{Spring, eval_sheet_fg};
+use crate::defect::sheet3d_energy::{Spring, build_hinges, eval_sheet_fg};
 use crate::defect::sheet3d_opt::{center_and_align_horizontal, lbfgs_minimize};
 #[cfg(test)]
 use crate::types::Isometry2;
@@ -167,7 +167,6 @@ pub fn relax_sheet_3d(
     }
     let mut diagnostics = model.diagnostics.clone();
     let warm_z = warm_z.filter(|wz| wz.iter().any(|z| z.abs() > 1e-4));
-    let hinges = build_hinges(&model.faces);
 
     let mut x_flat = vec![0.0_f64; 3 * n];
     for i in 0..n {
@@ -215,9 +214,16 @@ pub fn relax_sheet_3d(
         diagnostics.push("planar reference not converged; strain comparison is provisional".into());
     }
 
+    let mobius_seed = crystal.is_non_orientable.then(|| seed_mobius_3d(crystal));
+    let hinge_ref: Vec<[f64; 3]> = match &mobius_seed {
+        Some(seed) => seed.clone(),
+        None => (0..n).map(|i| [x_2d[2 * i], x_2d[2 * i + 1], 0.0]).collect(),
+    };
+    let hinges = build_hinges_with_ref(&model.faces, Some(&hinge_ref));
+
     let mut x3 = vec![0.0_f64; 3 * n];
-    if crystal.is_non_orientable && warm_z.is_none() {
-        for (i, p) in seed_mobius_3d(crystal).into_iter().enumerate() {
+    if let (Some(seed), None) = (&mobius_seed, warm_z) {
+        for (i, p) in seed.iter().enumerate() {
             x3[3 * i] = p[0];
             x3[3 * i + 1] = p[1];
             x3[3 * i + 2] = p[2];
@@ -316,7 +322,7 @@ pub fn relax_sheet_3d(
     let (site_bend_energy, bond_bend_energy) =
         compute_hinge_bend_breakdown(&xyz, &crystal.edges, &model.faces, &hinges, kappa_eff);
     let (bond_strain, face_strain) = compute_strains(&xyz, crystal, &model.edge_rest, &model.faces);
-    let vertex_omega = compute_vertex_omega(&xyz, &model.faces, &model.is_boundary);
+    let vertex_omega = compute_vertex_omega(&xyz, &model.faces, &model.is_boundary, &hinge_ref);
 
     let result = Sheet3DResult {
         xyz,

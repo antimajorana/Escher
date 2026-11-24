@@ -136,13 +136,79 @@ def _face_spoke_lengths(faces, bmap, bvec, uv, cone_faces, lattice) -> dict[int,
     return out
 
 
-def _build_hinges(faces, vc_map: dict[int, int]):
-    """Build inter-face dihedral hinges and intra-face spoke fan hinges."""
+def _concave_face_triangulation(pts3) -> list[tuple[int, int, int]] | None:
+    """Triangulate a face when its centroid fan overlaps in the oriented Newell plane."""
+    pts = np.asarray(pts3, dtype=float)
+    k = len(pts)
+    if k < 4:
+        return None
+    centered = pts - pts.mean(axis=0)
+    area = np.cross(centered, np.roll(centered, -1, axis=0)).sum(axis=0)
+    area_norm = np.linalg.norm(area)
+    if not math.isfinite(area_norm) or area_norm <= 1e-15:
+        return None
+    normal = area / area_norm
+    axis = np.eye(3)[np.argmin(np.abs(normal))]
+    tangent = axis - (axis @ normal) * normal
+    tangent /= np.linalg.norm(tangent)
+    q = np.column_stack((centered @ tangent, centered @ np.cross(normal, tangent)))
+    successors = np.roll(q, -1, axis=0)
+    signed_areas = q[:, 0] * successors[:, 1] - q[:, 1] * successors[:, 0]
+    if np.all(signed_areas > 64 * np.finfo(float).eps * area_norm):
+        winding = np.arctan2(signed_areas, (q * successors).sum(axis=1)).sum()
+        if abs(winding - 2 * math.pi) < 1e-5:
+            return None
+    idx, tris = list(range(k)), []
+    cr2 = lambda a, b, d: (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0])
+    d2 = lambda a, b: (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+    while len(idx) > 3:
+        m_len, best = len(idx), None
+        for strict in (True, False):
+            for t in range(m_len):
+                ip, ic, inx = idx[(t - 1) % m_len], idx[t], idx[(t + 1) % m_len]
+                a, b, d = q[ip], q[ic], q[inx]
+                p2 = max(d2(a, b) + d2(b, d) + d2(d, a), 1e-24)
+                cr = cr2(a, b, d)
+                if (strict and cr <= 1e-12 * p2) or (not strict and cr < -1e-12 * p2):
+                    continue
+                eps = -1e-12 * abs(cr) if strict else 1e-12 * p2
+                if not any(iu not in (ip, ic, inx) and cr2(a, b, q[iu]) >= eps
+                           and cr2(b, d, q[iu]) >= eps and cr2(d, a, q[iu]) >= eps for iu in idx):
+                    if best is None or cr / p2 > best[1] + 32 * np.finfo(float).eps:
+                        best = (t, cr / p2)
+            if best is not None:
+                break
+        pick = best[0] if best is not None else max(
+            range(m_len), key=lambda t: cr2(q[idx[(t - 1) % m_len]], q[idx[t]], q[idx[(t + 1) % m_len]]))
+        tris.append((idx[(pick - 1) % m_len], idx[pick], idx[(pick + 1) % m_len]))
+        idx.pop(pick)
+    tris.append((idx[0], idx[1], idx[2]))
+    return tris
+
+
+def _build_hinges(faces, vc_map: dict[int, int], concave_tris: dict[int, list[tuple[int, int, int]]] | None = None):
+    """Build inter-face dihedral hinges and intra-face spoke/ear hinges."""
     edge_inc: dict[tuple[int, int], list[tuple[int, int]]] = {}
     hp, hq, ha, hb, hw = [], [], [], [], []
+    ctris = concave_tris or {}
     for fi, f in enumerate(faces):
         d = len(f)
         if d < 3:
+            continue
+        if fi in ctris:
+            local_inc: dict[tuple[int, int], list[int]] = {}
+            for ia, ib, ic in ctris[fi]:
+                u, v, w = f[ia], f[ib], f[ic]
+                for a, b, opp in ((u, v, w), (v, w, u), (w, u, v)):
+                    local_inc.setdefault((min(a, b), max(a, b)), []).append(opp)
+            for m in range(d):
+                u, v = f[m], f[(m + 1) % d]
+                opps = local_inc.get((min(u, v), max(u, v)))
+                if opps:
+                    edge_inc.setdefault((min(u, v), max(u, v)), []).append((fi, opps[0]))
+            for (du, dv), opps in sorted(local_inc.items()):
+                if len(opps) == 2 and opps[0] != opps[1]:
+                    hp.append(du); hq.append(dv); ha.append(opps[0]); hb.append(opps[1]); hw.append(0.5)
             continue
         for m in range(d):
             u, v = f[m], f[(m + 1) % d]
@@ -196,11 +262,23 @@ def _run_elastic(V: int, X0: np.ndarray, edges: list[tuple[int, int]], edge_l0: 
     n_pts = 2 * V if is_proj else V
     l_mean = float(np.mean(edge_l0)) if len(edge_l0) else 1.0
     kappa_eff = float(kappa_b) * l_mean * l_mean
+    edge_map = {(min(u, v), max(u, v)): float(l0) for (u, v), l0 in zip(edges, edge_l0)}
     vc_map: dict[int, int] = {}
+    concave_tris: dict[int, list[tuple[int, int, int]]] = {}
     spokes: list[tuple[int, int, float]] = []
     C0: list[np.ndarray] = []
     for fi, f in enumerate(faces):
-        if len(f) >= 4:
+        d = len(f)
+        if d >= 4:
+            el = [edge_map.get((min(f[m], f[(m + 1) % d]), max(f[m], f[(m + 1) % d])), l_mean) for m in range(d)]
+            pts = X0[f].copy()
+            if is_open_sheet and np.allclose(np.linalg.norm(np.roll(pts[:, :2], -1, axis=0) - pts[:, :2], axis=1),
+                                             el, rtol=1e-9, atol=1e-12):
+                pts[:, 2] = 0.0
+            tris = _concave_face_triangulation(pts)
+            if tris is not None:
+                concave_tris[fi] = tris
+            # The supplied rest spokes constrain stretching even when bending uses an internal diagonal.
             vc = n_pts + len(vc_map)
             vc_map[fi] = vc
             C0.append(X0[f].mean(axis=0))
@@ -210,7 +288,7 @@ def _run_elastic(V: int, X0: np.ndarray, edges: list[tuple[int, int]], edge_l0: 
     sv = np.array([e[1] for e in edges] + [s[1] for s in spokes], int)
     sl0 = np.concatenate([edge_l0, np.array([s[2] for s in spokes], float)]) if spokes else edge_l0.copy()
     sw = np.ones(len(su), float) * (0.5 if is_proj else 1.0)
-    hp, hq, ha, hb, hw = _build_hinges(faces, vc_map)
+    hp, hq, ha, hb, hw = _build_hinges(faces, vc_map, concave_tris)
     if is_proj and len(hw):
         hw = 0.5 * hw
 

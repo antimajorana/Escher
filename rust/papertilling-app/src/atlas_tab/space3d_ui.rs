@@ -99,6 +99,7 @@ impl Space3dPanelState {
             if ui.small_button("#136 P4_2/mnm (Rutile)").clicked() {
                 self.selected_sg = 136;
                 self.selected_net = CanonicalNet3d::Rutile136;
+                self.screw_periods = 0;
                 if !self.pristine_only {
                     self.selected_defect = LineDefect3d::ScrewDispiration42_136;
                 }
@@ -134,27 +135,6 @@ impl Space3dPanelState {
             }
         });
 
-        dirty |= super::points3d_ui::show(ui, self);
-        ui.separator();
-        ui.strong("Named crystal examples");
-        let selected_text = if self.view.catalogue.is_some() {
-            "Choose an example…"
-        } else {
-            self.selected_net.label()
-        };
-        egui::ComboBox::from_id_salt("atlas_3d_net")
-            .selected_text(selected_text)
-            .show_ui(ui, |ui| {
-                for n in CanonicalNet3d::ALL {
-                    if ui.selectable_label(self.view.catalogue.is_none() && self.selected_net == n, n.label()).clicked() {
-                        self.selected_sg = n.space_group_num();
-                        self.selected_net = n;
-                        self.set_catalogue(None);
-                        self.view.catalogue_error = None;
-                        dirty = true;
-                    }
-                }
-            });
         if !self.pristine_only {
             ui.separator();
             ui.strong("Screw dislocation");
@@ -172,6 +152,28 @@ impl Space3dPanelState {
                 });
             }
         }
+        dirty |= super::points3d_ui::show(ui, self);
+        ui.separator();
+        ui.strong("Named crystal examples");
+        let selected_text = if self.view.catalogue.is_some() {
+            "Choose an example…"
+        } else {
+            self.selected_net.label()
+        };
+        egui::ComboBox::from_id_salt("atlas_3d_net")
+            .selected_text(selected_text)
+            .show_ui(ui, |ui| {
+                for n in CanonicalNet3d::ALL {
+                    if ui.selectable_label(self.view.catalogue.is_none() && self.selected_net == n, n.label()).clicked() {
+                        self.selected_sg = n.space_group_num();
+                        self.selected_net = n;
+                        self.screw_periods = 0;
+                        self.set_catalogue(None);
+                        self.view.catalogue_error = None;
+                        dirty = true;
+                    }
+                }
+            });
         self.show_view_controls(ui);
         dirty
     }

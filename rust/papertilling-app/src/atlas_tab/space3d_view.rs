@@ -294,12 +294,12 @@ impl Space3dPanelState {
         let coord = coordination(net.positions.len(), &net.bonds)[i];
         let f = frame.fractional(p);
         let tag = if picked == Some(i) { "picked" } else { "hover" };
-        let species = match (&self.view.catalogue, screw_key) {
+        let site_label = match (&self.view.catalogue, screw_key) {
             (Some(c), _) => c.orbit_label(kind),
             (None, Some(_)) => format!("orbit {}", usize::from(kind) + 1),
-            (None, None) => species_label(net_kind, kind).to_string(),
+            (None, None) => format!("species {kind}: {}", species_label(net_kind, kind)),
         };
-        ui.colored_label(tokens.status_ok, format!("Site #{i} ({tag}) | species {kind}: {species}"));
+        ui.colored_label(tokens.status_ok, format!("Site #{i} ({tag}) | {site_label}"));
         ui.small(format!("Cartesian: ({:+.4}, {:+.4}, {:+.4})", p[0], p[1], p[2]));
         let nominal = if defect != LineDefect3d::None || screw_key.is_some() { " (helical drawing)" } else { "" };
         ui.small(format!("Fractional: ({:.4}, {:.4}, {:.4}){nominal}", f[0], f[1], f[2]));

@@ -1,144 +1,25 @@
-//! Three-chart Volterra dislocation surgery, drawn face walks, non-crossing ring completions,
-//! and Weisfeiler-Lehman graph hashing (`lab_defects.dislocation` + completion primitives).
+//! Volterra dislocation surgery (3-chart strip removal / 4-chart strip insertion),
+//! drawn face walks, non-crossing ring completions, and Weisfeiler-Lehman graph hashing.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use petgraph::graph::UnGraph;
 
-use crate::defect::cone_geometry::{add2, cross2, dot2, mat2_inv, mat2_vec, norm2, sub2};
-use crate::defect::core_graph::{LatticeCoreInfo, PerfectLattice, SiteKey, TWO_PI};
+use crate::defect::cone_geometry::{add2, cross2, mat2_vec, norm2, sub2};
+use crate::defect::core_graph::{LatticeCoreInfo, PerfectLattice, SiteKey};
 use crate::defect::sym_helper::{np_allclose_vec, round_dec};
-use crate::types::{BuiltCrystal, DirectedBondData, Isometry2};
+use crate::types::{BuiltCrystal, Isometry2};
 
-/// Result of a 3-chart Volterra cut-and-reglue patch build, retaining lattice `SiteKey`s.
+pub(crate) use super::volterra_charts::build_volterra_patch;
+
+/// Result of a Volterra cut-and-reglue patch build, retaining lattice `SiteKey`s.
 #[derive(Clone, Debug)]
 pub struct VolterraPatch {
     pub crystal: BuiltCrystal,
     pub keys: Vec<SiteKey>,
 }
 
-/// Build a single Volterra dislocation on `lat_info` using the clean-room 3-chart cut-and-reglue rule.
-pub(crate) fn build_volterra_patch(
-    lat_info: &LatticeCoreInfo,
-    b: [f64; 2],
-    core_pt: [f64; 2],
-    cut: Option<[f64; 2]>,
-    r_patch: f64,
-) -> Result<VolterraPatch, String> {
-    let lat = &lat_info.lat;
-    let fb = mat2_vec(lat.a_inv, b);
-    let m_b = [fb[0].round_ties_even() as i32, fb[1].round_ties_even() as i32];
-    if norm2(b) < 1e-9
-        || (fb[0] - m_b[0] as f64).abs() > 1e-6
-        || (fb[1] - m_b[1] as f64).abs() > 1e-6
-    {
-        return Err(format!("b = {b:?} is not a non-zero lattice translation"));
-    }
-    let lb = norm2(b);
-    let d = cut.unwrap_or([b[1] / lb, -b[0] / lb]);
-    if cross2(b, d).abs() < 1e-12 {
-        return Err("cut direction is parallel to Burgers vector b".to_string());
-    }
-    let b_inv = mat2_inv([[b[0], d[0]], [b[1], d[1]]]);
-    let all_keys = lat.sites_in_disk(core_pt, r_patch);
-    let mut keys = Vec::with_capacity(all_keys.len());
-    let mut ts = Vec::with_capacity(all_keys.len());
-    let mut ref_pos = Vec::with_capacity(all_keys.len());
-    for k in all_keys {
-        let p = lat.pos(k);
-        let [t, s] = mat2_vec(b_inv, sub2(p, core_pt));
-        if s > 1e-9 && (-1e-9..(1.0 - 1e-9)).contains(&t) {
-            continue;
-        }
-        keys.push(k);
-        ts.push((t, s));
-        ref_pos.push(p);
-    }
-
-    let n = keys.len();
-    let mut edge_map: BTreeMap<(usize, usize), ([f64; 2], usize)> = BTreeMap::new();
-    for chart in 0..3 {
-        let mut where_map: HashMap<SiteKey, usize> = HashMap::with_capacity(n);
-        for (u, (&k, &(t, s))) in keys.iter().zip(&ts).enumerate() {
-            let (ok, sh) = match chart {
-                0 => (s <= 1e-9 || t < -1e-9, 0),
-                1 => (t >= 1.0 - 1e-9, -1),
-                _ => (s > 1e-9, if t >= 1.0 - 1e-9 { -1 } else { 0 }),
-            };
-            if ok {
-                let img = if sh == 0 {
-                    k
-                } else {
-                    (k.0 + sh * m_b[0], k.1 + sh * m_b[1], k.2)
-                };
-                where_map.insert(img, u);
-            }
-        }
-        for (&img, &u) in &where_map {
-            let p_img = lat.pos(img);
-            for (k2, kind) in lat.nbrs(img) {
-                let Some(&v) = where_map.get(&k2) else { continue };
-                if v == u {
-                    continue;
-                }
-                let vec_uv = sub2(lat.pos(k2), p_img);
-                for (pair, vec_dir) in [((u, v), vec_uv), ((v, u), [-vec_uv[0], -vec_uv[1]])] {
-                    if let Some(&(old_v, _)) = edge_map.get(&pair)
-                        && !np_allclose_vec(old_v, vec_dir, 1e-5, 1e-8)
-                    {
-                        return Err(format!("two charts disagree on bond {pair:?}"));
-                    }
-                    edge_map.insert(pair, (vec_dir, kind));
-                }
-            }
-        }
-    }
-
-    let mut adj = vec![Vec::new(); n];
-    let mut edges = Vec::new();
-    for ((u, v), (vec, kind)) in edge_map {
-        if u < v {
-            edges.push((u, v));
-        }
-        adj[u].push(DirectedBondData {
-            to: v,
-            vec,
-            kind,
-            seam: None,
-            ang: None,
-            across: false,
-            ghost_stub: None,
-        });
-    }
-    let sgn = if cross2(d, b) > 0.0 { 1.0 } else { -1.0 };
-    let c_mid = [core_pt[0] + 0.5 * b[0], core_pt[1] + 0.5 * b[1]];
-    let ld = norm2(d);
-    let dh = [d[0] / ld, d[1] / ld];
-    let pos: Vec<[f64; 2]> = ref_pos
-        .iter()
-        .map(|&p| {
-            let r = sub2(p, c_mid);
-            let ang = (sgn * cross2(dh, r)).atan2(dot2(r, dh)).rem_euclid(TWO_PI);
-            let f = 1.0 - ang / TWO_PI;
-            [p[0] - f * b[0], p[1] - f * b[1]]
-        })
-        .collect();
-    let basis_idx: Vec<usize> = keys.iter().map(|&k| k.2).collect();
-    let crystal = BuiltCrystal {
-        pos,
-        ref_pos,
-        basis_idx,
-        side: vec![None; n],
-        cone_sites: Vec::new(),
-        edges,
-        adj,
-        wall_sigma: None,
-        is_non_orientable: false,
-    };
-    Ok(VolterraPatch { crystal, keys })
-}
-
-/// Public 3-chart Volterra dislocation builder returning `BuiltCrystal`.
+/// Public Volterra dislocation builder returning `BuiltCrystal` with exact SF/RH holonomy `H = (I, -b)`.
 pub fn build_volterra_dislocation(
     lat_info: &LatticeCoreInfo,
     b: [f64; 2],
