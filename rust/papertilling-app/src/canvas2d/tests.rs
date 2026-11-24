@@ -376,7 +376,8 @@ fn concave_core_fill_stays_inside_its_outline() {
         let points: Vec<_> = outline.iter().map(|&[x, y]| egui::pos2(x, y)).collect();
         let mesh = render::concave_fill_mesh(&points, egui::Color32::WHITE);
         let mut area = 0.0;
-        for t in mesh.indices.chunks_exact(3) {
+        let (triangles, _) = mesh.indices.as_chunks::<3>();
+        for t in triangles {
             let (a, b, c) = (mesh.vertices[t[0] as usize].pos, mesh.vertices[t[1] as usize].pos, mesh.vertices[t[2] as usize].pos);
             let center = [(a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0];
             assert!(point_in_polygon(center, &outline), "triangle center {center:?} is outside the ring");

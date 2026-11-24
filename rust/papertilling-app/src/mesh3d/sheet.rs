@@ -332,7 +332,8 @@ mod tests {
             let vertices = &mesh.faces[mesh.opaque_vertex_count..];
             assert_eq!(vertices.len(), 12, "a six-sided face uses four triangles");
             let mut area = 0.0;
-            for t in vertices.chunks_exact(3) {
+            let (triangles, _) = vertices.as_chunks::<3>();
+            for t in triangles {
                 let original_xy = |i: usize| {
                     let v = t[i].position;
                     [f64::from(v[0] * mesh.radius), f64::from(-v[2] * mesh.radius)]
