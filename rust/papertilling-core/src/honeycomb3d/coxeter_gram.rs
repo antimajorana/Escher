@@ -79,7 +79,7 @@ impl Classification {
             return None;
         }
         // Number of flags of a spherical {a,b}. A Euclidean link is a cusp.
-        let flags = |a, b| {
+        let flags = |a: u32, b: u32| {
             let excess = 2 * (a + b) - a * b;
             (8_u32 * a * b).checked_div(excess).unwrap_or(0)
         };
