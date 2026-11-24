@@ -248,3 +248,44 @@ fn combine_preset_clears_pending_combine_from_session_restore() {
     assert_eq!(bs.len(), 2, "preset dipole kept instead of 1-pin session restore");
     assert!((bs[0][0] + bs[1][0]).abs() < 1e-12 && (bs[0][1] + bs[1][1]).abs() < 1e-12);
 }
+
+#[test]
+fn gallery_preset_switches_to_periodic_grid_independently_of_open_patch_state() {
+    let name = "Kagome: ITA symmetry + Voronoi";
+
+    // Case 1: start from Open patch (inflation.enabled == true, steps == 4).
+    let mut h_open = harness();
+    h_open.run_steps(2);
+    {
+        let app = h_open.state_mut();
+        app.gallery.inflation.steps = 4;
+        app.gallery.set_inflation_enabled(true, &mut app.canvas2d);
+        assert!(app.gallery.inflation.enabled && app.gallery.inflation.steps == 4);
+    }
+    apply(&mut h_open, name);
+    let snap_from_open = super::snapshot(h_open.state());
+    {
+        let app = h_open.state();
+        assert!(!app.gallery.inflation.enabled);
+        assert!(app.gallery.inflation.last_shells.is_empty());
+        assert!(matches!(app.canvas2d.scene(), Scene2D::PeriodicCell { repeat: 4, show_unit_cell: true, .. }));
+        // 4 * 4 * 6 = 96 Kagome bonds + 4 unit-cell border lines = 100 lines.
+        assert_eq!(app.canvas2d.counts().1, 100);
+    }
+
+    // Case 2: start from Periodic grid (inflation.enabled == false, repeat == 1).
+    let mut h_grid = harness();
+    h_grid.run_steps(2);
+    {
+        let app = h_grid.state_mut();
+        app.gallery.set_repeat(1, &mut app.canvas2d);
+        app.gallery.set_inflation_enabled(false, &mut app.canvas2d);
+        assert!(!app.gallery.inflation.enabled && app.gallery.repeat == 1);
+    }
+    apply(&mut h_grid, name);
+    let app = h_grid.state();
+    assert!(!app.gallery.inflation.enabled);
+    assert!(matches!(app.canvas2d.scene(), Scene2D::PeriodicCell { repeat: 4, show_unit_cell: true, .. }));
+    assert_eq!(app.canvas2d.counts().1, 100);
+    assert_eq!(super::snapshot(app), snap_from_open, "Gallery preset result must be independent of prior patch mode");
+}

@@ -123,6 +123,15 @@ def test_detect_dislocation_round_trip(mode, name, b, uv, weber):
     assert np.allclose(nye["boundary_closure"], b, atol=1e-9)
 
 
+def test_nye_sums_burgers_vectors_of_two_disconnected_crystals(mode):
+    _, pos = _dislocation("square", (1.0, 0.0))
+    pair = np.vstack([pos, pos + [30.0, 0.0]])
+    nye = dfm.compute_nye_and_strain(pair, "square")
+    assert nye["boundary_walk"] == []
+    assert np.allclose(nye["boundary_closure"], [2.0, 0.0], atol=1e-9)
+    assert np.allclose(nye["nye_total"], [2.0, 0.0], atol=1e-9)
+
+
 def test_detect_separated_disclination_dipole(mode):
     c1 = np.array([S3 / 2, 0.5])                                       # hexagon centres of the honeycomb cell
     d_vec = np.array([2 * S3, 0.0])
@@ -216,3 +225,17 @@ def test_diagnostics_are_stamped(mode):
     c, P = _dislocation("square", (1.0, 0.0))
     for d in dfm.detect_defects_coords(P, "square")["defects"]:
         assert d["reason"].startswith(("[PROVED]", "REFUSED"))
+
+
+def test_oriented_darts_of_a_square_annulus_and_two_islands():
+    faces = [[v, v + 1, v + 5, v + 4] for v in [0, 1, 2, 4, 5, 6, 8, 9, 10]]
+    left = {(u, v): i for i, f in enumerate(faces) for u, v in zip(f, f[1:] + f[:1])}
+
+    def area(walk):
+        return sum((u % 4) * (v // 4) - (v % 4) * (u // 4) for u, v in zip(walk, walk[1:])) / 2
+
+    ring = dfm._boundaries(faces, left, set(range(9)) - {4})
+    assert sorted(map(area, ring)) == [-1.0, 9.0]
+    for selected in [{0, 8}, {0, 4}]:  # disjoint squares, then two squares sharing one vertex
+        islands = dfm._boundaries(faces, left, selected)
+        assert sorted(map(area, islands)) == [1.0, 1.0]

@@ -66,7 +66,7 @@ pub struct CellComplex3d {
     pub cells: Vec<Vec<usize>>,
     /// Layer in which each cell was reached under the chosen adjacency rule.
     pub cell_shell: Vec<u32>,
-    /// Cells that are infinite (horospherical `{4,4}` / `{6,3}`) and were truncated to a patch.
+    /// Cells whose stored faces form a truncated patch of the full finite or horospherical cell.
     pub cell_truncated: Vec<bool>,
 }
 

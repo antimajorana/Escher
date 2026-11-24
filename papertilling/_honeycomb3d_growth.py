@@ -33,7 +33,7 @@ LOOKAHEAD = 2 ** 32 - 1
 FACE_TAG = 1 << 31
 IDEAL_VERTEX_REASON = ("[PROVED] an ideal vertex lies in infinitely many cells: its vertex figure {q,r} "
                        "is a Euclidean tiling ((q-2)(r-2) = 4)")
-INFINITE_CELL_REASON = ("[PROVED] every cell is an infinite horospherical {4,4} or {6,3} tiling "
+INFINITE_CELL_REASON = ("[PROVED] every cell is an infinite horospherical tiling "
                         "((p-2)(q-2) = 4), so a cell has infinitely many vertices and no layer can be built whole")
 
 

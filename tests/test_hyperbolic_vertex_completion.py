@@ -13,7 +13,17 @@ from collections import Counter
 
 import pytest
 
-from papertilling.hyperbolic import build_hyperbolic_tiling
+from papertilling.hyperbolic import build_hyperbolic_tiling, to_hyperboloid
+
+
+@pytest.mark.parametrize("radius", [0.96, 0.98, 0.995])
+def test_radial_distance_on_the_hyperboloid(radius):
+    x, y, time = to_hyperboloid([radius, 0.0])
+    # The intrinsic distance from the origin is 2 atanh(radius) on the unit-curvature disk.
+    distance = 2.0 * math.atanh(radius)
+    assert math.isclose(x, math.sinh(distance), rel_tol=1e-12)
+    assert y == 0.0
+    assert math.isclose(time, math.cosh(distance), rel_tol=1e-12)
 
 
 @pytest.fixture
@@ -283,7 +293,11 @@ def _assert_parity(fallback, rs, style, p, q, layers, delta):
     assert len(f["poincare_pts"]) == len(r["poincare_pts"])
     assert max(math.dist(a, b) for a, b in zip(f["poincare_pts"], r["poincare_pts"])) < 1e-9
     assert max(math.dist(a, b) for a, b in zip(f["klein_pts"], r["klein_pts"])) < 1e-9
-    assert max(max(abs(x - y) for x, y in zip(a, b)) for a, b in zip(f["hyperboloid_pts"], r["hyperboloid_pts"])) < 1e-8
+    # The embedding coordinates grow without bound towards the disk boundary.
+    for a, b in zip(f["hyperboloid_pts"], r["hyperboloid_pts"]):
+        assert all(math.isclose(x, y, rel_tol=1e-9, abs_tol=1e-8) for x, y in zip(a, b))
+    for a, b in zip(f["edge_arcs"], r["edge_arcs"]):
+        assert len(a) == len(b) and all(math.dist(x, y) < 1e-8 for x, y in zip(a, b))
 
 
 @pytest.mark.parametrize("style", ["RegularPQ", "RectifiedKagome", "DualQP"])

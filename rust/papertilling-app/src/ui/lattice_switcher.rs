@@ -1,7 +1,8 @@
-//! Global Quick Lattice Switcher: a searchable command palette (the HUD "Search (Ctrl+K)" button or Ctrl+K while
-//! the Command Deck is closed) listing Recent (LRU, 10), the 21 named lattices and the full
-//! stored catalogue of all three rules. Picking a lattice selects it in the Gallery and reloads the active tab
-//! at once (`PapertillingApp::select_lattice_and_sync`).
+//! Global Quick Lattice Switcher: a searchable command palette (the HUD "Find lattice (Ctrl+K)" button or Ctrl+K
+//! while All Views is closed) listing Recent (LRU, 10), the 21 named lattices and the full
+//! stored catalogue of all three rules. Picking a lattice reloads a lattice-driven view at once
+//! (`PapertillingApp::select_lattice_and_sync`), or routes to `Plane2D` when the active view does not draw the
+//! Gallery lattice.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -121,7 +122,12 @@ impl PapertillingApp {
         });
         if let Some(item) = picked {
             self.switcher.open = false;
-            self.select_lattice_and_sync(item);
+            if self.view_is_lattice_driven() {
+                self.select_lattice_and_sync(item);
+            } else {
+                let _ = self.select_lattice_quiet(item);
+                self.select_lattices_view(crate::app::LatticesView::Plane2D);
+            }
         } else if resp.should_close() {
             self.switcher.open = false;
         }

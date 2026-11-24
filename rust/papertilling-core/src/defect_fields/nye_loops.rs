@@ -233,39 +233,48 @@ pub(crate) fn grow_region(pf: &PlanarFaces, v2f: &[Vec<usize>], seed: &BTreeSet<
     reg
 }
 
-/// Counter-clockwise closed boundary walk `[v0, ..., v0]` of a face region (Hierholzer on the boundary darts).
-pub fn region_boundary_walk(pf: &PlanarFaces, reg: &BTreeSet<usize>) -> Vec<usize> {
-    let mut out: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut start = None;
+/// Oriented boundaries of the face region. Each dart keeps its selected face on the left,
+/// so holes have the opposite orientation from the outside boundary.
+pub(crate) fn region_boundaries(pf: &PlanarFaces, reg: &BTreeSet<usize>) -> Vec<Vec<usize>> {
+    let mut next = HashMap::new();
+    let mut boundary = BTreeSet::new();
     for &fi in reg {
-        let f = &pf.faces[fi];
-        for k in 0..f.len() {
-            let (u, v) = (f[k], f[(k + 1) % f.len()]);
-            if !pf.left_face.get(&(v, u)).is_some_and(|g| reg.contains(g)) {
-                out.entry(u).or_default().push(v);
-                start = Some(start.map_or(u, |s: usize| s.min(u)));
+        let face = &pf.faces[fi];
+        for i in 0..face.len() {
+            let (u, v, w) = (face[i], face[(i + 1) % face.len()], face[(i + 2) % face.len()]);
+            next.insert((u, v), w);
+            if !pf.left_face.get(&(v, u)).is_some_and(|f| reg.contains(f)) {
+                boundary.insert((u, v));
             }
         }
     }
-    let Some(s) = start else { return Vec::new() };
-    for l in out.values_mut() {
-        l.sort_unstable_by(|a, b| b.cmp(a));
-    }
-    let (mut stack, mut walk) = (vec![s], Vec::new());
-    while let Some(&u) = stack.last() {
-        if let Some(v) = out.get_mut(&u).and_then(Vec::pop) {
-            stack.push(v);
-        } else {
-            walk.push(stack.pop().unwrap_or(u));
+    let mut walks = Vec::new();
+    while let Some(&(mut u, mut v)) = boundary.first() {
+        let mut walk = vec![u];
+        while boundary.remove(&(u, v)) {
+            walk.push(v);
+            // Follow the selected faces around v. Two components touching only at v
+            // have different incident sectors, hence different boundary circuits.
+            let mut w = next[&(u, v)];
+            while let Some(&across) = next.get(&(w, v)) {
+                w = across;
+            }
+            (u, v) = (v, w);
         }
+        walks.push(walk);
     }
-    walk.reverse();
-    walk
+    walks
+}
+
+/// The closed circuit of a region with one boundary component. Empty for every other case.
+pub fn region_boundary_walk(pf: &PlanarFaces, reg: &BTreeSet<usize>) -> Vec<usize> {
+    let mut walks = region_boundaries(pf, reg);
+    if walks.len() == 1 { walks.pop().unwrap() } else { Vec::new() }
 }
 
 /// Net Frank angle inside a region: its faces plus the vertices strictly inside it.
-pub(crate) fn region_frank(pf: &PlanarFaces, reg: &BTreeSet<usize>, walk: &[usize], vq: &[f64], fq: &[f64]) -> f64 {
-    let on_loop: BTreeSet<usize> = walk.iter().copied().collect();
+pub(crate) fn region_frank(pf: &PlanarFaces, reg: &BTreeSet<usize>, walks: &[Vec<usize>], vq: &[f64], fq: &[f64]) -> f64 {
+    let on_loop: BTreeSet<usize> = walks.iter().flatten().copied().collect();
     let inner: BTreeSet<usize> = reg.iter().flat_map(|&f| pf.faces[f].iter().copied()).filter(|v| !on_loop.contains(v)).collect();
     let s = reg.iter().map(|&f| fq[f]).sum::<f64>() + inner.iter().map(|&v| vq[v]).sum::<f64>();
     (s * 1e6).round() / 1e6
@@ -372,8 +381,10 @@ fn loop_defect(
         }
     }
     let (reg, clean) = chosen.unwrap_or_default();
-    let walk = region_boundary_walk(pf, &reg);
-    let frank = region_frank(pf, &reg, &walk, &tc.vertex_frank, &tc.face_frank);
+    let mut walks = region_boundaries(pf, &reg);
+    let frank = region_frank(pf, &reg, &walks, &tc.vertex_frank, &tc.face_frank);
+    let multiple = walks.len() > 1;
+    let walk = if walks.len() == 1 { walks.pop().unwrap() } else { Vec::new() };
     let pts: Vec<[f64; 2]> = grp.iter().map(|&i| tc.clusters[i].centre).collect();
     let centre = [pts.iter().map(|p| p[0]).sum::<f64>() / pts.len() as f64, pts.iter().map(|p| p[1]).sum::<f64>() / pts.len() as f64];
     let mut d = DetectedDefect {
@@ -381,6 +392,10 @@ fn loop_defect(
         burgers: None, burgers_fs_rh: None, uv: None, index: None, frame_angle_deg: rl.frame_angle.to_degrees(),
         reason: String::new(),
     };
+    if multiple {
+        d.reason = "REFUSED: the region has several boundary circuits; a single transported Burgers circuit is undefined".into();
+        return d;
+    }
     if walk.len() < 4 {
         d.reason = "REFUSED: no closed loop could be formed round the cluster (it touches the rim)".to_string();
         return d;

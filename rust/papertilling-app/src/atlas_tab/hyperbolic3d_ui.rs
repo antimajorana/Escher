@@ -19,7 +19,7 @@ struct PatchChoice {
     ball_preview: bool,
 }
 
-pub(super) struct Hyperbolic3dPanel {
+pub(crate) struct Hyperbolic3dPanel {
     choice: PatchChoice,
     cache: Option<(PatchChoice, Result<AtlasHoneycomb, String>)>,
     worker: Option<LatestWorker<PatchChoice, Result<AtlasHoneycomb, String>>>,
@@ -45,6 +45,16 @@ impl Default for Hyperbolic3dPanel {
 }
 
 impl Hyperbolic3dPanel {
+    pub(crate) fn select_cell_layers(&mut self, symbol: [u32; 3], layers: u32) {
+        self.choice.symbol = symbol;
+        self.choice.layers = layers;
+        self.choice.ball_preview = false;
+    }
+
+    pub(crate) fn is_building(&self) -> bool {
+        self.pending.is_some()
+    }
+
     pub(super) fn show_controls(&mut self, ui: &mut egui::Ui) -> bool {
         let old = self.choice;
         ui.heading("Regular H³ honeycombs");
@@ -76,8 +86,7 @@ impl Hyperbolic3dPanel {
                 }
             });
         if self.choice.symbol != old.symbol {
-            self.choice.layers = 0;
-            self.choice.ball_preview = false;
+            self.select_cell_layers(self.choice.symbol, 0);
         }
         let [p, q, r] = self.choice.symbol;
         let cls = classify_schlafli(p, q, r);
@@ -103,8 +112,11 @@ impl Hyperbolic3dPanel {
                 });
             }
         }
+        if self.choice.symbol == [4, 4, 4] {
+            ui.small("Square face centres alone have extra mirrors. Blue sites sit 0.1 curvature radii inside each face, one on either side in the full honeycomb.");
+        }
         ui.small("Klein ball · curvature K = −1");
-        if self.pending.is_some() {
+        if self.is_building() {
             ui.spinner();
         }
         self.choice != old

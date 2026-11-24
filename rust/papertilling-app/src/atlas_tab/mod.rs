@@ -82,7 +82,7 @@ pub struct AtlasTabState {
     pub layers: layers_ui::LayersPanelState,
     pub space3d: space3d_ui::Space3dPanelState,
     pub hyperbolic: hyperbolic_ui::HyperbolicPanelState,
-    hyperbolic3d: hyperbolic3d_ui::Hyperbolic3dPanel,
+    pub(crate) hyperbolic3d: hyperbolic3d_ui::Hyperbolic3dPanel,
     pub dirty: bool,
 }
 

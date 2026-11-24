@@ -149,6 +149,16 @@ fn build_ball(p: u32, q: u32, r: u32, radius: f64, search_steps: u32, seed_only:
     let (site, _) = cls.finite_site_orbit().expect("classified H³");
     let klein = |x: Vec4| [1, 2, 3].map(|i| x[i] / x[0]);
     let mut orbit_centres = Vec::new();
+    let mut incidence_sites: Vec<Vec<[f64; 3]>> = Vec::new();
+    // The ray from face centre f toward ideal cell centre k has unit tangent
+    // k/(-<f,k>) - f. A displacement of 0.1 keeps each opposite-side pair
+    // closer than sites belonging to different faces (centre spacing acosh(2)).
+    let incidence_seed = (site == SiteOrbit::FaceCell).then(|| {
+        let (f, k) = (real.w[2], real.w[3]);
+        let inner = f[0]*k[0] - f[1]*k[1] - f[2]*k[2] - f[3]*k[3];
+        let t = 0.1_f64;
+        [0, 1, 2, 3].map(|i| (-t).exp()*f[i] + t.sinh()*k[i]/inner)
+    });
     let mut edge_centres = KeyIndex::new(3, 1e-4);
     for g in &kept {
         let mut cyc = Vec::with_capacity(p as usize);
@@ -182,8 +192,12 @@ fn build_ball(p: u32, q: u32, r: u32, radius: f64, search_steps: u32, seed_only:
                     orbit_centres.push(klein(c));
                 }
                 cell_faces.push(Vec::new());
+                if incidence_seed.is_some() { incidence_sites.push(Vec::new()); }
             }
             cell_faces[cid as usize].push(f);
+            if let Some(seed) = &incidence_seed {
+                incidence_sites[cid as usize].push(klein(mat_vec(m, seed)));
+            }
         }
     }
     if vidx.min_gap.is_finite() || cidx.min_gap.is_finite() || edge_centres.min_gap.is_finite() {
@@ -197,6 +211,9 @@ fn build_ball(p: u32, q: u32, r: u32, radius: f64, search_steps: u32, seed_only:
         b.add_cell(fs, 0, truncated);
     }
     let mut cx = b.finish();
+    if incidence_seed.is_some() {
+        orbit_centres = incidence_sites.into_iter().flatten().collect();
+    }
     cx.orbit_centres = orbit_centres;
     for x in &coords {
         if ideal {

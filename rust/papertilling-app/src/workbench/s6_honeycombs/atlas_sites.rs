@@ -1,6 +1,5 @@
 //! A finite patch of the sparsest single orbit under the chosen H³ reflection group.
-//! The generating bond joins a site to its image in the opposite chamber mirror.
-//! All other mirrors fix the site, so this one bond orbit connects the infinite net.
+//! Bonds join a site to its images in the chamber mirrors which move it.
 
 use std::collections::HashMap;
 
@@ -23,15 +22,27 @@ fn centre_bonds(cx: &CellComplex3d, site: SiteOrbit) -> Vec<[usize; 2]> {
                 }
             }
         }
-        SiteOrbit::Face => {
+        SiteOrbit::Face | SiteOrbit::FaceCell => {
+            let mut across_face = vec![None; cx.faces.len()];
+            let mut incidence = 0;
             // Two consecutive faces about an edge bound the same cell.
             for cell in &cx.cells {
                 let mut owner = HashMap::new();
                 for &face in cell {
+                    let index = if site == SiteOrbit::FaceCell {
+                        let index = incidence;
+                        incidence += 1;
+                        if let Some(other) = across_face[face].replace(index) {
+                            bonds.push([other, index]);
+                        }
+                        index
+                    } else {
+                        face
+                    };
                     let cycle = &cx.faces[face];
                     for (&a, &b) in cycle.iter().zip(cycle.iter().cycle().skip(1)) {
-                        if let Some(other) = owner.insert([a.min(b), a.max(b)], face) {
-                            bonds.push([other, face]);
+                        if let Some(other) = owner.insert([a.min(b), a.max(b)], index) {
+                            bonds.push([other, index]);
                         }
                     }
                 }
@@ -102,12 +113,47 @@ mod tests {
     use papertilling_core::honeycomb3d::classify_schlafli;
 
     #[test]
+    fn square_faces_with_extra_symmetry_are_resolved_into_opposite_side_pairs() {
+        let patch = papertilling_core::honeycomb3d::paracompact_ball(4, 4, 4, 0.01).unwrap();
+        let cx = &patch.complex;
+        assert_eq!(cx.faces.len(), 1);
+        assert_eq!(centre_bonds(cx, SiteOrbit::FaceCell), [[0, 1]]);
+        assert_eq!(cx.orbit_centres.len(), 2);
+        let (a, b) = (cx.orbit_centres[0], cx.orbit_centres[1]);
+        assert!(a.iter().zip(b).all(|(x, y)| (x + y).abs() < 1e-12));
+        let radius = a.iter().map(|x| x * x).sum::<f64>().sqrt();
+        assert!((radius - 0.1_f64.tanh()).abs() < 1e-12);
+
+        // R > acosh(2) includes every square adjacent to the central square.
+        // Across the square the separation is 2t. In a common ideal cell the
+        // hyperbolic height grows by exp(t), scaling cosh(d) - 1 by exp(-2t).
+        let patch = papertilling_core::honeycomb3d::paracompact_ball(4, 4, 4, 1.4).unwrap();
+        let cx = &patch.complex;
+        let bonds = centre_bonds(cx, SiteOrbit::FaceCell);
+        let sites = &cx.orbit_centres;
+        let dot = |a: [f64; 3], b: [f64; 3]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
+        let central: Vec<_> = sites.iter().copied().enumerate()
+            .filter(|(_, a)| (dot(*a, *a).sqrt() - radius).abs() < 1e-10).collect();
+        assert_eq!(central.len(), 2);
+        for (i, a) in central {
+            let mut distances: Vec<_> = bonds.iter().filter(|pair| pair.contains(&i)).map(|&[u, v]| {
+                let b = sites[if u == i { v } else { u }];
+                (1.0 - dot(a, b)) / ((1.0 - dot(a, a)) * (1.0 - dot(b, b))).sqrt()
+            }).collect();
+            distances.sort_by(f64::total_cmp);
+            assert_eq!(distances.len(), 5);
+            assert!((distances[0] - 0.2_f64.cosh()).abs() < 1e-10);
+            assert!(distances[1..].iter().all(|d| (d - (1.0 + (-0.2_f64).exp())).abs() < 1e-10));
+        }
+    }
+
+    #[test]
     fn known_site_stabilizers_and_dual_bonds() {
         for ((p, q, r), orbit) in [
             ((4, 3, 5), (SiteOrbit::Vertex, 120)),
             ((5, 3, 4), (SiteOrbit::Cell, 120)),
             ((3, 3, 6), (SiteOrbit::Cell, 24)),
-            ((4, 4, 4), (SiteOrbit::Face, 16)),
+            ((4, 4, 4), (SiteOrbit::FaceCell, 8)),
         ] {
             assert_eq!(classify_schlafli(p, q, r).finite_site_orbit(), Some(orbit));
         }

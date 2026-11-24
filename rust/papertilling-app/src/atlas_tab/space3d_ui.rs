@@ -6,7 +6,7 @@
 use papertilling_core::bieberbach::BieberbachSummary;
 use papertilling_core::growth::SeedKind;
 use papertilling_core::space3d::nets3d::{CanonicalNet3d, LineDefect3d};
-use papertilling_core::space3d::{analyze_space_group_3d, list_space_groups_3d};
+use papertilling_core::space3d::{SpaceGroup3dEntry, analyze_space_group_3d, list_space_groups_3d};
 
 use super::crystal_charge_ui::{CrystalChargeUi, CrystalGroup};
 use super::points3d_ui::CatalogueChoice;
@@ -27,6 +27,22 @@ pub struct Space3dPanelState {
     pub view: Space3dView,
     cached_sg: u16,
     charges: CrystalChargeUi,
+}
+
+fn symbol_key(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace() && *c != '_').map(|c| match c {
+        '₀'..='₉' => char::from(b'0' + (c as u32 - '₀' as u32) as u8),
+        '−' => '-',
+        c => c.to_ascii_lowercase(),
+    }).collect()
+}
+
+fn matches_group(group: &SpaceGroup3dEntry, query: &str) -> bool {
+    if let Some(number) = query.strip_prefix('#') {
+        return number.parse::<u16>() == Ok(group.number);
+    }
+    query.is_empty() || group.number.to_string().contains(query)
+        || [&group.symbol, &group.full_symbol, &group.schoenflies].iter().any(|s| symbol_key(s).contains(query))
 }
 
 impl Default for Space3dPanelState {
@@ -103,18 +119,13 @@ impl Space3dPanelState {
         }
         ui.horizontal(|ui| {
             ui.label("Find space group");
-            ui.add(egui::TextEdit::singleline(&mut self.filter).desired_width(120.0));
+            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Number or symbol").desired_width(120.0));
         });
-        let q = self.filter.trim().to_lowercase();
+        let q = symbol_key(&self.filter);
         egui::ScrollArea::vertical().id_salt("atlas_sg230_scroll").max_height(120.0).show(ui, |ui| {
-            for sg in list_space_groups_3d() {
-                if !q.is_empty()
-                    && !sg.symbol.to_lowercase().contains(&q)
-                    && !sg.schoenflies.to_lowercase().contains(&q)
-                    && !sg.number.to_string().contains(&q)
-                {
-                    continue;
-                }
+            let mut matches = list_space_groups_3d().iter().filter(|sg| matches_group(sg, &q)).peekable();
+            if matches.peek().is_none() { ui.small("No matching space groups."); }
+            for sg in matches {
                 let lbl = format!("#{}  {}  ({})", sg.number, sg.symbol, sg.schoenflies);
                 if ui.selectable_label(self.selected_sg == sg.number, lbl).clicked() {
                     self.select_group(sg.number);
@@ -123,6 +134,7 @@ impl Space3dPanelState {
             }
         });
 
+        dirty |= super::points3d_ui::show(ui, self);
         ui.separator();
         ui.strong("Named crystal examples");
         let selected_text = if self.view.catalogue.is_some() {
@@ -161,7 +173,6 @@ impl Space3dPanelState {
             }
         }
         self.show_view_controls(ui);
-        dirty |= super::points3d_ui::show(ui, self);
         dirty
     }
 
@@ -202,5 +213,19 @@ impl Space3dPanelState {
     pub fn build_scenes(&mut self, rot: &[[f32; 4]; 4]) -> (Scene2D, GpuMeshData, String) {
         self.ensure_cached();
         self.build_view_scenes(rot)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_search_accepts_the_printed_number_and_typeset_symbols() {
+        let group = |number| list_space_groups_3d().iter().find(|sg| sg.number == number).unwrap();
+        assert!(matches_group(group(14), &symbol_key("P 2₁/c")));
+        assert!(matches_group(group(225), &symbol_key("F m −3 m")));
+        assert!(matches_group(group(22), &symbol_key("#22")));
+        assert!(!matches_group(group(221), &symbol_key("#22")));
     }
 }

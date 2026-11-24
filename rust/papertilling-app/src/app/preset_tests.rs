@@ -94,7 +94,14 @@ fn apply(h: &mut Harness<'static, PapertillingApp>, name: &str) {
 fn snapshot(app: &PapertillingApp) -> String {
     let it = app.gallery.active_item();
     let tab = match app.active_tab {
-        NavTab::Gallery => format!("{:?} {} {}", app.gallery.overlays, app.gallery.repeat, app.gallery.show_unit_cell),
+        NavTab::Gallery => format!(
+            "{:?} {} {} {} {:?}",
+            app.gallery.overlays,
+            app.gallery.repeat,
+            app.gallery.show_unit_cell,
+            app.gallery.inflation.enabled,
+            app.canvas2d.counts()
+        ),
         NavTab::Surfaces => {
             let s = &app.surfaces;
             format!("{:?} {} {} {} {:?} {:?}", s.target, s.auto_size, s.params.h, s.params.k, s.elastic.shape_mode, app.canvas2d.counts())
@@ -165,13 +172,18 @@ fn check_known_answers(name: &str, app: &PapertillingApp) {
     match name {
         "Kagome: ITA symmetry + Voronoi" => {
             let o = app.gallery.overlays;
-            assert!(o.symmetry && o.voronoi && app.gallery.repeat == 4, "{name}");
+            assert!(o.symmetry && o.voronoi && app.gallery.repeat == 4 && !app.gallery.inflation.enabled, "{name}");
+            assert!(matches!(app.canvas2d.scene(), Scene2D::PeriodicCell { repeat: 4, show_unit_cell: true, .. }), "{name}");
         }
-        "Chiral kagome (p6, no mirrors)" => assert!(app.gallery.overlays.symmetry && !app.gallery.overlays.voronoi),
+        "Chiral kagome (p6, no mirrors)" => {
+            assert!(app.gallery.overlays.symmetry && !app.gallery.overlays.voronoi && !app.gallery.inflation.enabled, "{name}");
+            assert!(matches!(app.canvas2d.scene(), Scene2D::PeriodicCell { repeat: 3, show_unit_cell: true, .. }), "{name}");
+        }
         "p4g bond net #1 + Voronoi" => {
             let k = &app.gallery.active_item().alias_key;
             assert_eq!((k.group.as_str(), k.rule.as_str()), ("p4g", "bonds"));
-            assert!(app.gallery.overlays.voronoi && !app.gallery.overlays.symmetry);
+            assert!(app.gallery.overlays.voronoi && !app.gallery.overlays.symmetry && !app.gallery.inflation.enabled, "{name}");
+            assert!(matches!(app.canvas2d.scene(), Scene2D::PeriodicCell { repeat: 3, show_unit_cell: true, .. }), "{name}");
         }
         // dodecahedron: V = 20, E = 30, F = 12, chi = 2 (Python surface_table: 20 sites)
         "Honeycomb sphere (dodecahedron)" => assert_eq!(net(), (20, 30, 12, 2, true), "{name}"),

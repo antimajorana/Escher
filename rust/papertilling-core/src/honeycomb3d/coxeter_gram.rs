@@ -60,6 +60,7 @@ pub enum SiteOrbit {
     Cell,
     Face,
     Edge,
+    FaceCell,
 }
 
 impl SiteOrbit {
@@ -69,6 +70,7 @@ impl SiteOrbit {
             Self::Cell => "cell centres",
             Self::Face => "face centres",
             Self::Edge => "edge centres",
+            Self::FaceCell => "sites just inside each square face",
         }
     }
 }
@@ -77,6 +79,12 @@ impl Classification {
     pub fn finite_site_orbit(&self) -> Option<(SiteOrbit, u32)> {
         if !matches!(self.regime, HoneycombRegime::HyperbolicCompactH3 | HoneycombRegime::HyperbolicParacompactH3) {
             return None;
+        }
+        // In [4,4,4], the two finite corner orbits each have regular octahedral
+        // Dirichlet cells: their points alone gain extra mirrors. A site just
+        // inside each face has D4 stabilizer, the largest remaining finite order.
+        if (self.p, self.q, self.r) == (4, 4, 4) {
+            return Some((SiteOrbit::FaceCell, 8));
         }
         // Number of flags of a spherical {a,b}. A Euclidean link is a cusp.
         let flags = |a: u32, b: u32| {

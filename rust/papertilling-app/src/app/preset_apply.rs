@@ -99,7 +99,8 @@ impl PapertillingApp {
             PresetSettings::Gallery { repeat, symmetry, voronoi, unit_cell } => {
                 self.gallery.repeat = repeat.clamp(1, 6);
                 self.gallery.show_unit_cell = unit_cell;
-                self.gallery.set_overlays(GalleryOverlayToggles { symmetry, voronoi }, &mut self.canvas2d);
+                self.gallery.overlays = GalleryOverlayToggles { symmetry, voronoi };
+                self.gallery.set_inflation_enabled(false, &mut self.canvas2d);
             }
             PresetSettings::Surfaces { target, size, shape } => {
                 let s = &mut self.surfaces;

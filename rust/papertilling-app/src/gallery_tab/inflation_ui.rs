@@ -408,13 +408,21 @@ fn compile_inflation_scene(
         }
     }
 
+    let mut bond_kinds: BTreeMap<(usize, usize, [i32; 2]), usize> = BTreeMap::new();
+    for b in &cell.bonds {
+        for key in [(b.i, b.j, [b.n1, b.n2]), (b.j, b.i, [-b.n1, -b.n2])] {
+            bond_kinds.entry(key).and_modify(|k| *k = (*k).min(b.kind)).or_insert(b.kind);
+        }
+    }
+
     let mut lines = Vec::with_capacity(unique_edges.len() + if show_unit_cell { 4 } else { 0 });
-    for (u, v) in &unique_edges {
-        if let (Some(&pa), Some(&pb)) = (unique_sites.get(u), unique_sites.get(v)) {
+    for &(u, v) in &unique_edges {
+        if let (Some(&pa), Some(&pb)) = (unique_sites.get(&u), unique_sites.get(&v)) {
+            let kind = bond_kinds.get(&(u.0, v.0, [v.1[0] - u.1[0], v.1[1] - u.1[1]])).copied().unwrap_or(0);
             lines.push(LinePrim {
                 a: pa,
                 b: pb,
-                color: bond_palette(0),
+                color: bond_palette(kind),
                 width: 1.85,
                 dashed: false,
                 arrow_mid: false,

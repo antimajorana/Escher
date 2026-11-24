@@ -287,6 +287,9 @@ impl HyperbolicPanelState {
                 let orbit = if p > q { "face centres" } else { "vertices" };
                 ui.small(format!("Blue sites lie at {orbit}. One site is shared by {} reflection chambers.", 2 * p.max(q)));
             }
+            if self.effective_wedge() == 0 && self.style == HyperbolicStyle::RectifiedKagome && p == q {
+                ui.small("This tiling is self-dual. Its edge midpoints also preserve the symmetry that exchanges faces and vertices.");
+            }
             ui.small("Intrinsic curvature K = −1.");
             if !self.pristine_only {
                 let delta = self.effective_wedge();

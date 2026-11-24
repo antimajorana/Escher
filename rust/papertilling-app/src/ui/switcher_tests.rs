@@ -165,3 +165,68 @@ fn recent_is_an_lru_of_ten_unique_lattices() {
     assert_eq!(sw.recent.len(), RECENT_MAX, "revisiting does not duplicate");
     assert_eq!(sw.recent.front().unwrap().alias_key, named[5].alias_key, "revisited moves to the front");
 }
+
+#[test]
+fn palette_pick_on_non_lattice_driven_view_routes_to_plane2d() {
+    use crate::app::{AppMode, LatticesView};
+
+    let mut h = harness();
+    h.run_steps(2);
+    h.state_mut().set_advanced(true);
+    h.state_mut().select_lattices_view(LatticesView::ThreeDAndSubperiodic);
+    h.run_steps(2);
+    assert_eq!(h.state().active_tab, NavTab::Atlas);
+    assert!(!h.state().view_is_lattice_driven());
+
+    ctrl_k(&mut h);
+    h.query_all_by_role(egui::accesskit::Role::TextInput)
+        .last()
+        .expect("switcher search input")
+        .type_text("kagome p6m");
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(2);
+
+    {
+        let app = h.state();
+        assert!(!app.switcher.open, "picking a lattice closes the palette");
+        assert_eq!(
+            (app.active_mode, app.lattices_view, app.active_tab),
+            (AppMode::Lattices, LatticesView::Plane2D, NavTab::Gallery)
+        );
+        assert_eq!(app.gallery.active_item().named_key.as_deref(), Some("kagome"));
+        assert!(app.canvas2d.counts().0 > 0 && app.canvas2d.counts().1 > 0, "Gallery scene drawn");
+    }
+
+    // Also verify re-picking the already-selected tuned lattice from NavTab::Atlas routes to Plane2D
+    // while keeping its tuned parameter values.
+    let (vals, rev, tuned_recipe) = {
+        let app = h.state_mut();
+        let chiral = app.backend.find_named("chiral_kagome").expect("chiral_kagome").clone();
+        app.select_lattice_and_sync(chiral);
+        let s = app.gallery.sliders()[0].clone();
+        let _ = app.gallery.set_param(&s.name, s.value + 4.0 * s.step, &mut app.canvas2d);
+        (app.gallery.param_values(), app.gallery.revision(), app.gallery.active_item().recipe.clone())
+    };
+    h.state_mut().select_lattices_view(LatticesView::ThreeDAndSubperiodic);
+    h.run_steps(2);
+    assert_eq!(h.state().active_tab, NavTab::Atlas);
+    assert!(!h.state().view_is_lattice_driven());
+
+    // Ctrl+K highlights Recent #0 (`chiral_kagome`); pressing Enter re-picks it.
+    ctrl_k(&mut h);
+    h.key_press(Key::Enter);
+    h.run_steps(2);
+
+    let app = h.state();
+    assert!(!app.switcher.open);
+    assert_eq!(
+        (app.active_mode, app.lattices_view, app.active_tab),
+        (AppMode::Lattices, LatticesView::Plane2D, NavTab::Gallery)
+    );
+    assert_eq!(app.gallery.active_item().named_key.as_deref(), Some("chiral_kagome"));
+    assert_eq!(app.gallery.param_values(), vals, "tuned slider values preserved");
+    assert_eq!(app.gallery.revision(), rev, "revision preserved");
+    assert_eq!(app.gallery.active_item().recipe, tuned_recipe, "tuned recipe preserved");
+    assert!(app.canvas2d.counts().0 > 0 && app.canvas2d.counts().1 > 0, "Gallery scene drawn");
+}
