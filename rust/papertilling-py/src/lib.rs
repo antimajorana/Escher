@@ -275,13 +275,6 @@ pub fn defect_catalogue_json(
 #[pymodule]
 fn papertilling_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", papertilling_core::VERSION)?;
-    // Package versions can span multiple desktop releases. Official wheels expose
-    // the revision used by their build, including on the manylinux runner.
-    let source_url = match (option_env!("GITHUB_REPOSITORY"), option_env!("GITHUB_SHA")) {
-        (Some("antimajorana/Escher"), Some(revision)) => Some(format!("https://github.com/antimajorana/Escher/tree/{revision}")),
-        _ => None,
-    };
-    m.add("SOURCE_URL", source_url)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_key, m)?)?;
     m.add_function(wrap_pyfunction!(network_key, m)?)?;

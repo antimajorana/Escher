@@ -1,10 +1,3 @@
-Escher is distributed under the GNU General Public License, version 3 only.
-The matching source for the desktop binaries and Python acceleration wheels
-is available in the Source code archives on the same release page:
-https://github.com/antimajorana/Escher/releases
-An installed release wheel also identifies its exact source revision:
-    python -c "import papertilling_rs; print(papertilling_rs.SOURCE_URL)"
-
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 

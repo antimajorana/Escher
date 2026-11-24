@@ -20,6 +20,7 @@ APP_EXE = ROOT / "rust" / "target" / "release" / "papertilling-app.exe"
 ICON_ICO = ROOT / "rust" / "papertilling-app" / "assets" / "icon.ico"
 ISS_FILE = ROOT / "rust" / "papertilling-app" / "installer" / "windows" / "papertilling.iss"
 LICENSE_FILE = ROOT / "LICENSE"
+SOURCE_NOTICE = ROOT / "rust" / "papertilling-py" / "SOURCE-NOTICE.txt"
 DIST_DIR = ROOT / "dist"
 
 CS_INSTALLER = r"""
@@ -147,6 +148,7 @@ static class SetupProgram {
 
         ExtractGzipResource("app.exe.gz", appExe);
         ExtractGzipResource("license.txt.gz", licTxt);
+        ExtractGzipResource("source.txt.gz", Path.Combine(installDir, "SOURCE-NOTICE.txt"));
         File.Copy(Application.ExecutablePath, uninsExe, true);
 
         string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), AppName + ".lnk");
@@ -181,7 +183,7 @@ static class SetupProgram {
         if (File.Exists(startMenu)) File.Delete(startMenu);
         if (File.Exists(desk)) File.Delete(desk);
         Registry.CurrentUser.DeleteSubKeyTree(UninstKey, false);
-        foreach (string fn in new[] { "Escher.exe", "LICENSE.txt" }) {
+        foreach (string fn in new[] { "Escher.exe", "LICENSE.txt", "SOURCE-NOTICE.txt" }) {
             string p = Path.Combine(dir, fn);
             if (File.Exists(p)) try { File.Delete(p); } catch { }
         }
@@ -227,8 +229,10 @@ def main() -> int:
         tmp = Path(td)
         app_gz = tmp / "app.exe.gz"
         lic_gz = tmp / "license.txt.gz"
+        source_gz = tmp / "source.txt.gz"
         app_gz.write_bytes(gzip.compress(APP_EXE.read_bytes(), compresslevel=9))
         lic_gz.write_bytes(gzip.compress(LICENSE_FILE.read_bytes(), compresslevel=9))
+        source_gz.write_bytes(gzip.compress(SOURCE_NOTICE.read_bytes(), compresslevel=9))
         cs_file = tmp / "Setup.cs"
         cs_file.write_text(CS_INSTALLER.replace("__VER__", ver).replace("__VER4__", ver4), encoding="utf-8")
         cmd = [
@@ -237,6 +241,7 @@ def main() -> int:
             f"/win32icon:{ICON_ICO}",
             f"/resource:{app_gz},app.exe.gz",
             f"/resource:{lic_gz},license.txt.gz",
+            f"/resource:{source_gz},source.txt.gz",
             "/reference:System.dll",
             "/reference:System.Core.dll",
             "/reference:System.Drawing.dll",

@@ -20,6 +20,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - &source-notice
+        name: Record the source revision for this build
+        shell: bash
+        run: |
+          printf '\nExact source revision: https://github.com/%s/tree/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> rust/papertilling-py/SOURCE-NOTICE.txt
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -47,7 +52,7 @@ jobs:
           $portDir = "dist\escher-$ver-windows-x86_64"
           New-Item -ItemType Directory -Force -Path $portDir | Out-Null
           Copy-Item "rust\target\release\papertilling-app.exe" "$portDir\Escher.exe"
-          Copy-Item "LICENSE" "$portDir\LICENSE"
+          Copy-Item LICENSE, rust/papertilling-py/SOURCE-NOTICE.txt -Destination $portDir
           Compress-Archive -Path "$portDir\*" -DestinationPath "dist\escher-$ver-windows-x86_64-portable.zip" -Force
           Remove-Item -Recurse -Force $portDir
       - name: Build Python acceleration wheel (abi3-py310)
@@ -67,6 +72,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - *source-notice
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -114,7 +120,9 @@ jobs:
           iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/icon.icns"
 
           ln -s /Applications stage_dmg/Applications
+          cp LICENSE rust/papertilling-py/SOURCE-NOTICE.txt "$APP/Contents/Resources/"
           cp LICENSE stage_dmg/LICENSE.txt
+          cp rust/papertilling-py/SOURCE-NOTICE.txt stage_dmg/
           hdiutil create -volname "Escher $VER" -srcfolder stage_dmg -ov -format UDZO "dist/escher-$VER-macos-universal.dmg"
       - name: Build Universal2 Python acceleration wheel
         run: |
@@ -132,6 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - *source-notice
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -165,7 +174,7 @@ jobs:
           cp rust/papertilling-app/installer/linux/papertilling.desktop "$STAGE/escher.desktop"
           cp rust/papertilling-app/installer/linux/install.sh "$STAGE/install.sh"
           chmod +x "$STAGE/install.sh"
-          cp LICENSE "$STAGE/LICENSE"
+          cp LICENSE rust/papertilling-py/SOURCE-NOTICE.txt "$STAGE/"
           tar -czf "dist/$STAGE.tar.gz" "$STAGE"
       - name: Build manylinux Python acceleration wheel
         uses: PyO3/maturin-action@v1
@@ -201,6 +210,8 @@ jobs:
             - **Windows (x86_64):** download and run `escher-*-windows-x86_64-setup.exe` (per-user installer with Start Menu & Desktop shortcuts; no Administrator prompt required), or unpack `*-portable.zip`.
             - **macOS (Apple Silicon & Intel):** open `escher-*-macos-universal.dmg` and drag **Escher.app** to **Applications**.
             - **Linux (x86_64):** unpack `escher-*-linux-x86_64.tar.gz` and run `./install.sh` (installs to `~/.local` with desktop launcher icon).
+
+            **Corresponding source:** [Browse the source used for these downloads](https://github.com/${{ github.repository }}/tree/${{ github.sha }}). The same revision is in each package’s `SOURCE-NOTICE.txt`.
 
             ### Optional Python Acceleration
             Choose the wheel for your operating system and install it with pip alongside the Python package from this repository. The wheels support Python 3.10 and later.
