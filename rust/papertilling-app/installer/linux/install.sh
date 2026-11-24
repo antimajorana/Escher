@@ -17,15 +17,14 @@ if [ "${1:-}" = "--remove" ] || [ "${1:-}" = "--uninstall" ]; then
 fi
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$ICON_DIR"
-install -m 0755 "$SCRIPT_DIR/papertilling-app" "$BIN_DIR/papertilling-app"
+install -m 0755 "$SCRIPT_DIR/escher" "$BIN_DIR/papertilling-app"
 install -m 0644 "$SCRIPT_DIR/icon.png" "$ICON_DIR/papertilling.png"
 sed "s|^Exec=papertilling-app$|Exec=$BIN_DIR/papertilling-app|" \
-    "$SCRIPT_DIR/papertilling.desktop" > "$APP_DIR/papertilling.desktop"
+    "$SCRIPT_DIR/escher.desktop" > "$APP_DIR/papertilling.desktop"
 chmod 0644 "$APP_DIR/papertilling.desktop"
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
 fi
 
-echo "Installed Escher to $BIN_DIR/papertilling-app"
-echo "You can launch it from your desktop application menu or run: $BIN_DIR/papertilling-app"
+echo "Escher is installed. Launch it from your applications menu."

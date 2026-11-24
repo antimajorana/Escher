@@ -1,8 +1,8 @@
-<img align="right" src="rust/papertilling-app/assets/icon.png" width="112" height="112" alt="Circular Escher logo with five central pentagons surrounded by three layers of smaller pentagons">
+<img align="right" src="assets/escher.png" width="112" height="112" alt="Circular Escher logo with a central pentagon and three hyperbolic growth layers on black">
 
 # Escher
 
-Escher, formerly Papertilling, lets you build lattices and explore how their defects combine and bend a sheet. The circular logo shows the vertex-centered hyperbolic `{5,5}` tiling with three layers around the five central pentagons.
+Escher lets you build lattices and explore how their defects combine and bend a sheet. The logo shows a plaquette-centered hyperbolic `{5,5}` tiling with three layers around its central pentagon.
 
 ## Install
 
@@ -20,17 +20,7 @@ Browse 17 wallpaper groups and surface models under **Lattice**. Compare space, 
 
 ## Python
 
-Run `python -m pip install .` from this checkout with Python 3.10+, then draw a honeycomb dislocation.
-
-```python
-import matplotlib.pyplot as plt
-import papertilling as pt
-
-lattice = pt.named("Honeycomb")
-b = pt.DefectCatalogue(lattice).dislocations[0]["b"]
-pt.build(lattice, dict(kind="dislocation", b=b, at=(0.37, 0.41))).plot()
-plt.show()
-```
+Run `python -m pip install '.[notebooks]'` from this checkout with Python 3.10+, then open the worked notebooks.
 
 [Notebooks](notebooks/) · [Build from source and run tests](docs/DEVELOPMENT.md#rust-core-desktop-app-and-optional-python-extension) · [Changelog](CHANGELOG.md) · [GPL-3.0-only](LICENSE)
 

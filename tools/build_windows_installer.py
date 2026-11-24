@@ -141,9 +141,9 @@ static class SetupProgram {
 
     static void PerformInstall(string installDir, bool desktopShortcut, bool launchAfter) {
         Directory.CreateDirectory(installDir);
-        string appExe = Path.Combine(installDir, "papertilling-app.exe");
+        string appExe = Path.Combine(installDir, "Escher.exe");
         string licTxt = Path.Combine(installDir, "LICENSE.txt");
-        string uninsExe = Path.Combine(installDir, "uninstall-papertilling.exe");
+        string uninsExe = Path.Combine(installDir, "uninstall-escher.exe");
 
         ExtractGzipResource("app.exe.gz", appExe);
         ExtractGzipResource("license.txt.gz", licTxt);
@@ -181,7 +181,7 @@ static class SetupProgram {
         if (File.Exists(startMenu)) File.Delete(startMenu);
         if (File.Exists(desk)) File.Delete(desk);
         Registry.CurrentUser.DeleteSubKeyTree(UninstKey, false);
-        foreach (string fn in new[] { "papertilling-app.exe", "LICENSE.txt" }) {
+        foreach (string fn in new[] { "Escher.exe", "LICENSE.txt" }) {
             string p = Path.Combine(dir, fn);
             if (File.Exists(p)) try { File.Delete(p); } catch { }
         }

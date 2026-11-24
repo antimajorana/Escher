@@ -21,7 +21,7 @@ LicenseFile=..\..\..\..\LICENSE
 OutputDir=..\..\..\..\dist
 OutputBaseFilename=escher-{#MyAppVersion}-windows-x86_64-setup
 SetupIconFile=..\..\assets\icon.ico
-UninstallDisplayIcon={app}\papertilling-app.exe
+UninstallDisplayIcon={app}\Escher.exe
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -37,7 +37,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "..\..\..\target\release\papertilling-app.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\..\target\release\papertilling-app.exe"; DestDir: "{app}"; DestName: "Escher.exe"; Flags: ignoreversion
 Source: "..\..\..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
@@ -45,8 +45,8 @@ Type: files; Name: "{autoprograms}\Papertilling.lnk"
 Type: files; Name: "{autodesktop}\Papertilling.lnk"
 
 [Icons]
-Name: "{autoprograms}\Escher"; Filename: "{app}\papertilling-app.exe"; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
-Name: "{autodesktop}\Escher"; Filename: "{app}\papertilling-app.exe"; Tasks: desktopicon; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
+Name: "{autoprograms}\Escher"; Filename: "{app}\Escher.exe"; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
+Name: "{autodesktop}\Escher"; Filename: "{app}\Escher.exe"; Tasks: desktopicon; Comment: "Explore 2D wallpaper lattices, crystalline defects, and surfaces"
 
 [Run]
-Filename: "{app}\papertilling-app.exe"; Description: "{cm:LaunchProgram,Escher}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Escher.exe"; Description: "{cm:LaunchProgram,Escher}"; Flags: nowait postinstall skipifsilent

@@ -49,12 +49,12 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use app::PapertillingApp;
 
 fn load_app_icon() -> Arc<egui::IconData> {
-    const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+    const ICON_PNG: &[u8] = include_bytes!("../../../assets/escher.png");
     let mut decoder = png::Decoder::new(Cursor::new(ICON_PNG));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
-    let mut reader = decoder.read_info().expect("valid embedded icon.png header");
+    let mut reader = decoder.read_info().expect("valid embedded Escher icon header");
     let mut buf = vec![0u8; reader.output_buffer_size().expect("icon buffer size")];
-    let info = reader.next_frame(&mut buf).expect("valid embedded icon.png frame");
+    let info = reader.next_frame(&mut buf).expect("valid embedded Escher icon frame");
     buf.truncate(info.buffer_size());
     Arc::new(egui::IconData {
         rgba: buf,
@@ -69,7 +69,7 @@ fn main() -> ExitCode {
         match arg.as_str() {
             "--smoke-test" => smoke_test = true,
             "--help" | "-h" => {
-                println!("Usage: papertilling-app [--smoke-test]");
+                println!("Escher Desktop Explorer [--smoke-test]");
                 return ExitCode::SUCCESS;
             }
             other => {
@@ -118,11 +118,11 @@ fn main() -> ExitCode {
     match result {
         Ok(()) if !smoke_test || smoke_outcome.load(Ordering::Acquire) == 1 => ExitCode::SUCCESS,
         Ok(()) => {
-            eprintln!("papertilling-app error: smoke test failed before finishing all stages");
+            eprintln!("Escher error: smoke test failed before finishing all stages");
             ExitCode::FAILURE
         }
         Err(err) => {
-            eprintln!("papertilling-app error: {err}");
+            eprintln!("Escher error: {err}");
             ExitCode::FAILURE
         }
     }

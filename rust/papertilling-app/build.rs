@@ -62,7 +62,7 @@ fn ico_to_win32_res(ico: &[u8]) -> Vec<u8> {
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
-    println!("cargo:rerun-if-changed=assets/icon.png");
+    println!("cargo:rerun-if-changed=../../assets/escher.png");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();

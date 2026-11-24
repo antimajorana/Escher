@@ -35,7 +35,7 @@ jobs:
           $raw = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "${{ inputs.tag }}" }
           if ([string]::IsNullOrWhiteSpace($raw)) { $raw = "0.2.0" }
           "version=$raw" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-      - name: Build papertilling-app (release)
+      - name: Build Escher (release)
         run: cargo build --release --manifest-path rust/Cargo.toml -p papertilling-app
       - name: Build Windows Setup.exe (Inno Setup 6) and portable zip
         shell: pwsh
@@ -46,11 +46,11 @@ jobs:
           & $iscc "/DMyAppVersion=$ver" "rust\papertilling-app\installer\windows\papertilling.iss"
           $portDir = "dist\escher-$ver-windows-x86_64"
           New-Item -ItemType Directory -Force -Path $portDir | Out-Null
-          Copy-Item "rust\target\release\papertilling-app.exe" "$portDir\papertilling-app.exe"
+          Copy-Item "rust\target\release\papertilling-app.exe" "$portDir\Escher.exe"
           Copy-Item "LICENSE" "$portDir\LICENSE"
           Compress-Archive -Path "$portDir\*" -DestinationPath "dist\escher-$ver-windows-x86_64-portable.zip" -Force
           Remove-Item -Recurse -Force $portDir
-      - name: Build papertilling-rs Python wheel (abi3-py310)
+      - name: Build Python acceleration wheel (abi3-py310)
         run: |
           python -m pip install --upgrade pip "maturin>=1.16"
           python -m maturin build --release --manifest-path rust/papertilling-py/Cargo.toml --out dist
@@ -97,14 +97,14 @@ jobs:
           lipo -create \
             rust/target/aarch64-apple-darwin/release/papertilling-app \
             rust/target/x86_64-apple-darwin/release/papertilling-app \
-            -output "$APP/Contents/MacOS/papertilling-app"
-          chmod +x "$APP/Contents/MacOS/papertilling-app"
+            -output "$APP/Contents/MacOS/Escher"
+          chmod +x "$APP/Contents/MacOS/Escher"
 
           sed "s/0\.2\.0/$VER/g" rust/papertilling-app/installer/macos/Info.plist > "$APP/Contents/Info.plist"
 
           ICONSET="icon.iconset"
           mkdir -p "$ICONSET"
-          SRC="rust/papertilling-app/assets/icon.png"
+          SRC="assets/escher.png"
           for sz in 16 32 128 256; do
             sips -z $sz $sz "$SRC" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null
           done
@@ -116,7 +116,7 @@ jobs:
           ln -s /Applications stage_dmg/Applications
           cp LICENSE stage_dmg/LICENSE.txt
           hdiutil create -volname "Escher $VER" -srcfolder stage_dmg -ov -format UDZO "dist/escher-$VER-macos-universal.dmg"
-      - name: Build papertilling-rs Universal2 Python wheel
+      - name: Build Universal2 Python acceleration wheel
         run: |
           python -m pip install --upgrade pip "maturin>=1.16"
           python -m maturin build --release --target universal2-apple-darwin --manifest-path rust/papertilling-py/Cargo.toml --out dist
@@ -159,15 +159,15 @@ jobs:
           cargo build --release --manifest-path rust/Cargo.toml -p papertilling-app
           STAGE="escher-$VER-linux-x86_64"
           mkdir -p "$STAGE" dist
-          cp rust/target/release/papertilling-app "$STAGE/papertilling-app"
-          chmod +x "$STAGE/papertilling-app"
-          cp rust/papertilling-app/assets/icon.png "$STAGE/icon.png"
-          cp rust/papertilling-app/installer/linux/papertilling.desktop "$STAGE/papertilling.desktop"
+          cp rust/target/release/papertilling-app "$STAGE/escher"
+          chmod +x "$STAGE/escher"
+          cp assets/escher.png "$STAGE/icon.png"
+          cp rust/papertilling-app/installer/linux/papertilling.desktop "$STAGE/escher.desktop"
           cp rust/papertilling-app/installer/linux/install.sh "$STAGE/install.sh"
           chmod +x "$STAGE/install.sh"
           cp LICENSE "$STAGE/LICENSE"
           tar -czf "dist/$STAGE.tar.gz" "$STAGE"
-      - name: Build papertilling-rs manylinux Python wheel
+      - name: Build manylinux Python acceleration wheel
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64
@@ -195,11 +195,12 @@ jobs:
         with:
           files: release-assets/*
           generate_release_notes: true
+          name: Escher ${{ github.ref_name }}
           body: |
             ### Desktop App Installers (no Rust or Python needed)
             - **Windows (x86_64):** download and run `escher-*-windows-x86_64-setup.exe` (per-user installer with Start Menu & Desktop shortcuts; no Administrator prompt required), or unpack `*-portable.zip`.
             - **macOS (Apple Silicon & Intel):** open `escher-*-macos-universal.dmg` and drag **Escher.app** to **Applications**.
             - **Linux (x86_64):** unpack `escher-*-linux-x86_64.tar.gz` and run `./install.sh` (installs to `~/.local` with desktop launcher icon).
 
-            ### Optional Python Acceleration Wheel (`papertilling-rs`)
-            Download the `.whl` matching your OS (`cp310-abi3`, Python 3.10+) and run `pip install papertilling_rs-*.whl` alongside `pip install git+https://github.com/antimajorana/papertilling`.
+            ### Optional Python Acceleration
+            Choose the wheel for your operating system and install it with pip alongside the Python package from this repository. The wheels support Python 3.10 and later.
