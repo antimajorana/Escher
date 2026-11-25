@@ -22,7 +22,7 @@ lattices, and more exotic groups**. Nothing 3D, hyperbolic or exotic is built in
 | where the app runs | desktop only (native Windows / Linux / macOS) |
 | who computes, who draws | a Rust core, with the Python package on top (Python bindings), like moyo / spglib |
 | version 1 contents | all four: browse lattices per group, browse defects per lattice, combine defects live, lattices on surfaces |
-| licence | GPL-3.0-only, like the Python package |
+| licence | GPL-3.0-only, like the Python package (changed on 2026-11-25 to AGPL-3.0-only for the whole project) |
 | GUI and 3D stack | `eframe 0.37` / `egui` + `egui_extras` + `rfd` + custom `egui_wgpu::CallbackTrait` (`wgpu 30`) |
 | symmetry back end | 17 plane groups self-contained in `papertilling-core::plane`; reserve `moyo` for the 3D phase (optional dev-test check only) |
 | data exchange | JSON (`data/*.json` + `data/named.json` storing `(recipe, frame)`) + PyO3 in-memory bindings (`papertilling-rs`, `abi3-py310`) |

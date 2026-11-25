@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Licence: changed from GPL-3.0-only to AGPL-3.0-only on 2026-11-25. Versions published before this change remain available under GPL-3.0-only. Anyone who runs a modified version as a network service must offer its source to that service's users.
 - Correctness pass (C1): unified 0-based seeded layer-by-layer growth (`vertex`, `edge`, `face`, `cell`, `Dirichlet`) across 2D plane lattices (opening on `p6m` honeycomb with 4 layers), $S^2 / H^2$ curved tilings, $S^3 / E^3 / H^3$ honeycombs (touching and face-shell rules up to 120,000 cells, plus radius-$R$ ball truncation for paracompact $H^3$), 230 space-group `points3d` catalogue (at least 7 entries per group by shells-until-connected bonds), 80 layer-group slabs with symmetry-checked stacking, and Dirichlet-seeded growth of defected crystals (disclinations, dislocations, Stone-Wales); 2D boundary conditions per lattice (open, 1-pair cylinder, 2-pair torus, 3-pair Wigner-Seitz hexagonal torus, Moebius, Klein) with cell-symmetry verdicts and explicit non-isometric 3D picture notes; adjacent-bond vertex angle-shear overlay; and quarantine/hiding of postponed Analysis, AO elastic, 3D manifold embeddings, and un-reglued 3D line defects.
 - Lattices on surfaces (`papertilling.surfaces`): cylinder, torus, Moebius band and Klein bottle (exact quotients of the plane by
   symmetries of the lattice); sphere and projective plane with the lattice's elementary disclinations at its own rotation centres

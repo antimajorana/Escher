@@ -8,7 +8,7 @@ Escher lets you build lattices and explore how their defects combine and bend a 
 
 Run `*-windows-x86_64-setup.exe` on 64-bit Windows. The release also includes portable Windows, macOS, and Linux builds. [Latest downloads](https://github.com/antimajorana/Escher/releases/latest)
 
-Every official desktop download and Python acceleration wheel includes `SOURCE-NOTICE.txt` with a link to its exact source revision. In a wheel, the notice and GPL text are under `.dist-info/licenses/`. Each release also offers the matching source archives. [Escher releases](https://github.com/antimajorana/Escher/releases)
+Every official desktop download and Python acceleration wheel includes `SOURCE-NOTICE.txt` with a link to its exact source revision. In a wheel, the notice and AGPL text are under `.dist-info/licenses/`. Each release also offers the matching source archives. [Escher releases](https://github.com/antimajorana/Escher/releases)
 
 ## Try it on the honeycomb
 
@@ -24,6 +24,8 @@ Open **View → Explore geometry** for 3D space groups and hyperbolic tilings. I
 
 Run `python -m pip install '.[notebooks]'` from this checkout with Python 3.10+, then open the worked notebooks.
 
-[Notebooks](notebooks/) · [Build from source and run tests](docs/DEVELOPMENT.md#rust-core-desktop-app-and-optional-python-extension) · [Changelog](CHANGELOG.md) · [GPL-3.0-only](LICENSE)
+[Notebooks](notebooks/) · [Build from source and run tests](docs/DEVELOPMENT.md#rust-core-desktop-app-and-optional-python-extension) · [Changelog](CHANGELOG.md) · [AGPL-3.0-only](LICENSE)
+
+Escher is free software under the GNU Affero General Public License, version 3 only: you may use, study, share, and modify it under that licence. Anyone who runs a modified version as a network service must offer its source to that service's users.
 
 Copyright © 2026 antimajorana

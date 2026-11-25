@@ -7,7 +7,7 @@ name = "papertilling"
 version = "0.2.0"
 description = "Planar periodic lattices of the 17 wallpaper groups and their crystalline-symmetry defects"
 readme = "README.md"
-license = "GPL-3.0-only"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [{ name = "antimajorana" }]
 keywords = ["lattice", "wallpaper groups", "plane groups", "tiling", "crystal defects", "dislocations", "disclinations", "symmetry"]

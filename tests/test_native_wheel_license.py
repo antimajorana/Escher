@@ -12,7 +12,7 @@ def test_native_wheel_includes_project_license():
     except PackageNotFoundError:
         pytest.skip("the optional native wheel is not installed")
 
-    assert native.metadata["License-Expression"] == "GPL-3.0-only"
+    assert native.metadata["License-Expression"] == "AGPL-3.0-only"
     assert {"LICENSE", "SOURCE-NOTICE.txt"} <= set(native.metadata.get_all("License-File", []))
     licenses = [p for p in native.files or () if p.as_posix().endswith(".dist-info/licenses/LICENSE")]
     assert len(licenses) == 1
