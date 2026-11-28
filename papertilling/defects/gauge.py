@@ -231,6 +231,7 @@ def fusion_channels(lattice, specs_or_charges, *, max_shells: int = 3, non_orien
     proper_ops = [(e["R"], e["tau"]) for e in ext["elements"] if e["det"] == 1]
     improper_ops = [(e["R"], e["tau"]) for e in ext["elements"] if e["det"] == -1] if non_orientable else []
     candidates: list[tuple[float, dict, list[dict] | None]] = []
+    is_turn = False
     if abs(a1) < 1e-6 and abs(a2) < 1e-6:
         law, b1 = "T×T", -H1[1]
         for R_h, _ in proper_ops:
@@ -248,14 +249,18 @@ def fusion_channels(lattice, specs_or_charges, *, max_shells: int = 3, non_orien
     else:
         ang_sum = a1 + a2
         c1, c2 = np.linalg.solve(np.eye(2) - H1[0], H1[1]), np.linalg.solve(np.eye(2) - H2[0], H2[1])
-        if abs(ang_sum) >= 1e-6 and (abs(ang_sum) % 360.0 < 1e-6 or ang_sum >= 360.0 - 1e-6):
+        # A whole number of turns (Frank angle +-360, ...) has the identity rotation as holonomy, so the outcome is
+        # a Burgers vector (translation), exactly as for an annihilating pair; the Frank angle itself is not trivial.
+        turns = round(ang_sum / 360.0)
+        is_turn = abs(ang_sum - 360.0 * turns) < 1e-6 and turns != 0
+        if not is_turn and ang_sum >= 360.0 - 1e-6:       # cone-closing angle with a non-trivial rotation: not handled
             return {"law": "D×D (turn)", "channels": [], "contains_vacuum": False,
-                    "infinite_tower": abs(ang_sum) % 360.0 < 1e-6, "frank_angle_deg": ang_sum}
-        is_pair = abs(ang_sum) < 1e-6
-        law = "D×D->T" if is_pair else "D×D->D"
+                    "infinite_tower": False, "frank_angle_deg": ang_sum}
+        is_pair = abs(ang_sum) < 1e-6 or is_turn          # identity rotation: the charge is a translation
+        law = "D×D (turn)" if is_turn else ("D×D->T" if is_pair else "D×D->D")
         lim = 5 if is_pair else max(1, int(round(abs(np.linalg.det(np.eye(2) - H1[0] @ H2[0]))))) + 2
         bases = [(R_h @ c2 + t_h) for R_h, t_h in proper_ops]
-        if is_pair and improper_ops:
+        if abs(ang_sum) < 1e-6 and improper_ops:
             H2m = iso_compose(improper_ops[0], iso_compose(iso_inverse(H2), iso_inverse(improper_ops[0])))
             c2m = np.linalg.solve(np.eye(2) - H2m[0], H2m[1])
             bases.extend(R_h @ c2m + t_h for R_h, t_h in proper_ops)
@@ -264,7 +269,7 @@ def fusion_channels(lattice, specs_or_charges, *, max_shells: int = 3, non_orien
                 c2_p = c2_0 + lat.A @ np.array([n1, n2], float)
                 H_tot = iso_compose(H1, rotation_about(c2_p, math.radians(a2)))
                 e_p = float(np.dot(H_tot[1], H_tot[1])) if is_pair else float(np.linalg.norm(c2_p - c1))
-                wit = ([] if (is_pair and e_p < 1e-12) else
+                wit = ([] if (is_pair and not is_turn and e_p < 1e-12) else
                        [{"kind": "disclination", "angle": a1, "at": c1.copy()},
                         {"kind": "disclination", "angle": a2, "at": c2_p.copy()}])
                 candidates.append((e_p, classify_charge(lat, 0.0 if is_pair else ang_sum, H_tot), wit))
@@ -279,13 +284,18 @@ def fusion_channels(lattice, specs_or_charges, *, max_shells: int = 3, non_orien
                       "burgers_norm": None if b is None else float(np.linalg.norm(b)),
                       "centre": q.get("centre"), "centre_class": q.get("centre_class"),
                       "energy_proxy": float(e_p), "witness_specs": wit})
-    if law == "D×D->T":
+    if is_turn:                                         # kind/label describe the holonomy; the Frank angle is the turn
+        for c in dedup:
+            c["frank_angle_deg"] = float(ang_sum)
+            c["label"] = f"{360 * turns:+d} deg turn + {c['label']}"
+    if law in ("D×D->T", "D×D (turn)"):
         shells = sorted({round(c["energy_proxy"], 6) for c in dedup if c["energy_proxy"] > 1e-9})[:max_shells]
         dedup = [c for c in dedup if c["energy_proxy"] < 1e-9 or round(c["energy_proxy"], 6) in shells]
     min_e = min((c["energy_proxy"] for c in dedup), default=0.0)
     return {"law": law, "channels": dedup,
             "minimal_channels": [c for c in dedup if abs(c["energy_proxy"] - min_e) < 1e-6],
-            "contains_vacuum": any(c["kind"] == "vacuum" for c in dedup), "infinite_tower": law == "D×D->T"}
+            "contains_vacuum": any(c["kind"] == "vacuum" for c in dedup) and not is_turn,
+            "infinite_tower": law in ("D×D->T", "D×D (turn)")}
 
 
 class RibbonFace(list):
