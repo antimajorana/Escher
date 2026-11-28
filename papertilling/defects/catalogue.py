@@ -248,7 +248,11 @@ class DefectCatalogue:
             return self._family
         try:
             from ..legacy.lattice_families import Family
-            return Family.from_cell(self.input_cell)
+            # The reduced primitive cell (positively oriented), not the cell as the user gave it: a
+            # left-handed input cell would be standardised through a reflection, which swaps the ITA labels
+            # of centres that only an enantiomorphic pair distinguishes (1b/1c in p3), and would then
+            # disagree with the labels of build.LatticeData / wyckoff_rotocentres, built on the reduced cell.
+            return Family.from_cell(self.cell)
         except Exception:
             return None
 
